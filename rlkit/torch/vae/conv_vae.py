@@ -102,6 +102,69 @@ imsize84_default_architecture = dict(
     )
 )
 
+imsize84_monet_architecture = dict(
+    conv_args=dict(
+        kernel_sizes=[3, 3, 3, 3],
+        n_channels=[32, 32, 64, 64],
+        strides=[2, 2, 2, 2],
+    ),
+    conv_kwargs=dict(
+        hidden_sizes=[256, 32],
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    ),
+    deconv_args=dict(
+        hidden_sizes=[],
+
+        deconv_input_width=92,
+        deconv_input_height=92,
+        deconv_input_channels=18,
+
+        # deconv_output_kernel_size=6,
+        # deconv_output_strides=3,
+        # deconv_output_channels=3,
+
+        kernel_sizes=[5, 6],
+        n_channels=[32, 16],
+        strides=[3, 3],
+    ),
+    deconv_kwargs=dict(
+        batch_norm_deconv=False,
+        batch_norm_fc=False,
+    )
+)
+
+imsize128_default_architecture = dict(
+    conv_args=dict(
+        kernel_sizes=[3, 3, 3, 3],
+        n_channels=[32, 32, 64, 64],
+        strides=[2, 2, 2, 2],
+    ),
+    conv_kwargs=dict(
+        hidden_sizes=[256, 32],
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    ),
+    deconv_args=dict(
+        hidden_sizes=[],
+
+        deconv_input_width=2,
+        deconv_input_height=2,
+        deconv_input_channels=32,
+
+        deconv_output_kernel_size=6,
+        deconv_output_strides=3,
+        deconv_output_channels=3,
+
+        kernel_sizes=[3, 3, 3, 3],
+        n_channels=[32, 32, 32, 32],
+        strides=[1, 1, 1, 1],
+    ),
+    deconv_kwargs=dict(
+        batch_norm_deconv=False,
+        batch_norm_fc=False,
+    )
+)
 
 class ConvVAE(GaussianLatentVAE):
     def __init__(

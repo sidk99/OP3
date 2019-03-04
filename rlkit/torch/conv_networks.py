@@ -3,7 +3,7 @@ from torch import nn as nn
 
 from rlkit.pythonplusplus import identity
 from rlkit.torch.core import PyTorchModule
-
+from rlkit.torch.pytorch_util import from_numpy
 import numpy as np
 
 
@@ -130,7 +130,6 @@ class CNN(PyTorchModule):
                 h = norm_layer(h)
             h = self.hidden_activation(h)
         return h
-
 
 class TwoHeadDCNN(PyTorchModule):
     def __init__(

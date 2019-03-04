@@ -8,9 +8,10 @@ from rlkit.core import logger
 from rlkit.core.serializable import Serializable
 from rlkit.core.eval_util import create_stats_ordered_dict
 from rlkit.torch import pytorch_util as ptu
+from rlkit.torch.pytorch_util import from_numpy
 
 
-class ConvVAETrainer(Serializable):
+class MonetTrainer(Serializable):
     def __init__(
             self,
             train_dataset,
@@ -19,6 +20,7 @@ class ConvVAETrainer(Serializable):
             batch_size=128,
             log_interval=0,
             beta=0.5,
+            gamma=0.5,
             lr=1e-3,
             do_scatterplot=False,
             normalize=False,
@@ -30,6 +32,7 @@ class ConvVAETrainer(Serializable):
         self.log_interval = log_interval
         self.batch_size = batch_size
         self.beta = beta
+        self.gamma = gamma
         self.imsize = model.imsize
         self.do_scatterplot = do_scatterplot
 
@@ -42,7 +45,7 @@ class ConvVAETrainer(Serializable):
 
         self.lr = lr
         params = list(self.model.parameters())
-        self.optimizer = optim.Adam(params, lr=self.lr)
+        self.optimizer = optim.RMSprop(params, lr=self.lr)
         self.train_dataset, self.test_dataset = train_dataset, test_dataset
         assert self.train_dataset.dtype == np.uint8
         assert self.test_dataset.dtype == np.uint8
@@ -111,6 +114,7 @@ class ConvVAETrainer(Serializable):
         losses = []
         log_probs = []
         kles = []
+        m_losses = []
         for batch_idx in range(batches):
             if sample_batch is not None:
                 data = sample_batch(self.batch_size)
@@ -118,27 +122,30 @@ class ConvVAETrainer(Serializable):
             else:
                 next_obs = self.get_batch()
             self.optimizer.zero_grad()
-            reconstructions, obs_distribution_params, latent_distribution_params = self.model(
+            reconstructions, x_prob_losses, kle_losses, mask_losses, x_hats, masks = self.model(
                 next_obs)
-            log_prob = self.model.logprob(next_obs, obs_distribution_params)
-            kle = self.model.kl_divergence(latent_distribution_params)
 
-            loss = self.beta * kle - log_prob
+            x_prob_loss = (sum(x_prob_losses)).sum() / next_obs.shape[0]
+            kle_loss = self.beta * sum(kle_losses)
+            mask_loss = self.gamma * mask_losses
+            loss = x_prob_loss + kle_loss + mask_loss
 
             self.optimizer.zero_grad()
             loss.backward()
             losses.append(loss.item())
-            log_probs.append(log_prob.item())
-            kles.append(kle.item())
+            log_probs.append(x_prob_loss.item())
+            kles.append(kle_loss.item())
+            m_losses.append(mask_loss.item())
 
             self.optimizer.step()
             if self.log_interval and batch_idx % self.log_interval == 0:
-                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                    epoch,
-                    batch_idx * len(data),
-                    len(self.train_loader.dataset),
-                    100. * batch_idx / len(self.train_loader),
-                    loss.item() / len(next_obs)))
+                print(x_prob_loss.item(), kle_loss.item(), mask_loss.item())
+                # print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                #     epoch,
+                #     batch_idx,
+                #     len(self.train_loader.dataset),
+                #     100. * batch_idx / len(self.train_loader),
+                #     loss.item() / len(next_obs)))
 
         if from_rl:
             self.vae_logger_stats_for_rl['Train VAE Epoch'] = epoch
@@ -151,6 +158,7 @@ class ConvVAETrainer(Serializable):
             logger.record_tabular("train/Log Prob", np.mean(log_probs))
             logger.record_tabular("train/KL", np.mean(kles))
             logger.record_tabular("train/loss", np.mean(losses))
+            logger.record_tabular('train/mask_loss', np.mean(m_losses))
 
     def test_epoch(
             self,
@@ -164,43 +172,63 @@ class ConvVAETrainer(Serializable):
         log_probs = []
         kles = []
         zs = []
+        m_losses = []
         for batch_idx in range(10):
             next_obs = self.get_batch(train=True)
-            reconstructions, obs_distribution_params, latent_distribution_params = self.model(
+            reconstructions, x_prob_losses, kle_losses, mask_losses, x_hats, masks = self.model(
                 next_obs)
-            log_prob = self.model.logprob(next_obs, obs_distribution_params)
-            kle = self.model.kl_divergence(latent_distribution_params)
-            loss = self.beta * kle - log_prob
+            x_prob_loss = -sum(x_prob_losses).mean()
+            kle_loss = self.beta * sum(kle_losses)
+            mask_loss = self.gamma * mask_losses
+            loss = x_prob_loss + kle_loss + mask_loss
 
-            encoder_mean = latent_distribution_params[0]
-            z_data = ptu.get_numpy(encoder_mean.cpu())
-            for i in range(len(z_data)):
-                zs.append(z_data[i, :])
+
             losses.append(loss.item())
-            log_probs.append(log_prob.item())
-            kles.append(kle.item())
+            log_probs.append(x_prob_loss.item())
+            kles.append(kle_loss.item())
+            m_losses.append(mask_loss.item())
 
+            #encoder_mean = latent_distribution_params[0]
+            #z_data = ptu.get_numpy(encoder_mean.cpu())
+            #for i in range(len(z_data)):
+            #    zs.append(z_data[i, :])
+            K = len(x_hats)
             if batch_idx == 0 and save_reconstruction:
                 n = min(next_obs.size(0), 8)
-                comparison = torch.cat([
-                    next_obs[:n].narrow(start=0, length=self.imlength, dim=1)
-                        .contiguous().view(
-                        -1, self.input_channels, self.imsize, self.imsize
-                    ),
-                    reconstructions.view(
-                        self.batch_size,
-                        self.input_channels,
-                        self.imsize,
-                        self.imsize,
-                    )[:n]
-                ])
+                ground_truth = next_obs[0].view(1, 3, self.imsize, self.imsize)
+                ground_truth = torch.cat([ground_truth for _ in range(K+1)])
+
+
+                x_hats = torch.stack([x_hat[0] for x_hat in x_hats], 0)
+                x_hats = torch.cat([x_hats, torch.unsqueeze(reconstructions[0], 0)])
+
+                masks_t = torch.stack([mask[0] for mask in masks], 0)
+                masks_t = torch.cat([masks_t, masks_t.sum(0, keepdim=True)], 0)
+                masks_t = torch.cat([masks_t for _ in range(3)], 1)
+
+                recs = x_hats * masks_t
+                comparison = torch.clamp(torch.cat([ground_truth, x_hats, masks_t, recs]), 0, 1)
+
+                # comparison = torch.cat([
+                #     next_obs[:n].narrow(start=0, length=3 * self.imsize * self.imsize, dim=1)
+                #         .contiguous().view(
+                #         -1, 3, self.imsize, self.imsize
+                #     ),
+                #     reconstructions.view(
+                #         self.batch_size,
+                #         3,
+                #         self.imsize,
+                #         self.imsize,
+                #     )[:n]
+                # ])
+                # import pdb; pdb.set_trace()
                 save_dir = osp.join(logger.get_snapshot_dir(),
                                     'r%d.png' % epoch)
-                save_image(comparison.data.cpu(), save_dir, nrow=n)
+                save_image(comparison.data.cpu(), save_dir, nrow=K+1)
 
-        zs = np.array(zs)
-        self.model.dist_mu = zs.mean(axis=0)
-        self.model.dist_std = zs.std(axis=0)
+        #zs = np.array(zs)
+        #self.model.dist_mu = zs.mean(axis=0)
+        #self.model.dist_std = zs.std(axis=0)
 
         if from_rl:
             self.vae_logger_stats_for_rl['Test VAE Epoch'] = epoch
@@ -210,8 +238,8 @@ class ConvVAETrainer(Serializable):
             self.vae_logger_stats_for_rl['Test VAE loss'] = np.mean(losses)
             self.vae_logger_stats_for_rl['VAE Beta'] = self.beta
         else:
-            for key, value in self.debug_statistics().items():
-                logger.record_tabular(key, value)
+            #for key, value in self.debug_statistics().items():
+            #    logger.record_tabular(key, value)
 
             logger.record_tabular("test/Log Prob", np.mean(log_probs))
             logger.record_tabular("test/KL", np.mean(kles))
@@ -263,7 +291,7 @@ class ConvVAETrainer(Serializable):
         sample = self.model.decode(sample)[0].cpu()
         save_dir = osp.join(logger.get_snapshot_dir(), 's%d.png' % epoch)
         save_image(
-            sample.data.view(64, self.input_channels, self.imsize, self.imsize),
+            sample.data.view(64, 3, self.imsize, self.imsize),
             save_dir
         )
 
