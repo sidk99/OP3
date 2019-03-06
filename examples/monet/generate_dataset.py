@@ -4,6 +4,9 @@ import numpy as np
 from scipy.misc import imread, imresize
 import torch
 
+'''python examples/monet/generate_dataset.py --input_image_dir ~/Downloads/CLEVR_v1.0/images/train/ --max_images 10000 --output_h5_file ~/objects/rlkit
+/examples/monet/clevr_train.hdf5'''
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--input_image_dir', required=True)
 parser.add_argument('--max_images', default=None, type=int)

@@ -125,7 +125,11 @@ class MonetTrainer(Serializable):
             reconstructions, x_prob_losses, kle_losses, mask_losses, x_hats, masks = self.model(
                 next_obs)
 
-            x_prob_loss = (sum(x_prob_losses)).sum() / next_obs.shape[0]
+            # 1. m outside log
+            # x_prob_loss = (sum(x_prob_losses)).sum() / next_obs.shape[0]
+            # 2. m inside log
+            x_prob_loss = -torch.log(sum(x_prob_losses)).sum() / next_obs.shape[0]
+
             kle_loss = self.beta * sum(kle_losses)
             mask_loss = self.gamma * mask_losses
             loss = x_prob_loss + kle_loss + mask_loss
@@ -188,10 +192,6 @@ class MonetTrainer(Serializable):
             kles.append(kle_loss.item())
             m_losses.append(mask_loss.item())
 
-            #encoder_mean = latent_distribution_params[0]
-            #z_data = ptu.get_numpy(encoder_mean.cpu())
-            #for i in range(len(z_data)):
-            #    zs.append(z_data[i, :])
             K = len(x_hats)
             if batch_idx == 0 and save_reconstruction:
                 n = min(next_obs.size(0), 8)
@@ -209,26 +209,12 @@ class MonetTrainer(Serializable):
                 recs = x_hats * masks_t
                 comparison = torch.clamp(torch.cat([ground_truth, x_hats, masks_t, recs]), 0, 1)
 
-                # comparison = torch.cat([
-                #     next_obs[:n].narrow(start=0, length=3 * self.imsize * self.imsize, dim=1)
-                #         .contiguous().view(
-                #         -1, 3, self.imsize, self.imsize
-                #     ),
-                #     reconstructions.view(
-                #         self.batch_size,
-                #         3,
-                #         self.imsize,
-                #         self.imsize,
-                #     )[:n]
-                # ])
-                # import pdb; pdb.set_trace()
+
                 save_dir = osp.join(logger.get_snapshot_dir(),
                                     'r%d.png' % epoch)
                 save_image(comparison.data.cpu(), save_dir, nrow=K+1)
 
-        #zs = np.array(zs)
-        #self.model.dist_mu = zs.mean(axis=0)
-        #self.model.dist_std = zs.std(axis=0)
+
 
         if from_rl:
             self.vae_logger_stats_for_rl['Test VAE Epoch'] = epoch

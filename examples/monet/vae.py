@@ -13,26 +13,36 @@ import numpy as np
 from scipy import misc
 import h5py
 
-def load_dataset(data_path):
+def load_dataset(data_path, train=True):
     hdf5_file = h5py.File(data_path, 'r')  # RV: Data file
-    return np.array(hdf5_file['features'])
+    if 'clevr' in data_path:
+        return np.array(hdf5_file['features'])
+    else:
+        if train:
+            feats = np.array(hdf5_file['training']['features'])
+        else:
+            feats = np.array(hdf5_file['test']['features'])
+        data = feats.reshape((-1, 64, 64, 3))
+        data = (data * 255).astype(np.uint8)
+        data = np.swapaxes(data, 1, 3)
+        return data
 
 
 def train_vae(variant):
-    #representation_size = variant['vae_kwargs']["representation_size"]
-    # generate_vae_dataset_fctn = variant.get('generate_vae_data_fctn',
-    #                                         generate_vae_dataset)
-    # train_data, test_data, info = generate_vae_dataset_fctn(
-    #     variant['generate_vae_dataset_kwargs']
-    # )
+    #train_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_train_10000.hdf5'
+    #test_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_test.hdf5'
 
-    train_data = load_dataset('/home/jcoreyes/objects/rlkit/examples/monet/clevr_train_10000.hdf5')
-    test_data = load_dataset('/home/jcoreyes/objects/rlkit/examples/monet/clevr_test.hdf5')
+    train_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorTwoBallSmall.h5'
+    test_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorTwoBallSmall.h5'
+
+    train_data = load_dataset(train_path, train=True)
+    test_data = load_dataset(test_path, train=False)
+
     train_data = train_data.reshape((train_data.shape[0], -1))
     test_data = test_data.reshape((test_data.shape[0], -1))
     #logger.save_extra_data(info)
     logger.get_snapshot_dir()
-    variant['vae_kwargs']['architecture'] = monet.imsize84_monet_architecture
+    variant['vae_kwargs']['architecture'] = monet.imsize64_monet_architecture #monet.imsize84_monet_architecture
     variant['vae_kwargs']['decoder_output_activation'] = identity
     variant['vae_kwargs']['decoder_class'] = BroadcastCNN
 
@@ -62,7 +72,7 @@ def train_vae(variant):
 if __name__ == "__main__":
     variant = dict(
         vae_kwargs = dict(
-            imsize=84,
+            imsize=64,
             representation_size=16,
             input_channels=4,
             decoder_distribution='gaussian_identity_variance'

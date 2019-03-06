@@ -43,6 +43,37 @@ imsize84_monet_architecture = dict(
     )
 )
 
+imsize64_monet_architecture = dict(
+    conv_args=dict(
+        kernel_sizes=[3, 3, 3, 3],
+        n_channels=[32, 32, 64, 64],
+        strides=[2, 2, 2, 2],
+    ),
+    conv_kwargs=dict(
+        hidden_sizes=[256, 32],
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    ),
+    deconv_args=dict(
+        hidden_sizes=[],
+
+        input_width=72,
+        input_height=72,
+        input_channels=18,
+
+        # deconv_output_kernel_size=6,
+        # deconv_output_strides=3,
+        # deconv_output_channels=3,
+
+        kernel_sizes=[3, 3, 3, 3, 1],
+        n_channels=[32, 32, 32, 32, 4],
+        strides=[1, 1, 1, 1, 1],
+    ),
+    deconv_kwargs=dict(
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    )
+)
 
 class BroadcastCNN(PyTorchModule):
     def __init__(
@@ -314,7 +345,7 @@ class MonetVAE(GaussianLatentVAE):
         :param input:
         :return: reconstructed input, obs_distribution_params, latent_distribution_params
         """
-        K = 5
+        K = 3
         bs = input.shape[0]
         scope = from_numpy(np.ones((bs, 1, self.imsize, self.imsize)))
         log_scope = torch.log(scope)
@@ -350,20 +381,17 @@ class MonetVAE(GaussianLatentVAE):
             m_hat_logits.append(torch.unsqueeze(m_hat_logit, 1))
             log_masks.append(log_mask)
 
-            x_prob = self.gaussian_log_prob(x_hat, input, from_numpy(np.array([sigma])))
+            # 1. m outside log
+            #x_prob = self.gaussian_log_prob(x_hat, input, from_numpy(np.array([sigma])))
+            #x_prob_losses.append(mask * x_prob)
+
+            # 2. m inside log
+            x_prob = self.gaussian_prob(x_hat, input, from_numpy(np.array([sigma])))
             x_prob_losses.append(mask * x_prob)
 
             kle = self.kl_divergence(latent_distribution_params)
             kle_losses.append(kle)
 
-            #mask_loss = self.cross_entropy_with_logits(m_hat_logits, mask.detach())
-            #mask_loss = F.binary_cross_entropy_with_logits(torch.unsqueeze(m_hat_logits, 1), mask.detach(), reduce=False)
-            #mask_loss = mask * (log_mask - F.logsigmoid(torch.unsqueeze(m_hat_logits, 1)))
-            #mask_loss = mask_loss.sum() / input.shape[0]
-            #mask_loss = F.binary_cross_entropy_with_logits(torch.unsqueeze(m_hat_logits, 1), mask.detach(), reduce=False).sum() / input.shape[0]
-            #mask_losses.append(mask_loss)
-
-            #import pdb; pdb.set_trace()
             log_scope = log_scope + F.logsigmoid(-attention_logits) # log(s(1-attention)) = log(s) + log (1-attention)
 
         #import pdb; pdb.set_trace()
