@@ -185,7 +185,7 @@ class IodineVAE(GaussianLatentVAE):
     def logprob(self, inputs, obs_distribution_params):
         pass
 
-    def forward(self, input, optimizer):
+    def forward(self, input):
         """
         :param input:
         :return: reconstructed input, obs_distribution_params, latent_distribution_params
@@ -203,9 +203,9 @@ class IodineVAE(GaussianLatentVAE):
                    from_numpy(np.zeros((bs, K, self.representation_size)))]
         # initialize hidden state
         h = self.refinement_net.initialize_hidden(bs*K)
-        optimizer.zero_grad()
         lns = self.layer_norms
-        for t in range(T):
+        losses = []
+        for t in range(1, T+1):
             z = self.reparameterize(lambdas)
             x_hat, x_var_hat, m_hat_logit = self.decode(z.view(bs*K, self.representation_size))
             m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
@@ -221,6 +221,7 @@ class IodineVAE(GaussianLatentVAE):
             kle = self.kl_divergence([l.view(bs*K, self.representation_size) for l in lambdas])
             kle_loss = self.beta * kle.sum() / bs
             loss = kle_loss + log_likelihood
+            losses.append(t * loss)
             # Compute gradients
             loss.backward(retain_graph=True)
 
@@ -244,10 +245,9 @@ class IodineVAE(GaussianLatentVAE):
             lambdas[0] = lambdas[0] + refinement[:, :, :self.representation_size]
             lambdas[1] = lambdas[1] + refinement[:, :, self.representation_size:]
 
-        torch.nn.utils.clip_grad_norm_(self.parameters(), 5) # TODO Clip other gradients?
-        optimizer.step()
+        total_loss = sum(losses) / T
 
-        return x_hat, mask, loss, kle_loss, log_likelihood
+        return x_hat, mask, total_loss, kle_loss, log_likelihood
 
 
 

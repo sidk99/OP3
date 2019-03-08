@@ -122,11 +122,12 @@ class IodineTrainer(Serializable):
                 next_obs = self.get_batch()
             self.optimizer.zero_grad()
             x_hat, mask, loss, kle_loss, x_prob_loss = self.model(next_obs, self.optimizer)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5)  # TODO Clip other gradients?
 
             losses.append(loss.item())
             log_probs.append(x_prob_loss.item())
             kles.append(kle_loss.item())
-
             self.optimizer.step()
             if self.log_interval and batch_idx % self.log_interval == 0:
                 print(x_prob_loss.item(), kle_loss.item())
