@@ -2,6 +2,7 @@ import torch
 import torch.utils.data
 from rlkit.torch.pytorch_util import from_numpy
 from torch import nn
+from torch.autograd import Variable
 from torch.nn import functional as F
 from rlkit.pythonplusplus import identity
 from rlkit.torch import pytorch_util as ptu
@@ -103,16 +104,8 @@ class RefinementNetwork(PyTorchModule):
 
         self.coords = np.stack([xcoords, ycoords], 0)
 
-    def forward(self, input, hidden):
-        fc_input = (self.added_fc_input_size != 0)
+    def forward(self, input, hidden, extra_input=None):
 
-        #conv_input = input.narrow(start=0,
-        #                          length=self.conv_input_length,
-        #                          dim=1).contiguous()
-        if fc_input:
-            extra_fc_input = input.narrow(start=self.conv_input_length,
-                                          length=self.added_fc_input_size,
-                                          dim=1)
         # need to reshape from batch of flattened images into (channsls, w, h)
         h = input.view(input.shape[0],
                         self.input_channels-2,
@@ -126,8 +119,10 @@ class RefinementNetwork(PyTorchModule):
                                use_batch_norm=self.batch_norm_conv)
         # flatten channels for fc layers
         h = h.view(h.size(0), -1)
-        if fc_input:
-            h = torch.cat((h, extra_fc_input), dim=1)
+
+        if extra_input is not None:
+            h = torch.cat((h, extra_input), dim=1)
+
         output = self.apply_forward(h, self.fc_layers, self.fc_norm_layers,
                                use_batch_norm=self.batch_norm_fc)
 
@@ -136,7 +131,8 @@ class RefinementNetwork(PyTorchModule):
         return output, hidden
 
     def initialize_hidden(self, bs):
-        return (ptu.from_numpy(np.zeros((1, bs, self.lstm_size))), ptu.from_numpy(np.zeros((1, bs, self.lstm_size))))
+        return (Variable(ptu.from_numpy(np.zeros((1, bs, self.lstm_size)))),
+                Variable(ptu.from_numpy(np.zeros((1, bs, self.lstm_size)))))
 
     def apply_forward(self, input, hidden_layers, norm_layers,
                       use_batch_norm=False):

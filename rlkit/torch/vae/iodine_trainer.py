@@ -121,14 +121,15 @@ class IodineTrainer(Serializable):
             else:
                 next_obs = self.get_batch()
             self.optimizer.zero_grad()
-            x_hat, mask, loss, kle_loss, x_prob_loss = self.model(next_obs, self.optimizer)
+            x_hat, mask, loss, kle_loss, x_prob_loss = self.model(next_obs)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5)  # TODO Clip other gradients?
+            self.optimizer.step()
 
             losses.append(loss.item())
             log_probs.append(x_prob_loss.item())
             kles.append(kle_loss.item())
-            self.optimizer.step()
+
             if self.log_interval and batch_idx % self.log_interval == 0:
                 print(x_prob_loss.item(), kle_loss.item())
 
@@ -161,7 +162,7 @@ class IodineTrainer(Serializable):
         m_losses = []
         for batch_idx in range(10):
             next_obs = self.get_batch(train=True)
-            x_hat, mask, loss, kle_loss, x_prob_loss = self.model(next_obs, self.optimizer)
+            x_hat, mask, loss, kle_loss, x_prob_loss = self.model(next_obs)
             K = x_hat.shape[0] // self.batch_size
             mask = mask.view(self.batch_size * K, self.imsize, self.imsize)[:K].unsqueeze(1)
             x_hat = x_hat[:K]
@@ -177,7 +178,9 @@ class IodineTrainer(Serializable):
                 ground_truth = next_obs[0].view(1, 3, self.imsize, self.imsize)
                 ground_truth = torch.cat([ground_truth for _ in range(K)])
                 masks_t = torch.cat([mask for _ in range(3)], 1)
-                comparison = torch.clamp(torch.cat([ground_truth, x_hat, masks_t, x_hat * mask], 0), 0, 1)
+                recon = x_hat * mask
+                ground_truth[-1, ...] = recon.sum(0)
+                comparison = torch.clamp(torch.cat([ground_truth, x_hat, masks_t, recon], 0), 0, 1)
 
 
                 save_dir = osp.join(logger.get_snapshot_dir(),

@@ -43,8 +43,8 @@ def train_vae(variant):
     train_data = load_dataset(train_path, train=True)
     test_data = load_dataset(test_path, train=False)
 
-    train_data = train_data.reshape((train_data.shape[0], -1))[:1000]
-    test_data = test_data.reshape((test_data.shape[0], -1))
+    train_data = train_data.reshape((train_data.shape[0], -1))[:100]
+    test_data = test_data.reshape((test_data.shape[0], -1))[:100]
     #logger.save_extra_data(info)
     logger.get_snapshot_dir()
     variant['vae_kwargs']['architecture'] = iodine.imsize84_iodine_architecture
@@ -81,7 +81,7 @@ if __name__ == "__main__":
             representation_size=128,
             input_channels=3,
             decoder_distribution='gaussian_identity_variance',
-            beta = 0.5,
+            beta=1.0,
         ),
         algo_kwargs = dict(
             gamma=0.5,
