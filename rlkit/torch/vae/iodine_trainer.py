@@ -19,7 +19,6 @@ class IodineTrainer(Serializable):
             model,
             batch_size=128,
             log_interval=0,
-            beta=0.5,
             gamma=0.5,
             lr=1e-3,
             do_scatterplot=False,
@@ -31,7 +30,7 @@ class IodineTrainer(Serializable):
         self.quick_init(locals())
         self.log_interval = log_interval
         self.batch_size = batch_size
-        self.beta = beta
+        self.beta = model.beta
         self.gamma = gamma
         self.imsize = model.imsize
         self.do_scatterplot = do_scatterplot

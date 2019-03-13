@@ -78,7 +78,7 @@ class RefinementNetwork(PyTorchModule):
                                self.input_height)  # initially the model is on CPU (caller should then move it to GPU if
         for conv_layer in self.conv_layers:
             test_mat = conv_layer(test_mat)
-            self.conv_norm_layers.append(nn.BatchNorm2d(test_mat.shape[1]))
+            #self.conv_norm_layers.append(nn.BatchNorm2d(test_mat.shape[1]))
 
         fc_input_size = int(np.prod(test_mat.shape))
         # used only for injecting input directly into fc layers
@@ -87,17 +87,17 @@ class RefinementNetwork(PyTorchModule):
         for idx, hidden_size in enumerate(hidden_sizes):
             fc_layer = nn.Linear(fc_input_size, hidden_size)
 
-            norm_layer = nn.BatchNorm1d(hidden_size)
+            #norm_layer = nn.BatchNorm1d(hidden_size)
             fc_layer.weight.data.uniform_(-init_w, init_w)
             fc_layer.bias.data.uniform_(-init_w, init_w)
 
             self.fc_layers.append(fc_layer)
-            self.fc_norm_layers.append(norm_layer)
+            #self.fc_norm_layers.append(norm_layer)
             fc_input_size = hidden_size
 
         self.last_fc = nn.Linear(lstm_size, output_size)
-        #self.last_fc.weight.data.uniform_(-init_w, init_w)
-        #self.last_fc.bias.data.uniform_(-init_w, init_w)
+        self.last_fc.weight.data.uniform_(-init_w, init_w)
+        self.last_fc.bias.data.uniform_(-init_w, init_w)
 
         xcoords = np.expand_dims(np.linspace(-1, 1, self.input_width), 0).repeat(self.input_height, 0)
         ycoords = np.repeat(np.linspace(-1, 1, self.input_height), self.input_width).reshape((self.input_height, self.input_width))
@@ -107,10 +107,12 @@ class RefinementNetwork(PyTorchModule):
     def forward(self, input, hidden, extra_input=None):
 
         # need to reshape from batch of flattened images into (channsls, w, h)
-        h = input.view(input.shape[0],
-                        self.input_channels-2,
-                        self.input_height,
-                        self.input_width)
+        # import pdb; pdb.set_trace()
+        # h = input.view(input.shape[0],
+        #                 self.input_channels-2,
+        #                 self.input_height,
+        #                 self.input_width)
+        h = input
 
         coords = from_numpy(np.repeat(np.expand_dims(self.coords, 0), input.shape[0], 0))
         h = torch.cat([h, coords], 1)
@@ -137,10 +139,10 @@ class RefinementNetwork(PyTorchModule):
     def apply_forward(self, input, hidden_layers, norm_layers,
                       use_batch_norm=False):
         h = input
-        for layer, norm_layer in zip(hidden_layers, norm_layers):
+        for layer in hidden_layers:
             h = layer(h)
-            if use_batch_norm:
-                h = norm_layer(h)
+            #if use_batch_norm:
+            #    h = norm_layer(h)
             h = self.hidden_activation(h)
         return h
 

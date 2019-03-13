@@ -43,7 +43,7 @@ def train_vae(variant):
     train_data = load_dataset(train_path, train=True)
     test_data = load_dataset(test_path, train=False)
 
-    train_data = train_data.reshape((train_data.shape[0], -1))[:100]
+    train_data = train_data.reshape((train_data.shape[0], -1))[:500]
     test_data = test_data.reshape((test_data.shape[0], -1))[:100]
     #logger.save_extra_data(info)
     logger.get_snapshot_dir()
@@ -81,15 +81,15 @@ if __name__ == "__main__":
             representation_size=128,
             input_channels=3,
             decoder_distribution='gaussian_identity_variance',
-            beta=1.0,
+            beta=0.1,
         ),
         algo_kwargs = dict(
             gamma=0.5,
-            batch_size=8,
+            batch_size=4,
             lr=3e-4,
             log_interval=0,
         ),
-        num_epochs=1500,
+        num_epochs=2000,
         algorithm='VAE',
         save_period=5,
     )
