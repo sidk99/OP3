@@ -22,7 +22,7 @@ imsize84_iodine_architecture = dict(
         input_channels=66,
 
         kernel_sizes=[3, 3, 3, 3],
-        n_channels=[16, 16, 16, 16],
+        n_channels=[32, 32, 16, 16],
         strides=[1, 1, 1, 1],
     ),
     deconv_kwargs=dict(
@@ -37,43 +37,43 @@ imsize84_iodine_architecture = dict(
         kernel_sizes=[3, 3, 3, 3],
         n_channels=[16, 16, 16, 16],
         strides=[1, 1, 1, 1],
-        hidden_sizes=[256, 256],
-        output_size=128,
+        hidden_sizes=[128, 128],
+        output_size=64,
         lstm_size=256,
-        added_fc_input_size=128
+        added_fc_input_size=0
 
     )
 )
 
 imsize64_iodine_architecture = dict(
-    conv_args=dict(
-        kernel_sizes=[3, 3, 3, 3],
-        n_channels=[32, 32, 64, 64],
-        strides=[2, 2, 2, 2],
-    ),
-    conv_kwargs=dict(
-        hidden_sizes=[256, 32],
-        batch_norm_conv=False,
-        batch_norm_fc=False,
-    ),
     deconv_args=dict(
         hidden_sizes=[],
 
         input_width=72,
         input_height=72,
-        input_channels=18,
+        input_channels=66,
 
-        # deconv_output_kernel_size=6,
-        # deconv_output_strides=3,
-        # deconv_output_channels=3,
-
-        kernel_sizes=[3, 3, 3, 3, 1],
-        n_channels=[32, 32, 32, 32, 4],
-        strides=[1, 1, 1, 1, 1],
+        kernel_sizes=[3, 3, 3, 3],
+        n_channels=[32, 32, 32, 32],
+        strides=[1, 1, 1, 1],
     ),
     deconv_kwargs=dict(
         batch_norm_conv=False,
         batch_norm_fc=False,
+    ),
+    refine_args=dict(
+        input_width=64,
+        input_height=64,
+        input_channels=17,
+        paddings=[0, 0, 0, 0],
+        kernel_sizes=[3, 3, 3, 3],
+        n_channels=[32, 32, 32, 32],
+        strides=[1, 1, 1, 1],
+        hidden_sizes=[128, 128],
+        output_size=64,
+        lstm_size=256,
+        added_fc_input_size=0
+
     )
 )
 
@@ -156,7 +156,7 @@ class IodineVAE(GaussianLatentVAE):
             hidden_activation=nn.ELU(),
             **deconv_kwargs)
 
-        l_norm_sizes = [7, 1]
+        l_norm_sizes = [7, 1, 1]
         self.layer_norms = [LayerNorm2D(l) for l in l_norm_sizes]
         [l.to(ptu.device) for l in self.layer_norms]
         self.epoch = 0
@@ -177,7 +177,9 @@ class IodineVAE(GaussianLatentVAE):
 
     def gaussian_prob(self, inputs, targets, sigma):
         #import pdb; pdb.set_trace()
-        return torch.exp((-torch.pow(inputs - targets, 2).sum(1) / (2 * sigma ** 2))) / torch.sqrt(2 * sigma**2 * 3.1415)
+        ch = 3
+        # (2pi) ^ ch = 248.05
+        return torch.exp((-torch.pow(inputs - targets, 2).sum(1) / (ch * 2 * sigma ** 2))) / (torch.sqrt(sigma**(2 * ch))*248.05)
         #return torch.exp(-torch.pow(inputs - targets, 2) / ( 2 * torch.pow(sigma, 2)))
 
     def gaussian_log_prob(self, inputs, targets, sigma):
@@ -206,10 +208,7 @@ class IodineVAE(GaussianLatentVAE):
         inputK = input.unsqueeze(1).repeat(1, K, 1, 1, 1).view(bs*K, 3, self.imsize, self.imsize)
         sigma = 0.1
         # means and log_vars of latent
-        # lambdas = [Variable(ptu.normal(ptu.zeros((bs, K, self.representation_size)))),
-        #            Variable(ptu.zeros((bs, K, self.representation_size)))]
-        lambdas = [l.repeat(bs*K, 1).view(bs, self.K, -1) for l in self.lambdas] # TODO verify repeating correctly will this update self.lambdas?
-        #lambdas = [l.repeat(bs, 1, 1).view(bs, self.K, -1) for l in self.lambdas]
+        lambdas = [l.repeat(bs*K, 1) for l in self.lambdas] # TODO verify repeating correctly will this update self.lambdas?
 
         # initialize hidden state
         h = self.refinement_net.initialize_hidden(bs*K)
@@ -218,7 +217,6 @@ class IodineVAE(GaussianLatentVAE):
         x_hats = []
         masks = []
         for t in range(1, T+1):
-            [l.retain_grad() for l in lambdas]
             z = self.rsample(lambdas)
             x_hat, x_var_hat, m_hat_logit = self.decode(z.view(bs*K, self.representation_size))
 
@@ -226,51 +224,48 @@ class IodineVAE(GaussianLatentVAE):
             mask = F.softmax(m_hat_logit, dim=1)
             x_hats.append(x_hat)
             masks.append(mask)
-            # Retain grads
-            mask.retain_grad()
-            x_hat.retain_grad()
 
             pixel_x_prob = self.gaussian_prob(x_hat, inputK, from_numpy(np.array([sigma]))).view(bs, K, self.imsize, self.imsize)
             pixel_likelihood = (mask * pixel_x_prob).sum(1) # sum along K
-            log_likelihood = -torch.log(pixel_likelihood + 1e-8).sum() / bs
+            log_likelihood = -torch.log(pixel_likelihood + 1e-15).sum() / bs
 
             kle = self.kl_divergence([l.view(bs*K, self.representation_size) for l in lambdas])
             kle_loss = self.beta * kle.sum() / bs
             loss = kle_loss + log_likelihood
             losses.append(t * loss)
-            # Compute gradients
-            loss.backward(retain_graph=True)
 
             # Compute inputs a for refinement network
-            posterior_mask = pixel_x_prob / pixel_x_prob.sum(1, keepdim=True)
+            posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-15) # avoid divide by zero
             leave_out_ll = pixel_likelihood.unsqueeze(1) - mask * pixel_x_prob
+            x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = torch.autograd.grad(loss, [x_hat, mask] + lambdas, create_graph=True)
 
             tiled_k_shape = (bs * K, -1, self.imsize, self.imsize)
+
             # TODO clip all grads during T
-            # TODO check softmax of masks is correct along axis, all repeats / reshapes are working
             a = torch.cat([
                     torch.cat([inputK, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),
                     lns[0](torch.cat([
-                        x_hat.grad.detach(),
-                        mask.grad.view(tiled_k_shape).detach(),
+                        x_hat_grad.detach(),
+                        mask_grad.view(tiled_k_shape).detach(),
                         posterior_mask.view(tiled_k_shape).detach(),
                         pixel_likelihood.unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach(),
                         leave_out_ll.view(tiled_k_shape).detach()], 1))
 
                 ], 1)
 
-            extra_input = lns[1](torch.cat([l.grad.view(bs*K, -1).detach() for l in lambdas], -1))
-            refinement, h = self.refinement_net(a, h, extra_input=extra_input)
-            refinement = refinement.view(bs, K, self.representation_size*2) # updates for both means and log_vars
-            # TODO should self.lambdas be updated instead?
+            extra_input = torch.cat([lns[1](lambdas_grad_1.view(bs*K, -1).detach()),
+                                     lns[2](lambdas_grad_2.view(bs*K, -1).detach())
+                                     ], -1)
+            refinement1, refinement2, h = self.refinement_net(a, h, extra_input=extra_input)
 
-            lambdas[0] = lambdas[0] + refinement[:, :, :self.representation_size]
-            lambdas[1] = lambdas[1] + refinement[:, :, self.representation_size:]
+            lambdas[0] = lambdas[0] + refinement1
+            lambdas[1] = lambdas[1] + refinement2
 
         total_loss = sum(losses) / T
 
         final_recon = (mask.unsqueeze(2) * x_hat.view(bs, K, 3, self.imsize, self.imsize)).sum(1)
         mse = torch.pow(final_recon - input, 2).mean()
+
 
         return x_hats, masks, total_loss, kle_loss / self.beta, log_likelihood, mse
 

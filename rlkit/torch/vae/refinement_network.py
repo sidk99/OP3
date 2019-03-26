@@ -57,7 +57,7 @@ class RefinementNetwork(PyTorchModule):
         self.fc_layers = nn.ModuleList()
         self.fc_norm_layers = nn.ModuleList()
 
-        self.lstm = nn.LSTM(hidden_sizes[-1], lstm_size, num_layers=1, batch_first=True)
+        self.lstm = nn.LSTM(hidden_sizes[-1]*2, lstm_size, num_layers=1, batch_first=True)
 
         for out_channels, kernel_size, stride, padding in \
                 zip(n_channels, kernel_sizes, strides, paddings):
@@ -96,8 +96,9 @@ class RefinementNetwork(PyTorchModule):
             fc_input_size = hidden_size
 
         self.last_fc = nn.Linear(lstm_size, output_size)
-        self.last_fc.weight.data.uniform_(-init_w, init_w)
-        self.last_fc.bias.data.uniform_(-init_w, init_w)
+        #self.last_fc.weight.data.uniform_(-init_w, init_w)
+        #self.last_fc.bias.data.uniform_(-init_w, init_w)
+        self.last_fc2 = nn.Linear(lstm_size, output_size)
 
         xcoords = np.expand_dims(np.linspace(-1, 1, self.input_width), 0).repeat(self.input_height, 0)
         ycoords = np.repeat(np.linspace(-1, 1, self.input_height), self.input_width).reshape((self.input_height, self.input_width))
@@ -122,15 +123,19 @@ class RefinementNetwork(PyTorchModule):
         # flatten channels for fc layers
         h = h.view(h.size(0), -1)
 
-        if extra_input is not None:
-            h = torch.cat((h, extra_input), dim=1)
+        # if extra_input is not None:
+        #     h = torch.cat((h, extra_input), dim=1)
 
         output = self.apply_forward(h, self.fc_layers, self.fc_norm_layers,
                                use_batch_norm=self.batch_norm_fc)
 
+        if extra_input is not None:
+            output = torch.cat([output, extra_input], dim=1)
+
         output, hidden = self.lstm(output.unsqueeze(1), hidden)
-        output = self.output_activation(self.last_fc(output.squeeze()))
-        return output, hidden
+        output1 = self.output_activation(self.last_fc(output.squeeze()))
+        output2 = self.output_activation(self.last_fc2(output.squeeze()))
+        return output1, output2, hidden
 
     def initialize_hidden(self, bs):
         return (Variable(ptu.from_numpy(np.zeros((1, bs, self.lstm_size)))),
