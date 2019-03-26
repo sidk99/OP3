@@ -19,11 +19,11 @@ imsize84_iodine_architecture = dict(
 
         input_width=92,
         input_height=92,
-        input_channels=130,
+        input_channels=66,
 
-        kernel_sizes=[3, 3, 3, 3, 1],
-        n_channels=[32, 32, 32, 32, 4],
-        strides=[1, 1, 1, 1, 1],
+        kernel_sizes=[3, 3, 3, 3],
+        n_channels=[16, 16, 16, 16],
+        strides=[1, 1, 1, 1],
     ),
     deconv_kwargs=dict(
         batch_norm_conv=False,
@@ -32,15 +32,15 @@ imsize84_iodine_architecture = dict(
     refine_args=dict(
         input_width=84,
         input_height=84,
-        input_channels=21,
+        input_channels=17,
         paddings=[0, 0, 0, 0],
         kernel_sizes=[3, 3, 3, 3],
-        n_channels=[32, 32, 32, 32],
+        n_channels=[16, 16, 16, 16],
         strides=[1, 1, 1, 1],
         hidden_sizes=[256, 256],
-        output_size=256,
+        output_size=128,
         lstm_size=256,
-        added_fc_input_size=256
+        added_fc_input_size=128
 
     )
 )
@@ -88,7 +88,7 @@ class IodineVAE(GaussianLatentVAE):
             decoder_class=DCNN,
             decoder_output_activation=identity,
             decoder_distribution='bernoulli',
-            K=5,
+            K=3,
             input_channels=1,
             imsize=48,
             init_w=1e-3,
@@ -156,15 +156,15 @@ class IodineVAE(GaussianLatentVAE):
             hidden_activation=nn.ELU(),
             **deconv_kwargs)
 
-        l_norm_sizes = [3, 1, 1, 1, 1, 1]
+        l_norm_sizes = [7, 1]
         self.layer_norms = [LayerNorm2D(l) for l in l_norm_sizes]
         [l.to(ptu.device) for l in self.layer_norms]
         self.epoch = 0
         self.decoder_distribution = decoder_distribution
 
-        #self.apply(ptu.init_weights)
-        self.lambdas = [Parameter(ptu.normal(ptu.zeros((1, self.representation_size)))),
-                        Parameter(ptu.zeros((1, self.representation_size)))]
+        self.apply(ptu.init_weights)
+        self.lambdas = [Parameter(ptu.zeros((1, self.representation_size))),
+                        Parameter(torch.log(ptu.zeros((1, self.representation_size)) + 1))]
 
     def encode(self, input):
         pass
@@ -177,7 +177,7 @@ class IodineVAE(GaussianLatentVAE):
 
     def gaussian_prob(self, inputs, targets, sigma):
         #import pdb; pdb.set_trace()
-        return torch.exp((-torch.pow(inputs - targets, 2) / (2 * sigma ** 2))) / torch.sqrt(2 * sigma**2 * 3.1415)
+        return torch.exp((-torch.pow(inputs - targets, 2).sum(1) / (2 * sigma ** 2))) / torch.sqrt(2 * sigma**2 * 3.1415)
         #return torch.exp(-torch.pow(inputs - targets, 2) / ( 2 * torch.pow(sigma, 2)))
 
     def gaussian_log_prob(self, inputs, targets, sigma):
@@ -203,32 +203,36 @@ class IodineVAE(GaussianLatentVAE):
         
         
         input = input.view(bs, 3, self.imsize, self.imsize)
-        #inputK = torch.cat([input[i].unsqueeze(0).repeat(K, 1, 1, 1) for i in range(bs)], 0) # detach or create copy here?
         inputK = input.unsqueeze(1).repeat(1, K, 1, 1, 1).view(bs*K, 3, self.imsize, self.imsize)
-        sigma = 0.2
+        sigma = 0.1
         # means and log_vars of latent
         # lambdas = [Variable(ptu.normal(ptu.zeros((bs, K, self.representation_size)))),
         #            Variable(ptu.zeros((bs, K, self.representation_size)))]
         lambdas = [l.repeat(bs*K, 1).view(bs, self.K, -1) for l in self.lambdas] # TODO verify repeating correctly will this update self.lambdas?
+        #lambdas = [l.repeat(bs, 1, 1).view(bs, self.K, -1) for l in self.lambdas]
 
         # initialize hidden state
         h = self.refinement_net.initialize_hidden(bs*K)
         lns = self.layer_norms
         losses = []
+        x_hats = []
+        masks = []
         for t in range(1, T+1):
             [l.retain_grad() for l in lambdas]
-            z = self.reparameterize(lambdas)
+            z = self.rsample(lambdas)
             x_hat, x_var_hat, m_hat_logit = self.decode(z.view(bs*K, self.representation_size))
 
             m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
             mask = F.softmax(m_hat_logit, dim=1)
+            x_hats.append(x_hat)
+            masks.append(mask)
             # Retain grads
             mask.retain_grad()
             x_hat.retain_grad()
 
-            x_prob = self.gaussian_prob(x_hat, inputK, from_numpy(np.array([sigma])))
-            likelihood = (mask.unsqueeze(2) * x_prob.view(bs, K, 3, self.imsize, self.imsize))
-            log_likelihood = -torch.log(likelihood.sum(1) + 1e-5).sum() / bs
+            pixel_x_prob = self.gaussian_prob(x_hat, inputK, from_numpy(np.array([sigma]))).view(bs, K, self.imsize, self.imsize)
+            pixel_likelihood = (mask * pixel_x_prob).sum(1) # sum along K
+            log_likelihood = -torch.log(pixel_likelihood + 1e-8).sum() / bs
 
             kle = self.kl_divergence([l.view(bs*K, self.representation_size) for l in lambdas])
             kle_loss = self.beta * kle.sum() / bs
@@ -238,26 +242,26 @@ class IodineVAE(GaussianLatentVAE):
             loss.backward(retain_graph=True)
 
             # Compute inputs a for refinement network
-            pixel_likelihood = torch.prod(likelihood, 2) # product among color channels
-            posterior_mask = pixel_likelihood / pixel_likelihood.sum(1, keepdim=True)
-            leave_out_ll = pixel_likelihood.sum(1, keepdim=True) - pixel_likelihood
+            posterior_mask = pixel_x_prob / pixel_x_prob.sum(1, keepdim=True)
+            leave_out_ll = pixel_likelihood.unsqueeze(1) - mask * pixel_x_prob
 
             tiled_k_shape = (bs * K, -1, self.imsize, self.imsize)
             # TODO clip all grads during T
             # TODO check softmax of masks is correct along axis, all repeats / reshapes are working
             a = torch.cat([
-                inputK, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape),
-                lns[0](x_hat.grad.detach()),
-                lns[1](mask.grad.view(tiled_k_shape).detach()),
-                lns[2](posterior_mask.view(tiled_k_shape).detach()),
-                lns[3](pixel_likelihood.unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach()),
-                lns[4](leave_out_ll.view(tiled_k_shape).detach())
-            ], 1)
-            extra_input = lns[5](torch.cat([l.grad.view(bs*K, -1).detach() for l in lambdas], -1))
+                    torch.cat([inputK, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),
+                    lns[0](torch.cat([
+                        x_hat.grad.detach(),
+                        mask.grad.view(tiled_k_shape).detach(),
+                        posterior_mask.view(tiled_k_shape).detach(),
+                        pixel_likelihood.unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach(),
+                        leave_out_ll.view(tiled_k_shape).detach()], 1))
+
+                ], 1)
+
+            extra_input = lns[1](torch.cat([l.grad.view(bs*K, -1).detach() for l in lambdas], -1))
             refinement, h = self.refinement_net(a, h, extra_input=extra_input)
             refinement = refinement.view(bs, K, self.representation_size*2) # updates for both means and log_vars
-            # lambdas[0] = lambdas[0] + refinement[:, :, :self.representation_size]
-            # lambdas[1] = lambdas[1] + refinement[:, :, self.representation_size:]
             # TODO should self.lambdas be updated instead?
 
             lambdas[0] = lambdas[0] + refinement[:, :, :self.representation_size]
@@ -265,7 +269,10 @@ class IodineVAE(GaussianLatentVAE):
 
         total_loss = sum(losses) / T
 
-        return x_hat, mask, total_loss, kle_loss, log_likelihood
+        final_recon = (mask.unsqueeze(2) * x_hat.view(bs, K, 3, self.imsize, self.imsize)).sum(1)
+        mse = torch.pow(final_recon - input, 2).mean()
+
+        return x_hats, masks, total_loss, kle_loss / self.beta, log_likelihood, mse
 
 
 

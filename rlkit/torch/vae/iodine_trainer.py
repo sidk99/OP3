@@ -43,7 +43,7 @@ class IodineTrainer(Serializable):
         self.imlength = model.imlength
 
         self.lr = lr
-        params = list(self.model.parameters())
+        params = list(self.model.parameters()) + self.model.lambdas
         self.optimizer = optim.Adam(params, lr=self.lr)
         self.train_dataset, self.test_dataset = train_dataset, test_dataset
         assert self.train_dataset.dtype == np.uint8
@@ -86,10 +86,6 @@ class IodineTrainer(Serializable):
         error = torch_input - recons
         return ptu.get_numpy((error ** 2).sum(dim=1))
 
-    def set_vae(self, vae):
-        self.model = vae
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
-
     def get_batch(self, train=True):
         dataset = self.train_dataset if train else self.test_dataset
         ind = np.random.randint(0, len(dataset), self.batch_size)
@@ -113,6 +109,7 @@ class IodineTrainer(Serializable):
         losses = []
         log_probs = []
         kles = []
+        mses = []
         for batch_idx in range(batches):
             if sample_batch is not None:
                 data = sample_batch(self.batch_size)
@@ -120,14 +117,15 @@ class IodineTrainer(Serializable):
             else:
                 next_obs = self.get_batch()
             self.optimizer.zero_grad()
-            x_hat, mask, loss, kle_loss, x_prob_loss = self.model(next_obs)
+            x_hat, mask, loss, kle_loss, x_prob_loss, mse = self.model(next_obs)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5)  # TODO Clip other gradients?
+            torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()] + self.model.lambdas, 5.0)  # TODO Clip other gradients?
             self.optimizer.step()
 
             losses.append(loss.item())
             log_probs.append(x_prob_loss.item())
             kles.append(kle_loss.item())
+            mses.append(mse.item())
 
             if self.log_interval and batch_idx % self.log_interval == 0:
                 print(x_prob_loss.item(), kle_loss.item())
@@ -144,6 +142,7 @@ class IodineTrainer(Serializable):
             logger.record_tabular("train/Log Prob", np.mean(log_probs))
             logger.record_tabular("train/KL", np.mean(kles))
             logger.record_tabular("train/loss", np.mean(losses))
+            logger.record_tabular("train/mse", np.mean(mses))
             #logger.record_tabular('train/mask_loss', np.mean(m_losses))
 
     def test_epoch(
@@ -159,13 +158,9 @@ class IodineTrainer(Serializable):
         kles = []
         zs = []
         m_losses = []
-        for batch_idx in range(10):
+        for batch_idx in range(1):
             next_obs = self.get_batch(train=True)
-            x_hat, mask, loss, kle_loss, x_prob_loss = self.model(next_obs)
-            K = x_hat.shape[0] // self.batch_size
-            mask = mask.view(self.batch_size * K, self.imsize, self.imsize)[:K].unsqueeze(1)
-            x_hat = x_hat[:K]
-
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse = self.model(next_obs)
 
             losses.append(loss.item())
             log_probs.append(x_prob_loss.item())
@@ -173,15 +168,21 @@ class IodineTrainer(Serializable):
 
 
             if batch_idx == 0 and save_reconstruction:
-                n = min(next_obs.size(0), 8)
                 ground_truth = next_obs[0].view(1, 3, self.imsize, self.imsize)
+                K = self.model.K
                 ground_truth = torch.cat([ground_truth for _ in range(K)])
-                masks_t = torch.cat([mask for _ in range(3)], 1)
-                recon = x_hat * mask
-                ground_truth[-1, ...] = recon.sum(0)
-                comparison = torch.clamp(torch.cat([ground_truth, x_hat, masks_t, recon], 0), 0, 1)
 
+                def make_grid(mask, x_hat):
+                    mask = mask[0].unsqueeze(1)
+                    x_hat = x_hat[:K]
 
+                    masks_t = torch.cat([mask for _ in range(3)], 1)
+                    recon = x_hat * mask
+                    ground_truth[-1, ...] = recon.sum(0)
+                    comparison = torch.clamp(torch.cat([ground_truth, x_hat, masks_t, recon], 0), 0, 1)
+                    return comparison
+
+                comparison = torch.cat([make_grid(m, x) for m, x in zip(masks, x_hats)], 0)
                 save_dir = osp.join(logger.get_snapshot_dir(),
                                     'r%d.png' % epoch)
                 save_image(comparison.data.cpu(), save_dir, nrow=K)

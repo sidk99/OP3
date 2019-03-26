@@ -4,11 +4,11 @@ import numpy as np
 
 def init_weights(m):
     if type(m) == torch.nn.Linear:
-        torch.nn.init.xavier_uniform(m.weight)
-        m.bias.data.fill_(0.1)
+        torch.nn.init.kaiming_uniform(m.weight)
+        m.bias.data.fill_(0.01)
     elif type(m) == torch.nn.Conv2d:
-        torch.nn.init.xavier_uniform(m.weight)
-        m.bias.data.fill_(0.1)
+        torch.nn.init.kaiming_uniform(m.weight)
+        m.bias.data.fill_(0.01)
 
 def soft_update_from_to(source, target, tau):
     for target_param, param in zip(target.parameters(), source.parameters()):
