@@ -86,6 +86,13 @@ class GaussianLatentVAE(VAEBase):
         self.dist_mu = np.zeros(self.representation_size)
         self.dist_std = np.ones(self.representation_size)
 
+    def rsample_std(self, latent_distribution_params):
+        mu, std = latent_distribution_params
+        stds = std
+        epsilon = ptu.randn(*mu.size())
+        latents = epsilon * stds + mu
+        return latents
+
     def rsample(self, latent_distribution_params):
         mu, logvar = latent_distribution_params
         stds = (0.5 * logvar).exp()

@@ -57,7 +57,7 @@ class RefinementNetwork(PyTorchModule):
         self.fc_layers = nn.ModuleList()
         self.fc_norm_layers = nn.ModuleList()
 
-        self.lstm = nn.LSTM(hidden_sizes[-1]*2, lstm_size, num_layers=1, batch_first=True)
+        self.lstm = nn.LSTM(hidden_sizes[-1]*3, lstm_size, num_layers=1, batch_first=True)
 
         for out_channels, kernel_size, stride, padding in \
                 zip(n_channels, kernel_sizes, strides, paddings):
