@@ -22,6 +22,7 @@ class RefinementNetwork(PyTorchModule):
             paddings,
             hidden_sizes,
             lstm_size,
+            lstm_input_size,
             added_fc_input_size=0,
             batch_norm_conv=False,
             batch_norm_fc=False,
@@ -57,7 +58,7 @@ class RefinementNetwork(PyTorchModule):
         self.fc_layers = nn.ModuleList()
         self.fc_norm_layers = nn.ModuleList()
 
-        self.lstm = nn.LSTM(hidden_sizes[-1]*3, lstm_size, num_layers=1, batch_first=True)
+        self.lstm = nn.LSTM(lstm_input_size, lstm_size, num_layers=1, batch_first=True)
 
         for out_channels, kernel_size, stride, padding in \
                 zip(n_channels, kernel_sizes, strides, paddings):
@@ -103,7 +104,9 @@ class RefinementNetwork(PyTorchModule):
         xcoords = np.expand_dims(np.linspace(-1, 1, self.input_width), 0).repeat(self.input_height, 0)
         ycoords = np.repeat(np.linspace(-1, 1, self.input_height), self.input_width).reshape((self.input_height, self.input_width))
 
-        self.coords = np.stack([xcoords, ycoords], 0)
+        self.coords = from_numpy(np.expand_dims(np.stack([xcoords, ycoords], 0), 0))
+
+
 
     def forward(self, input, hidden, extra_input=None):
 
@@ -115,7 +118,7 @@ class RefinementNetwork(PyTorchModule):
         #                 self.input_width)
         h = input
 
-        coords = from_numpy(np.repeat(np.expand_dims(self.coords, 0), input.shape[0], 0))
+        coords = self.coords.repeat(input.shape[0], 1, 1, 1)
         h = torch.cat([h, coords], 1)
 
         h = self.apply_forward(h, self.conv_layers, self.conv_norm_layers,

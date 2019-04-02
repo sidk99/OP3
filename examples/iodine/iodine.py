@@ -37,13 +37,15 @@ def train_vae(variant):
     #train_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_train.hdf5'
     #test_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_test.hdf5'
 
-    train_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorTwoBallSmall.h5'
-    test_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorTwoBallSmall.h5'
+    train_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
+    test_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
 
     train_data = load_dataset(train_path, train=True)
     test_data = load_dataset(test_path, train=False)
 
-    train_data = train_data.reshape((train_data.shape[0], -1))[:500]
+    train_data = train_data.reshape((train_data.shape[0], -1))[:50]
+    #train_data = train_data.reshape((train_data.shape[0], -1))[0]
+    #train_data = np.reshape(train_data[:2], (2, -1)).repeat(100, 0)
     test_data = test_data.reshape((test_data.shape[0], -1))[:10]
     #logger.save_extra_data(info)
     logger.get_snapshot_dir()
@@ -79,15 +81,15 @@ if __name__ == "__main__":
     variant = dict(
         vae_kwargs = dict(
             imsize=64,
-            representation_size=128,
+            representation_size=32,
             input_channels=3,
             decoder_distribution='gaussian_identity_variance',
             beta=1,
         ),
         algo_kwargs = dict(
             gamma=0.5,
-            batch_size=8,
-            lr=3e-4,
+            batch_size=32,
+            lr=1e-4,
             log_interval=0,
         ),
         num_epochs=10000,

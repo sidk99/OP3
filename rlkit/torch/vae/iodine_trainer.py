@@ -104,7 +104,7 @@ class IodineTrainer(Serializable):
         Y = Y[ind, :]
         return ptu.from_numpy(X), ptu.from_numpy(Y)
 
-    def train_epoch(self, epoch, sample_batch=None, batches=100, from_rl=False):
+    def train_epoch(self, epoch, sample_batch=None, batches=20, from_rl=False):
         self.model.train()
         losses = []
         log_probs = []
@@ -153,6 +153,7 @@ class IodineTrainer(Serializable):
             save_vae=True,
             from_rl=False,
     ):
+
         #self.model.eval() #TODO Get around needing gradients during eval mode
         losses = []
         log_probs = []

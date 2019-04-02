@@ -4,6 +4,7 @@ from torch import nn as nn
 from rlkit.pythonplusplus import identity
 from rlkit.torch.core import PyTorchModule
 from rlkit.torch.pytorch_util import from_numpy
+from rlkit.torch import pytorch_util as ptu
 import numpy as np
 
 
@@ -324,17 +325,17 @@ class BroadcastCNN(PyTorchModule):
         xcoords = np.expand_dims(np.linspace(-1, 1, self.input_width), 0).repeat(self.input_height, 0)
         ycoords = np.repeat(np.linspace(-1, 1, self.input_height), self.input_width).reshape((self.input_height, self.input_width))
 
-        self.coords = np.stack([xcoords, ycoords], 0)
+        self.coords = from_numpy(np.expand_dims(np.stack([xcoords, ycoords], 0), 0))
 
     def forward(self, input):
         assert len(input.shape) == 2
         # spatially broadcast latent
         input = input.view(input.shape[0], input.shape[1], 1, 1)
 
-        broadcast = np.ones((input.shape[0], input.shape[1], self.input_height, self.input_width))
-        input = input * from_numpy(broadcast)
+        broadcast = ptu.ones((input.shape[0], input.shape[1], self.input_height, self.input_width))
+        input = input * broadcast
 
-        coords = from_numpy(np.repeat(np.expand_dims(self.coords, 0), input.shape[0], 0))
+        coords = self.coords.repeat(input.shape[0], 1, 1, 1)
         h = torch.cat([input, coords], 1)
 
         h = self.apply_forward(h, self.conv_layers, self.conv_norm_layers,
@@ -348,8 +349,6 @@ class BroadcastCNN(PyTorchModule):
         h = input
         for i, layer in enumerate(hidden_layers):
             h = layer(h)
-            #if use_batch_norm:
-            #    h = norm_layer(h)
-            #if i < len(hidden_layers) - 1:
-            h = self.hidden_activation(h)
+            if i < len(hidden_layers) - 1:
+                h = self.hidden_activation(h)
         return h

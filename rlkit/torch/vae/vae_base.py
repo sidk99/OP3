@@ -100,6 +100,15 @@ class GaussianLatentVAE(VAEBase):
         latents = epsilon * stds + mu
         return latents
 
+    def rsample_softplus(self, latent_distribution_params):
+        mu, softplus = latent_distribution_params
+        stds = torch.sqrt(torch.log(1 + softplus.exp()))
+
+        #stds = (0.5 * logvar).exp()
+        epsilon = ptu.randn(*mu.size())
+        latents = epsilon * stds + mu
+        return latents
+
     def rsample_multiple_latents(self, latent_distribution_params,
                                  num_latents_to_sample=1):
         mu, logvar = latent_distribution_params
@@ -135,6 +144,15 @@ class GaussianLatentVAE(VAEBase):
         mu, logvar = latent_distribution_params
         return - 0.5 * torch.sum(
             1 + logvar - mu.pow(2) - logvar.exp(), dim=1
+        ).mean()
+
+    def kl_divergence_softplus(self, latent_distribution_params):
+
+        mu, softplus = latent_distribution_params
+        stds = torch.sqrt(torch.log(1 + softplus.exp()))
+        logvar = torch.log(torch.log(1 + softplus.exp()))
+        return - 0.5 * torch.sum(
+            1 + logvar - mu.pow(2) - stds, dim=1
         ).mean()
 
     def __getstate__(self):
