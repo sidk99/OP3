@@ -34,25 +34,25 @@ def load_dataset(data_path, train=True):
 
 
 def train_vae(variant):
-    #train_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_train.hdf5'
-    #test_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_test.hdf5'
+    train_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_train.hdf5'
+    test_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_test.hdf5'
 
-    train_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
-    test_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
+    #train_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
+    #test_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
 
     train_data = load_dataset(train_path, train=True)
     test_data = load_dataset(test_path, train=False)
 
-    train_data = train_data.reshape((train_data.shape[0], -1))[:50]
+    train_data = train_data.reshape((train_data.shape[0], -1))[:500]
     #train_data = train_data.reshape((train_data.shape[0], -1))[0]
     #train_data = np.reshape(train_data[:2], (2, -1)).repeat(100, 0)
     test_data = test_data.reshape((test_data.shape[0], -1))[:10]
     #logger.save_extra_data(info)
     logger.get_snapshot_dir()
-    variant['vae_kwargs']['architecture'] = iodine.imsize64_iodine_architecture
+    variant['vae_kwargs']['architecture'] = iodine.imsize84_iodine_architecture
     variant['vae_kwargs']['decoder_class'] = BroadcastCNN
 
-    refinement_net = RefinementNetwork(**iodine.imsize64_iodine_architecture['refine_args'],
+    refinement_net = RefinementNetwork(**iodine.imsize84_iodine_architecture['refine_args'],
                                        hidden_activation=nn.ELU())
     m = IodineVAE(
         **variant['vae_kwargs'],
@@ -66,7 +66,7 @@ def train_vae(variant):
     save_period = variant['save_period']
     for epoch in range(variant['num_epochs']):
         should_save_imgs = (epoch % save_period == 0)
-        t.train_epoch(epoch)
+        t.train_epoch(epoch, batches=train_data.shape[0]//variant['algo_kwargs']['batch_size'])
         t.test_epoch(
             epoch,
             save_reconstruction=should_save_imgs,
@@ -80,15 +80,15 @@ def train_vae(variant):
 if __name__ == "__main__":
     variant = dict(
         vae_kwargs = dict(
-            imsize=64,
-            representation_size=32,
+            imsize=84,
+            representation_size=128,
             input_channels=3,
             decoder_distribution='gaussian_identity_variance',
             beta=1,
         ),
         algo_kwargs = dict(
             gamma=0.5,
-            batch_size=32,
+            batch_size=16,
             lr=1e-4,
             log_interval=0,
         ),

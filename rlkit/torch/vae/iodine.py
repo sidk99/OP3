@@ -23,6 +23,7 @@ imsize84_iodine_architecture = dict(
 
         kernel_sizes=[3, 3, 3, 3],
         n_channels=[64, 64, 64, 64],
+        paddings=[0, 0, 0, 0],
         strides=[1, 1, 1, 1],
     ),
     deconv_kwargs=dict(
@@ -40,6 +41,7 @@ imsize84_iodine_architecture = dict(
         hidden_sizes=[128, 128],
         output_size=128,
         lstm_size=256,
+        lstm_input_size=768,
         added_fc_input_size=0
 
     )
@@ -90,7 +92,7 @@ class IodineVAE(GaussianLatentVAE):
             decoder_class=DCNN,
             decoder_output_activation=identity,
             decoder_distribution='bernoulli',
-            K=3,
+            K=5,
             input_channels=1,
             imsize=48,
             init_w=1e-3,
@@ -234,15 +236,11 @@ class IodineVAE(GaussianLatentVAE):
             pixel_x_prob = self.gaussian_prob(x_hat, inputK, from_numpy(np.array([sigma]))).view(bs, K, self.imsize, self.imsize)
             pixel_likelihood = (mask * pixel_x_prob).sum(1) # sum along K
             log_likelihood = -torch.log(pixel_likelihood + 1e-30).sum() / bs
-            # pixel_x_prob = torch.pow(x_hat - inputK, 2).mean(1).view(bs, K, self.imsize, self.imsize)
-            # pixel_likelihood = (mask * pixel_x_prob).sum(1)
-            # log_likelihood = pixel_likelihood.sum() / bs / sigma ** 2
 
             kle = self.kl_divergence_softplus(lambdas)
             kle_loss = self.beta * kle.sum() / bs
             loss = log_likelihood + kle_loss
             losses.append(t * loss)
-            #losses.append(loss)
 
             # Compute inputs a for refinement network
             posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-8) # avoid divide by zero
