@@ -92,13 +92,15 @@ class IodineVAE(GaussianLatentVAE):
             decoder_class=DCNN,
             decoder_output_activation=identity,
             decoder_distribution='bernoulli',
-            K=5,
+            K=3,
+            T=5,
             input_channels=1,
             imsize=48,
             init_w=1e-3,
             min_variance=1e-3,
             hidden_init=ptu.fanin_init,
             beta=5,
+            dynamic=False,
     ):
         """
 
@@ -143,11 +145,13 @@ class IodineVAE(GaussianLatentVAE):
         else:
             self.log_min_variance = float(np.log(min_variance))
         self.K = K
+        self.T = T
         self.input_channels = input_channels
         self.imsize = imsize
         self.imlength = self.imsize * self.imsize * self.input_channels
         self.refinement_net = refinement_net
         self.beta = beta
+        self.dynamic = dynamic
 
         deconv_args, deconv_kwargs = architecture['deconv_args'], architecture['deconv_kwargs']
 
@@ -199,13 +203,19 @@ class IodineVAE(GaussianLatentVAE):
     def logprob(self, inputs, obs_distribution_params):
         pass
 
-    def forward(self, input):
+    def forward(self, input, seedsteps=5):
+        if self.dynamic:
+            return self._forward_dynamic(input, seedsteps=seedsteps)
+        else:
+            return self._forward_static(input)
+
+    def _forward_static(self, input):
         """
         :param input:
         :return: reconstructed input, obs_distribution_params, latent_distribution_params
         """
         K = self.K
-        T = 5
+        T = self.T
         bs = input.shape[0]
         
         
@@ -248,9 +258,8 @@ class IodineVAE(GaussianLatentVAE):
             x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = torch.autograd.grad(loss, [x_hat, mask] + lambdas,
                                                                                         create_graph=True, retain_graph=True)
 
-            tiled_k_shape = (bs * K, -1, self.imsize, self.imsize) # TODO when collapsing back to this shape is K still most contiguous?
+            tiled_k_shape = (bs * K, -1, self.imsize, self.imsize)
 
-            # TODO clip all grads during T
             a = torch.cat([
                     torch.cat([inputK, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),
                     lns[0](torch.cat([
@@ -265,7 +274,6 @@ class IodineVAE(GaussianLatentVAE):
             extra_input = torch.cat([lns[1](lambdas_grad_1.view(bs*K, -1).detach()),
                                     lns[2](lambdas_grad_2.view(bs*K, -1).detach())
                                     ], -1)
-            #extra_input = lns[1](lambdas_grad_1.view(bs * K, -1).detach())
             extra_input = torch.cat([extra_input, lambdas[0], lambdas[1], z], -1)
             refinement1, refinement2, h = self.refinement_net(a, h, extra_input=extra_input)
             #import pdb; pdb.set_trace()
@@ -281,5 +289,86 @@ class IodineVAE(GaussianLatentVAE):
 
         return x_hats, masks, total_loss, kle_loss / self.beta, log_likelihood, mse
 
+    def _forward_dynamic(self, input, seedsteps):
+        """
+        :param input:
+        :return: reconstructed input, obs_distribution_params, latent_distribution_params
+        """
+        K = self.K
+        # input is (bs, T, ch, imsize, imsize)
+        bs = input.shape[0]
+        T = input.shape[1]
 
+        #inputTK = input.permute(1, 0, 2, 3, 4).unsqueeze(2).repeat(1, 1, K, 1, 1, 1)
+        #inputK = input.unsqueeze(1).repeat(1, K, 1, 1, 1).view(bs * K, 3, self.imsize, self.imsize)
 
+        sigma = 0.1
+        # means and log_vars of latent
+        lambdas = [l.repeat(bs * K, 1) for l in self.lambdas]
+
+        # initialize hidden state
+        h = self.refinement_net.initialize_hidden(bs * K)
+        lns = self.layer_norms
+        losses = []
+        x_hats = []
+        masks = []
+        for t in range(1, T + 1):
+            z = self.rsample_softplus(lambdas)
+            x_hat, x_var_hat, m_hat_logit = self.decode(z)  # x_hat is (bs*K, 3, imsize, imsize)
+            # import pdb; pdb.set_trace()
+            m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
+            mask = F.softmax(m_hat_logit, dim=1)
+            x_hats.append(x_hat)
+            masks.append(mask)
+            #inputK = inputTK[t-1].view(bs*K, 3, self.imsize, self.imsize)
+            if t > seedsteps:
+                inputK = (mask.unsqueeze(2) * x_hat.view(bs, K, 3, self.imsize, self.imsize)).sum(1, keepdim=True).repeat(1, K, 1, 1, 1).view(bs*K, 3, self.imsize, self.imsize).detach()
+                #inputK = torch.clamp(inputK, 0, 1)
+            else:
+                inputK = input[:, t-1].unsqueeze(1).repeat(1, K, 1, 1, 1).view(bs*K, 3, self.imsize, self.imsize)
+            pixel_x_prob = self.gaussian_prob(x_hat, inputK, from_numpy(np.array([sigma]))).view(bs, K, self.imsize,
+                                                                                                 self.imsize)
+            pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K
+            log_likelihood = -torch.log(pixel_likelihood + 1e-12).sum() / bs
+
+            kle = self.kl_divergence_softplus(lambdas)
+            kle_loss = self.beta * kle.sum() / bs
+            loss = log_likelihood + kle_loss
+            losses.append(t * loss)
+
+            # Compute inputs a for refinement network
+            posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-8)  # avoid divide by zero
+            leave_out_ll = pixel_likelihood.unsqueeze(1) - mask * pixel_x_prob
+            x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = torch.autograd.grad(loss, [x_hat, mask] + lambdas,
+                                                                                        create_graph=True,
+                                                                                        retain_graph=True)
+
+            tiled_k_shape = (bs * K, -1, self.imsize, self.imsize)
+
+            a = torch.cat([
+                torch.cat([inputK, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),
+                lns[0](torch.cat([
+                    x_hat_grad.detach(),
+                    mask_grad.view(tiled_k_shape).detach(),
+                    posterior_mask.view(tiled_k_shape).detach(),
+                    pixel_likelihood.unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach(),
+                    leave_out_ll.view(tiled_k_shape).detach()], 1))
+
+            ], 1)
+
+            extra_input = torch.cat([lns[1](lambdas_grad_1.view(bs * K, -1).detach()),
+                                     lns[2](lambdas_grad_2.view(bs * K, -1).detach())
+                                     ], -1)
+            extra_input = torch.cat([extra_input, lambdas[0], lambdas[1], z], -1)
+            refinement1, refinement2, h = self.refinement_net(a, h, extra_input=extra_input)
+            # import pdb; pdb.set_trace()
+            lambdas[0] = refinement1
+            lambdas[1] = refinement2
+
+        total_loss = sum(losses) / T
+        # total_loss = losses[-1]
+
+        final_recon = (mask.unsqueeze(2) * x_hat.view(bs, K, 3, self.imsize, self.imsize)).sum(1)
+        mse = torch.pow(final_recon - input[:, -1], 2).mean()
+
+        return x_hats, masks, total_loss, kle_loss / self.beta, log_likelihood, mse
