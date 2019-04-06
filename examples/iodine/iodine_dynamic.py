@@ -59,19 +59,15 @@ def train_vae(variant):
     n_frames = 35
     imsize = train_data.shape[-1]
     T = variant['vae_kwargs']['T']
-    t_sample = np.arange(0, 30, 3)
-    train_data = train_data.reshape((n_frames, -1, 3, imsize, imsize)).swapaxes(0, 1)[:500, t_sample]
-    test_data = test_data.reshape((n_frames, -1, 3, imsize, imsize)).swapaxes(0, 1)[:10, t_sample]
-    #train_data = train_data.reshape((train_data.shape[0], -1))[:500]
-    #train_data = train_data.reshape((train_data.shape[0], -1))[0]
-    #train_data = np.reshape(train_data[:2], (2, -1)).repeat(100, 0)
-    test_data = test_data.reshape((test_data.shape[0], -1))[:10]
+    t_sample = np.array([0, 0, 0, 0, 0, 10, 15, 20, 25, 30])
+    train_data = train_data.reshape((n_frames, -1, 3, imsize, imsize)).swapaxes(0, 1)[:1000, t_sample]
+    test_data = test_data.reshape((n_frames, -1, 3, imsize, imsize)).swapaxes(0, 1)[:50, t_sample]
     #logger.save_extra_data(info)
     logger.get_snapshot_dir()
-    variant['vae_kwargs']['architecture'] = iodine.imsize64_iodine_architecture
+    variant['vae_kwargs']['architecture'] = iodine.imsize64_large_iodine_architecture
     variant['vae_kwargs']['decoder_class'] = BroadcastCNN
 
-    refinement_net = RefinementNetwork(**iodine.imsize64_iodine_architecture['refine_args'],
+    refinement_net = RefinementNetwork(**iodine.imsize64_large_iodine_architecture['refine_args'],
                                        hidden_activation=nn.ELU())
     m = IodineVAE(
         **variant['vae_kwargs'],
@@ -87,13 +83,10 @@ def train_vae(variant):
     for epoch in range(variant['num_epochs']):
         should_save_imgs = (epoch % save_period == 0)
         t.train_epoch(epoch, batches=train_data.shape[0]//variant['algo_kwargs']['batch_size'])
-        t.test_epoch(
-            epoch,
-            save_reconstruction=should_save_imgs,
-            save_vae=False
-        )
-        if should_save_imgs:
-            t.dump_samples(epoch)
+        t.test_epoch(epoch, save_vae=False, train=False, record_stats=True, batches=1)
+        t.test_epoch(epoch, save_vae=False, train=True, record_stats=False, batches=1)
+        #if should_save_imgs:
+        #    t.dump_samples(epoch)
     logger.save_extra_data(m, 'vae.pkl', mode='pickle')
 
 
@@ -101,16 +94,16 @@ if __name__ == "__main__":
     variant = dict(
         vae_kwargs = dict(
             imsize=64,
-            representation_size=32,
+            representation_size=128,
             input_channels=3,
             decoder_distribution='gaussian_identity_variance',
             beta=1,
-            K=3,
+            K=5,
             T=10,
         ),
         algo_kwargs = dict(
             gamma=0.5,
-            batch_size=16,
+            batch_size=8,
             lr=1e-4,
             log_interval=0,
         ),

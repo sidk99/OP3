@@ -81,6 +81,39 @@ imsize64_iodine_architecture = dict(
     )
 )
 
+imsize64_large_iodine_architecture = dict(
+    deconv_args=dict(
+        hidden_sizes=[],
+
+        input_width=80,
+        input_height=80,
+        input_channels=130,
+
+        kernel_sizes=[5, 5, 5, 5],
+        n_channels=[64, 64, 64, 64],
+        strides=[1, 1, 1, 1],
+        paddings=[0, 0, 0, 0]
+    ),
+    deconv_kwargs=dict(
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    ),
+    refine_args=dict(
+        input_width=64,
+        input_height=64,
+        input_channels=17,
+        paddings=[0, 0, 0, 0],
+        kernel_sizes=[5, 5, 5, 5],
+        n_channels=[64, 64, 64, 64],
+        strides=[2, 2, 2, 2],
+        hidden_sizes=[128, 128],
+        output_size=128,
+        lstm_size=256,
+        lstm_input_size=768,
+        added_fc_input_size=0
+
+    )
+)
 
 
 class IodineVAE(GaussianLatentVAE):
@@ -315,14 +348,14 @@ class IodineVAE(GaussianLatentVAE):
         for t in range(1, T + 1):
             z = self.rsample_softplus(lambdas)
             x_hat, x_var_hat, m_hat_logit = self.decode(z)  # x_hat is (bs*K, 3, imsize, imsize)
-            # import pdb; pdb.set_trace()
             m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
             mask = F.softmax(m_hat_logit, dim=1)
             x_hats.append(x_hat)
             masks.append(mask)
             #inputK = inputTK[t-1].view(bs*K, 3, self.imsize, self.imsize)
             if t > seedsteps:
-                inputK = (mask.unsqueeze(2) * x_hat.view(bs, K, 3, self.imsize, self.imsize)).sum(1, keepdim=True).repeat(1, K, 1, 1, 1).view(bs*K, 3, self.imsize, self.imsize).detach()
+                recon = (mask.unsqueeze(2) * torch.clamp(x_hat, 0, 1).view(bs, K, 3, self.imsize, self.imsize)).sum(1, keepdim=True)
+                inputK = recon.repeat(1, K, 1, 1, 1).view(bs*K, 3, self.imsize, self.imsize).detach()
                 #inputK = torch.clamp(inputK, 0, 1)
             else:
                 inputK = input[:, t-1].unsqueeze(1).repeat(1, K, 1, 1, 1).view(bs*K, 3, self.imsize, self.imsize)
@@ -366,7 +399,6 @@ class IodineVAE(GaussianLatentVAE):
             lambdas[1] = refinement2
 
         total_loss = sum(losses) / T
-        # total_loss = losses[-1]
 
         final_recon = (mask.unsqueeze(2) * x_hat.view(bs, K, 3, self.imsize, self.imsize)).sum(1)
         mse = torch.pow(final_recon - input[:, -1], 2).mean()

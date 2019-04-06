@@ -152,22 +152,26 @@ class IodineTrainer(Serializable):
             save_reconstruction=True,
             save_vae=True,
             from_rl=False,
+            record_stats=True,
+            train=True,
+            batches=1
     ):
 
-        #self.model.eval() #TODO Get around needing gradients during eval mode
+        self.model.eval() #TODO Get around needing gradients during eval mode
         losses = []
         log_probs = []
         kles = []
-        zs = []
-        m_losses = []
-        for batch_idx in range(1):
-            next_obs = self.get_batch(train=True)
+        mses = []
+        for batch_idx in range(batches):
+            self.optimizer.zero_grad()
+            next_obs = self.get_batch(train=train)
             T = next_obs.shape[1]
             x_hats, masks, loss, kle_loss, x_prob_loss, mse = self.model(next_obs, seedsteps=5)
 
             losses.append(loss.item())
             log_probs.append(x_prob_loss.item())
             kles.append(kle_loss.item())
+            mses.append(mse.item())
 
 
             if batch_idx == 0 and save_reconstruction:
@@ -182,7 +186,7 @@ class IodineTrainer(Serializable):
                 comparison = torch.cat([ground_truth, full_rec, m, x], 0).view(-1, 3, imsize, imsize)
 
                 save_dir = osp.join(logger.get_snapshot_dir(),
-                                    'r%d.png' % epoch)
+                                    '%s_r%d.png' % ('train' if train else 'val', epoch))
                 save_image(comparison.data.cpu(), save_dir, nrow=T)
 
 
@@ -197,13 +201,12 @@ class IodineTrainer(Serializable):
         else:
             #for key, value in self.debug_statistics().items():
             #    logger.record_tabular(key, value)
-
-            logger.record_tabular("test/Log Prob", np.mean(log_probs))
-            logger.record_tabular("test/KL", np.mean(kles))
-            logger.record_tabular("test/loss", np.mean(losses))
-            logger.record_tabular("beta", self.beta)
-
-            logger.dump_tabular()
+            if record_stats:
+                logger.record_tabular("test/Log Prob", np.mean(log_probs))
+                logger.record_tabular("test/KL", np.mean(kles))
+                logger.record_tabular("test/loss", np.mean(losses))
+                logger.record_tabular("test/mse", np.mean(mses))
+                logger.dump_tabular()
             if save_vae:
                 logger.save_itr_params(epoch, self.model)  # slow...
 
