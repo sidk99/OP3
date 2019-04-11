@@ -117,7 +117,7 @@ class IodineTrainer(Serializable):
             else:
                 next_obs = self.get_batch()
             self.optimizer.zero_grad()
-            x_hat, mask, loss, kle_loss, x_prob_loss, mse = self.model(next_obs, seedsteps=11)
+            x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, seedsteps=11)
             loss.backward()
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()] + self.model.lambdas, 5.0)
             #torch.nn.utils.clip_grad_norm_(self.model.lambdas, 5.0)  # TODO Clip other gradients?
@@ -166,7 +166,7 @@ class IodineTrainer(Serializable):
             self.optimizer.zero_grad()
             next_obs = self.get_batch(train=train)
             T = next_obs.shape[1]
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse = self.model(next_obs, seedsteps=5)
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, seedsteps=3)
 
             losses.append(loss.item())
             log_probs.append(x_prob_loss.item())

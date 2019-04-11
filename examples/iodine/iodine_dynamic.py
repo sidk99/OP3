@@ -5,6 +5,7 @@ from rlkit.torch.vae.iodine import IodineVAE
 from rlkit.torch.conv_networks import BroadcastCNN
 import rlkit.torch.vae.iodine as iodine
 from rlkit.torch.vae.refinement_network import RefinementNetwork
+from rlkit.torch.vae.physics_network import PhysicsNetwork
 from rlkit.torch.vae.vae_trainer import ConvVAETrainer
 import rlkit.torch.vae.conv_vae as conv_vae
 from rlkit.torch.vae.unet import UNet
@@ -59,7 +60,10 @@ def train_vae(variant):
     n_frames = 35
     imsize = train_data.shape[-1]
     T = variant['vae_kwargs']['T']
-    t_sample = np.array([0, 0, 0, 0, 0, 10, 15, 20, 25, 30])
+    K = variant['vae_kwargs']['K']
+    rep_size = variant['vae_kwargs']['representation_size']
+   # t_sample = np.array([0, 0, 0, 0, 0, 10, 15, 20, 25, 30])
+    t_sample = np.array([0, 0, 0, 34, 34])
     train_data = train_data.reshape((n_frames, -1, 3, imsize, imsize)).swapaxes(0, 1)[:1000, t_sample]
     test_data = test_data.reshape((n_frames, -1, 3, imsize, imsize)).swapaxes(0, 1)[:50, t_sample]
     #logger.save_extra_data(info)
@@ -69,10 +73,14 @@ def train_vae(variant):
 
     refinement_net = RefinementNetwork(**iodine.imsize64_large_iodine_architecture['refine_args'],
                                        hidden_activation=nn.ELU())
+    physics_net = None
+    if variant['physics']:
+        physics_net = PhysicsNetwork(K, rep_size)
     m = IodineVAE(
         **variant['vae_kwargs'],
         refinement_net=refinement_net,
-        dynamic=True
+        dynamic=True,
+        physics_net=physics_net,
 
     )
 
@@ -83,8 +91,10 @@ def train_vae(variant):
     for epoch in range(variant['num_epochs']):
         should_save_imgs = (epoch % save_period == 0)
         t.train_epoch(epoch, batches=train_data.shape[0]//variant['algo_kwargs']['batch_size'])
-        t.test_epoch(epoch, save_vae=False, train=False, record_stats=True, batches=1)
-        t.test_epoch(epoch, save_vae=False, train=True, record_stats=False, batches=1)
+        t.test_epoch(epoch, save_vae=True, train=False, record_stats=True, batches=1,
+                     save_reconstruction=should_save_imgs)
+        t.test_epoch(epoch, save_vae=False, train=True, record_stats=False, batches=1,
+                     save_reconstruction=should_save_imgs)
         #if should_save_imgs:
         #    t.dump_samples(epoch)
     logger.save_extra_data(m, 'vae.pkl', mode='pickle')
@@ -99,7 +109,7 @@ if __name__ == "__main__":
             decoder_distribution='gaussian_identity_variance',
             beta=1,
             K=5,
-            T=10,
+            T=5,
         ),
         algo_kwargs = dict(
             gamma=0.5,
@@ -110,12 +120,13 @@ if __name__ == "__main__":
         num_epochs=10000,
         algorithm='VAE',
         save_period=5,
+        physics=True
     )
 
 
     run_experiment(
         train_vae,
-        exp_prefix='iodine-blocks',
+        exp_prefix='iodine-blocks-physics',
         mode='here_no_doodad',
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

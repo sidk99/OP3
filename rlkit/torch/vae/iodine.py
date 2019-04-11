@@ -122,6 +122,7 @@ class IodineVAE(GaussianLatentVAE):
             representation_size,
             architecture,
             refinement_net,
+            physics_net=None,
             decoder_class=DCNN,
             decoder_output_activation=identity,
             decoder_distribution='bernoulli',
@@ -185,7 +186,7 @@ class IodineVAE(GaussianLatentVAE):
         self.refinement_net = refinement_net
         self.beta = beta
         self.dynamic = dynamic
-
+        self.physics_net = physics_net
         deconv_args, deconv_kwargs = architecture['deconv_args'], architecture['deconv_kwargs']
 
         self.decoder = decoder_class(
@@ -322,6 +323,20 @@ class IodineVAE(GaussianLatentVAE):
 
         return x_hats, masks, total_loss, kle_loss / self.beta, log_likelihood, mse
 
+    def predict(self, input, seedsteps, bs=4):
+
+        self.eval()
+        final_recons = []
+        n_batches = input.shape[0] // bs
+
+        for i in range(n_batches):
+            start_idx = i*bs
+            end_idx = start_idx + bs
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self._forward_dynamic(input[start_idx:end_idx], seedsteps)
+            final_recons.append(final_recon.data)
+
+        return torch.cat(final_recons)
+
     def _forward_dynamic(self, input, seedsteps):
         """
         :param input:
@@ -347,7 +362,7 @@ class IodineVAE(GaussianLatentVAE):
         masks = []
         for t in range(1, T + 1):
             z = self.rsample_softplus(lambdas)
-            x_hat, x_var_hat, m_hat_logit = self.decode(z)  # x_hat is (bs*K, 3, imsize, imsize)
+            x_hat, x_var_hat, m_hat_logit = self.decode(z)  # x_hat is (bs*K, 3, imsize, imsize) # TODO clamp x_hat between 0 and 1
             m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
             mask = F.softmax(m_hat_logit, dim=1)
             x_hats.append(x_hat)
@@ -393,14 +408,16 @@ class IodineVAE(GaussianLatentVAE):
                                      lns[2](lambdas_grad_2.view(bs * K, -1).detach())
                                      ], -1)
             extra_input = torch.cat([extra_input, lambdas[0], lambdas[1], z], -1)
-            refinement1, refinement2, h = self.refinement_net(a, h, extra_input=extra_input)
+            lambdas1, lambdas2, h = self.refinement_net(a, h, extra_input=extra_input)
+            if self.physics_net is not None:
+                lambdas1 = self.physics_net(lambdas1)
             # import pdb; pdb.set_trace()
-            lambdas[0] = refinement1
-            lambdas[1] = refinement2
+            lambdas[0] = lambdas1
+            lambdas[1] = lambdas2
 
         total_loss = sum(losses) / T
 
         final_recon = (mask.unsqueeze(2) * x_hat.view(bs, K, 3, self.imsize, self.imsize)).sum(1)
         mse = torch.pow(final_recon - input[:, -1], 2).mean()
 
-        return x_hats, masks, total_loss, kle_loss / self.beta, log_likelihood, mse
+        return x_hats, masks, total_loss, kle_loss / self.beta, log_likelihood, mse, final_recon
