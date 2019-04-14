@@ -146,6 +146,9 @@ class IodineTrainer(Serializable):
             logger.record_tabular("train/mse", np.mean(mses))
             #logger.record_tabular('train/mask_loss', np.mean(m_losses))
 
+
+
+
     def test_epoch(
             self,
             epoch,
@@ -166,7 +169,7 @@ class IodineTrainer(Serializable):
             self.optimizer.zero_grad()
             next_obs = self.get_batch(train=train)
             T = next_obs.shape[1]
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, seedsteps=3)
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, seedsteps=11)
 
             losses.append(loss.item())
             log_probs.append(x_prob_loss.item())

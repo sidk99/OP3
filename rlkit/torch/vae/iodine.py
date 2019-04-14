@@ -2,6 +2,8 @@ import torch
 import torch.utils.data
 from torch import nn
 from torch.autograd import Variable
+from os import path as osp
+from torchvision.utils import save_image
 from torch.nn import functional as F, Parameter
 from rlkit.pythonplusplus import identity
 from rlkit.torch import pytorch_util as ptu
@@ -135,6 +137,7 @@ class IodineVAE(GaussianLatentVAE):
             hidden_init=ptu.fanin_init,
             beta=5,
             dynamic=False,
+            dataparallel=False,
     ):
         """
 
@@ -199,7 +202,10 @@ class IodineVAE(GaussianLatentVAE):
 
         l_norm_sizes = [7, 1, 1]
         self.layer_norms = nn.ModuleList([LayerNorm2D(l) for l in l_norm_sizes])
-        [l.to(ptu.device) for l in self.layer_norms]
+
+        if dataparallel:
+            self.decoder = nn.DataParallel(self.decoder)
+
         self.epoch = 0
         self.decoder_distribution = decoder_distribution
 
@@ -337,6 +343,25 @@ class IodineVAE(GaussianLatentVAE):
 
         return torch.cat(final_recons)
 
+    def gen_image(self, input, save_dir, seedsteps=3):
+        input = ptu.from_numpy(np.expand_dims(np.expand_dims(np.swapaxes(np.swapaxes(input, 0, 2), 1, 2), 0), 1).repeat(5, axis=1))
+        self.eval()
+        x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self._forward_dynamic(input, seedsteps=seedsteps)
+
+        ground_truth = input
+        K = self.K
+        imsize = ground_truth.shape[-1]
+
+        m = torch.stack([m[0] for m in masks]).permute(1, 0, 2, 3).unsqueeze(2).repeat(1, 1, 3, 1,
+                                                                                       1)  # K, T, 3, imsize, imsize
+        x = torch.stack(x_hats)[:, :K].permute(1, 0, 2, 3, 4)
+        rec = (m * x)
+        full_rec = rec.sum(0, keepdim=True)
+        comparison = torch.cat([ground_truth, full_rec, m, x], 0).view(-1, 3, imsize, imsize)
+
+        save_dir = osp.join(save_dir)
+        save_image(comparison.data.cpu(), save_dir, nrow=5)
+
     def _forward_dynamic(self, input, seedsteps):
         """
         :param input:
@@ -371,10 +396,14 @@ class IodineVAE(GaussianLatentVAE):
             if t > seedsteps:
                 recon = (mask.unsqueeze(2) * torch.clamp(x_hat, 0, 1).view(bs, K, 3, self.imsize, self.imsize)).sum(1, keepdim=True)
                 inputK = recon.repeat(1, K, 1, 1, 1).view(bs*K, 3, self.imsize, self.imsize).detach()
-                #inputK = torch.clamp(inputK, 0, 1)
             else:
                 inputK = input[:, t-1].unsqueeze(1).repeat(1, K, 1, 1, 1).view(bs*K, 3, self.imsize, self.imsize)
-            pixel_x_prob = self.gaussian_prob(x_hat, inputK, from_numpy(np.array([sigma]))).view(bs, K, self.imsize,
+
+                inputK_before = input[:, 0].unsqueeze(1).repeat(1, K, 1, 1, 1).view(bs*K, 3, self.imsize, self.imsize)
+                inputK_target = input[:, -1].unsqueeze(1).repeat(1, K, 1, 1, 1).view(bs*K, 3, self.imsize, self.imsize)
+
+
+            pixel_x_prob = self.gaussian_prob(x_hat, inputK_target, from_numpy(np.array([sigma]))).view(bs, K, self.imsize,
                                                                                                  self.imsize)
             pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K
             log_likelihood = -torch.log(pixel_likelihood + 1e-12).sum() / bs
@@ -394,7 +423,7 @@ class IodineVAE(GaussianLatentVAE):
             tiled_k_shape = (bs * K, -1, self.imsize, self.imsize)
 
             a = torch.cat([
-                torch.cat([inputK, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),
+                torch.cat([inputK_before, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),
                 lns[0](torch.cat([
                     x_hat_grad.detach(),
                     mask_grad.view(tiled_k_shape).detach(),

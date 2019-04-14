@@ -51,20 +51,21 @@ def train_vae(variant):
     # train_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
     # test_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
 
-    train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock.h5'
-    test_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock.h5'
+    train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10k.h5'
+    test_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10k.h5'
 
     train_data = load_dataset(train_path, train=True)
     test_data = load_dataset(test_path, train=False)
 
-    n_frames = 35
+    n_frames = 2
     imsize = train_data.shape[-1]
     T = variant['vae_kwargs']['T']
     K = variant['vae_kwargs']['K']
     rep_size = variant['vae_kwargs']['representation_size']
    # t_sample = np.array([0, 0, 0, 0, 0, 10, 15, 20, 25, 30])
-    t_sample = np.array([0, 0, 0, 34, 34])
-    train_data = train_data.reshape((n_frames, -1, 3, imsize, imsize)).swapaxes(0, 1)[:1000, t_sample]
+    #t_sample = np.array([0, 34, 34, 34, 34])
+    t_sample = np.array([0, 0, 0, 0, 1])
+    train_data = train_data.reshape((n_frames, -1, 3, imsize, imsize)).swapaxes(0, 1)[:5000, t_sample]
     test_data = test_data.reshape((n_frames, -1, 3, imsize, imsize)).swapaxes(0, 1)[:50, t_sample]
     #logger.save_extra_data(info)
     logger.get_snapshot_dir()
@@ -95,8 +96,6 @@ def train_vae(variant):
                      save_reconstruction=should_save_imgs)
         t.test_epoch(epoch, save_vae=False, train=True, record_stats=False, batches=1,
                      save_reconstruction=should_save_imgs)
-        #if should_save_imgs:
-        #    t.dump_samples(epoch)
     logger.save_extra_data(m, 'vae.pkl', mode='pickle')
 
 
@@ -110,6 +109,7 @@ if __name__ == "__main__":
             beta=1,
             K=5,
             T=5,
+            dataparallel=False
         ),
         algo_kwargs = dict(
             gamma=0.5,
@@ -119,14 +119,14 @@ if __name__ == "__main__":
         ),
         num_epochs=10000,
         algorithm='VAE',
-        save_period=5,
+        save_period=1,
         physics=True
     )
 
 
     run_experiment(
         train_vae,
-        exp_prefix='iodine-blocks-physics',
+        exp_prefix='iodine-blocks-physics_noseed',
         mode='here_no_doodad',
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
