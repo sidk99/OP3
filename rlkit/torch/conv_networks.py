@@ -327,12 +327,12 @@ class BroadcastCNN(PyTorchModule):
 
         self.coords = from_numpy(np.expand_dims(np.stack([xcoords, ycoords], 0), 0))
 
-    def forward(self, input):
+    def forward(self, input, broadcast):
         assert len(input.shape) == 2
         # spatially broadcast latent
         input = input.view(input.shape[0], input.shape[1], 1, 1)
 
-        broadcast = ptu.ones((input.shape[0], input.shape[1], self.input_height, self.input_width))
+        #broadcast = ptu.ones((input.shape[0], input.shape[1], self.input_height, self.input_width))
         input = input * broadcast
 
         coords = self.coords.repeat(input.shape[0], 1, 1, 1)

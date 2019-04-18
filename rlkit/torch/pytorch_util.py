@@ -4,10 +4,10 @@ import numpy as np
 
 def init_weights(m):
     if type(m) == torch.nn.Linear:
-        torch.nn.init.kaiming_uniform(m.weight)
+        torch.nn.init.kaiming_uniform_(m.weight)
         m.bias.data.fill_(0.01)
     elif type(m) == torch.nn.Conv2d:
-        torch.nn.init.kaiming_uniform(m.weight)
+        torch.nn.init.kaiming_uniform_(m.weight)
         m.bias.data.fill_(0.01)
 
 def soft_update_from_to(source, target, tau):

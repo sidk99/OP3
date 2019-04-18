@@ -108,7 +108,7 @@ class RefinementNetwork(PyTorchModule):
 
 
 
-    def forward(self, input, hidden, extra_input=None):
+    def forward(self, input, hidden1, hidden2, extra_input=None):
 
         # need to reshape from batch of flattened images into (channsls, w, h)
         # import pdb; pdb.set_trace()
@@ -135,10 +135,13 @@ class RefinementNetwork(PyTorchModule):
         if extra_input is not None:
             output = torch.cat([output, extra_input], dim=1)
 
-        output, hidden = self.lstm(output.unsqueeze(1), hidden)
+        if len(hidden1.shape) == 2:
+            hidden1, hidden2 = hidden1.unsqueeze(0), hidden2.unsqueeze(0)
+        self.lstm.flatten_parameters()
+        output, hidden = self.lstm(output.unsqueeze(1), (hidden1, hidden2))
         output1 = self.output_activation(self.last_fc(output.squeeze()))
         output2 = self.output_activation(self.last_fc2(output.squeeze()))
-        return output1, output2, hidden
+        return output1, output2, hidden[0], hidden[1]
 
     def initialize_hidden(self, bs):
         return (Variable(ptu.from_numpy(np.zeros((1, bs, self.lstm_size)))),

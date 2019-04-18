@@ -17,6 +17,8 @@ class IodineTrainer(Serializable):
             train_dataset,
             test_dataset,
             model,
+            train_actions=None,
+            test_actions=None,
             batch_size=128,
             log_interval=0,
             gamma=0.5,
@@ -50,6 +52,8 @@ class IodineTrainer(Serializable):
         assert self.test_dataset.dtype == np.uint8
         self.train_dataset = train_dataset
         self.test_dataset = test_dataset
+        self.train_actions = train_actions
+        self.test_actions = test_actions
 
         self.batch_size = batch_size
 
@@ -88,13 +92,14 @@ class IodineTrainer(Serializable):
 
     def get_batch(self, train=True):
         dataset = self.train_dataset if train else self.test_dataset
+        actions = self.train_actions if train else self.test_actions
         ind = np.random.randint(0, len(dataset), self.batch_size)
-        samples = normalize_image(dataset[ind, :])
-        if self.normalize:
-            samples = ((samples - self.train_data_mean) + 1) / 2
-        if self.background_subtract:
-            samples = samples - self.train_data_mean
-        return ptu.from_numpy(samples)
+        samples = dataset[ind, :]
+
+        action_samples = ptu.from_numpy(actions[ind, :]) if actions is not None else None
+
+
+        return ptu.from_numpy(samples).float() / 255., action_samples
 
     def get_debug_batch(self, train=True):
         dataset = self.train_dataset if train else self.test_dataset
@@ -104,20 +109,17 @@ class IodineTrainer(Serializable):
         Y = Y[ind, :]
         return ptu.from_numpy(X), ptu.from_numpy(Y)
 
-    def train_epoch(self, epoch, sample_batch=None, batches=20, from_rl=False):
+    def train_epoch(self, epoch, batches=20, from_rl=False):
         self.model.train()
         losses = []
         log_probs = []
         kles = []
         mses = []
+
         for batch_idx in range(batches):
-            if sample_batch is not None:
-                data = sample_batch(self.batch_size)
-                next_obs = data['next_obs']
-            else:
-                next_obs = self.get_batch()
+            next_obs, actions  = self.get_batch()
             self.optimizer.zero_grad()
-            x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, seedsteps=11)
+            x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions, seedsteps=11)
             loss.backward()
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()] + self.model.lambdas, 5.0)
             #torch.nn.utils.clip_grad_norm_(self.model.lambdas, 5.0)  # TODO Clip other gradients?
@@ -167,9 +169,9 @@ class IodineTrainer(Serializable):
         mses = []
         for batch_idx in range(batches):
             self.optimizer.zero_grad()
-            next_obs = self.get_batch(train=train)
+            next_obs, actions = self.get_batch(train=train)
             T = next_obs.shape[1]
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, seedsteps=11)
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions, seedsteps=1)
 
             losses.append(loss.item())
             log_probs.append(x_prob_loss.item())
@@ -182,11 +184,12 @@ class IodineTrainer(Serializable):
                 K = self.model.K
                 imsize = ground_truth.shape[-1]
 
-                m = torch.stack([m[0] for m in masks]).permute(1, 0, 2, 3).unsqueeze(2).repeat(1, 1, 3, 1, 1) # K, T, 3, imsize, imsize
+                m = torch.stack([m[0] for m in masks]).permute(1, 0, 2, 3).unsqueeze(2).repeat(1, 1, 3, 1, 1)
                 x = torch.stack(x_hats)[:, :K].permute(1, 0, 2, 3, 4)
                 rec = (m * x)
                 full_rec = rec.sum(0, keepdim=True)
-                comparison = torch.cat([ground_truth, full_rec, m, x], 0).view(-1, 3, imsize, imsize)
+
+                comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize)
 
                 save_dir = osp.join(logger.get_snapshot_dir(),
                                     '%s_r%d.png' % ('train' if train else 'val', epoch))

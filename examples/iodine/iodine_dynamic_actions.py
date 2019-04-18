@@ -35,13 +35,16 @@ def load_dataset(data_path, train=True):
     elif 'BlocksGeneration' in data_path:
         if train:
             feats = np.array(hdf5_file['training']['features'])
+            actions = np.array(hdf5_file['training']['actions'])
         else:
             feats = np.array(hdf5_file['validation']['features'])
-        data = feats.reshape((-1, 64, 64, 3))
-        data = (data * 255).astype(np.uint8)
-        data = np.swapaxes(data, 1, 3)
-        data = np.swapaxes(data, 2, 3)
-        return data
+            actions = np.array(hdf5_file['validation']['actions'])
+
+        t_sample = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 10])
+        feats = np.moveaxis(feats, -1, 2)[t_sample] # (T, bs, ch, imsize, imsize)
+        feats = np.moveaxis(feats, 0, 1)[:1000] # (bs, T, ch, imsize, imsize)
+        actions = actions.squeeze() # (bs, action_dim)
+        return feats, actions
 
 
 def train_vae(variant):
@@ -51,23 +54,15 @@ def train_vae(variant):
     # train_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
     # test_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
 
-    train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10k.h5'
-    test_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10k.h5'
+    train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock1kActions.h5'
+    test_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock1kActions.h5'
 
-    train_data = load_dataset(train_path, train=True)
-    test_data = load_dataset(test_path, train=False)
+    train_feats, train_actions = load_dataset(train_path, train=True)
+    test_feats, test_actions = load_dataset(test_path, train=False)
 
-    n_frames = 2
-    imsize = train_data.shape[-1]
-    T = variant['vae_kwargs']['T']
     K = variant['vae_kwargs']['K']
     rep_size = variant['vae_kwargs']['representation_size']
-   # t_sample = np.array([0, 0, 0, 0, 0, 10, 15, 20, 25, 30])
-    #t_sample = np.array([0, 34, 34, 34, 34])
-    t_sample = np.array([0, 0, 0, 0, 1])
-    train_data = train_data.reshape((n_frames, -1, 3, imsize, imsize)).swapaxes(0, 1)[:8000, t_sample]
-    test_data = test_data.reshape((n_frames, -1, 3, imsize, imsize)).swapaxes(0, 1)[:50, t_sample]
-    #logger.save_extra_data(info)
+
     logger.get_snapshot_dir()
     variant['vae_kwargs']['architecture'] = iodine.imsize64_large_iodine_architecture
     variant['vae_kwargs']['decoder_class'] = BroadcastCNN
@@ -76,7 +71,7 @@ def train_vae(variant):
                                        hidden_activation=nn.ELU())
     physics_net = None
     if variant['physics']:
-        physics_net = PhysicsNetwork(K, rep_size)
+        physics_net = PhysicsNetwork(K, rep_size, action_size=train_actions.shape[-1])
     m = IodineVAE(
         **variant['vae_kwargs'],
         refinement_net=refinement_net,
@@ -86,12 +81,12 @@ def train_vae(variant):
 
     m.to(ptu.device)
 
-    t = IodineTrainer(train_data, test_data, m,
+    t = IodineTrainer(train_feats, test_feats, m, train_actions=train_actions, test_actions=test_actions,
                        **variant['algo_kwargs'])
     save_period = variant['save_period']
     for epoch in range(variant['num_epochs']):
         should_save_imgs = (epoch % save_period == 0)
-        t.train_epoch(epoch, batches=train_data.shape[0]//variant['algo_kwargs']['batch_size'])
+        t.train_epoch(epoch, batches=train_feats.shape[0]//variant['algo_kwargs']['batch_size'])
         t.test_epoch(epoch, save_vae=True, train=False, record_stats=True, batches=1,
                      save_reconstruction=should_save_imgs)
         t.test_epoch(epoch, save_vae=False, train=True, record_stats=False, batches=1,
@@ -108,7 +103,7 @@ if __name__ == "__main__":
             decoder_distribution='gaussian_identity_variance',
             beta=1,
             K=7,
-            T=5,
+            T=10,
             dataparallel=True
         ),
         algo_kwargs = dict(
@@ -126,7 +121,7 @@ if __name__ == "__main__":
 
     run_experiment(
         train_vae,
-        exp_prefix='iodine-blocks-physics_noseed',
+        exp_prefix='iodine-blocks-physics-actions',
         mode='here_no_doodad',
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

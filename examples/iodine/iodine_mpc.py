@@ -106,7 +106,7 @@ class MPC:
         goal_image = goal_image.astype(np.float32) / 255
         #import pdb; pdb.set_trace()
         self.model.gen_image(goal_image,
-                                            '/home/jcoreyes/objects/rlkit/examples/iodine/test_mpc/goal.png')
+                            '/home/jcoreyes/objects/rlkit/examples/iodine/test_mpc/goal.png')
 
 
         actions_lst = []
@@ -121,11 +121,16 @@ class MPC:
 
 
 
-        actions = self.sample_actions(1000)
+        actions = self.sample_actions(100)
 
         asset_path = '/home/jcoreyes/objects/object-oriented-prediction/o2p2/data/stl'
 
-
+        true_actions = np.array([ [0, -.75,0,0, 0,0,1,0, .4, .75,.75,0],
+			[0, -.75,0,1, 0,0,1,0, .4, .25,.75,.25],
+			[0,  .75,0,0, 0,0,1,0, .4, .5,.25,1],
+			[0,  .75,0,1, 0,0,1,0, .4, 1,.25,.5]])
+        #actions.append(true_actions[mpc_itr])
+        actions = [true_actions[mpc_itr, :]]
         all_images = []
         for action in actions:
             a = [action[0], action[1:4], action[4:8], action[8], action[9:12]]
@@ -142,7 +147,7 @@ class MPC:
         #    import pdb; pdb.set_trace()
         input = ptu.from_numpy(np.expand_dims(initial_states, 1).repeat(5, axis=1))
 
-        final_recon = self.model.predict(input, seedsteps=3)
+        final_recon = self.model.predict(input, seedsteps=11, bs=1)
 
         pred = ptu.get_numpy(torch.clamp(final_recon, 0, 1)) # (bs, ch, imsize, imsize)
         pred = np.swapaxes(np.swapaxes(pred, 1, 3), 1, 2) # (bs, imsize, imsize, ch)
@@ -220,13 +225,13 @@ def main(variant):
     # train_goals = train_data[:, -1]
     # test_goals = test_data[:, -1]
 
-
-
-    model = pickle.load(open('/home/jcoreyes/objects/rlkit/output/04-09-iodine-blocks-physics/04-09-iodine-blocks-physics_2019_04_09_21_12_02_0000--s-9028/params.pkl', 'rb'))
+    model_file = '/home/jcoreyes/objects/rlkit/output/04-15-iodine-blocks-physics-noseed/04-15-iodine-blocks-physics_noseed_2019_04_15_12_19_02_0000--s-94700/params.pkl'
+    #model_file = '/home/jcoreyes/objects/rlkit/output/04-09-iodine-blocks-physics/04-09-iodine-blocks-physics_2019_04_09_21_12_02_0000--s-9028/params.pkl'
+    model = pickle.load(open(model_file, 'rb'))
     model.cuda()
     mpc = MPC(model)
     import imageio
-    goal_image = imageio.imread('/home/jcoreyes/objects/object-oriented-prediction/o2p2/planning/executed/mjc_6.png')
+    goal_image = imageio.imread('/home/jcoreyes/objects/object-oriented-prediction/o2p2/planning/executed/mjc_2.png')
     mpc.run(goal_image)
     #  m.to(ptu.device)
 
