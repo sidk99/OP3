@@ -40,9 +40,9 @@ def load_dataset(data_path, train=True):
             feats = np.array(hdf5_file['validation']['features'])
             actions = np.array(hdf5_file['validation']['actions'])
 
-        t_sample = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 10])
+        t_sample = np.array([0, 0, 0, 3, 5, 7, 10, 10, 10, 10])
         feats = np.moveaxis(feats, -1, 2)[t_sample] # (T, bs, ch, imsize, imsize)
-        feats = np.moveaxis(feats, 0, 1)[:1000] # (bs, T, ch, imsize, imsize)
+        feats = np.moveaxis(feats, 0, 1)[:8000] # (bs, T, ch, imsize, imsize)
         actions = actions.squeeze() # (bs, action_dim)
         return feats, actions
 
@@ -54,8 +54,8 @@ def train_vae(variant):
     # train_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
     # test_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
 
-    train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock1kActions.h5'
-    test_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock1kActions.h5'
+    train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10kActions.h5'
+    test_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10kActions.h5'
 
     train_feats, train_actions = load_dataset(train_path, train=True)
     test_feats, test_actions = load_dataset(test_path, train=False)
@@ -71,7 +71,7 @@ def train_vae(variant):
                                        hidden_activation=nn.ELU())
     physics_net = None
     if variant['physics']:
-        physics_net = PhysicsNetwork(K, rep_size, action_size=train_actions.shape[-1])
+        physics_net = PhysicsNetwork(K, rep_size, train_actions.shape[-1])
     m = IodineVAE(
         **variant['vae_kwargs'],
         refinement_net=refinement_net,
@@ -81,7 +81,8 @@ def train_vae(variant):
 
     m.to(ptu.device)
 
-    t = IodineTrainer(train_feats, test_feats, m, train_actions=train_actions, test_actions=test_actions,
+    t = IodineTrainer(train_feats, test_feats, m, variant['train_seedsteps'], variant['test_seedsteps'],
+                      train_actions=train_actions, test_actions=test_actions,
                        **variant['algo_kwargs'])
     save_period = variant['save_period']
     for epoch in range(variant['num_epochs']):
@@ -103,7 +104,7 @@ if __name__ == "__main__":
             decoder_distribution='gaussian_identity_variance',
             beta=1,
             K=7,
-            T=10,
+            T=5,
             dataparallel=True
         ),
         algo_kwargs = dict(
@@ -112,6 +113,8 @@ if __name__ == "__main__":
             lr=1e-4,
             log_interval=0,
         ),
+        train_seedsteps=11,
+        test_seedsteps=3,
         num_epochs=10000,
         algorithm='VAE',
         save_period=1,

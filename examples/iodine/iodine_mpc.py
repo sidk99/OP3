@@ -104,9 +104,12 @@ class MPC:
     def run(self, goal_image, mpc_h=6):
 
         goal_image = goal_image.astype(np.float32) / 255
+
         #import pdb; pdb.set_trace()
         self.model.gen_image(goal_image,
-                            '/home/jcoreyes/objects/rlkit/examples/iodine/test_mpc/goal.png')
+                            '/home/jcoreyes/objects/rlkit/examples/iodine/test_mpc/goal.png',
+                             action=np.zeros((13,)),
+                             seedsteps=11)
 
 
         actions_lst = []
@@ -225,13 +228,14 @@ def main(variant):
     # train_goals = train_data[:, -1]
     # test_goals = test_data[:, -1]
 
-    model_file = '/home/jcoreyes/objects/rlkit/output/04-15-iodine-blocks-physics-noseed/04-15-iodine-blocks-physics_noseed_2019_04_15_12_19_02_0000--s-94700/params.pkl'
+    #model_file = '/home/jcoreyes/objects/rlkit/output/04-15-iodine-blocks-physics-noseed/04-15-iodine-blocks-physics_noseed_2019_04_15_12_19_02_0000--s-94700/params.pkl'
+    model_file = '/home/jcoreyes/objects/rlkit/output/04-20-iodine-blocks-physics-actions/04-20-iodine-blocks-physics-actions_2019_04_20_08_42_16_0000--s-17038/params.pkl'
     #model_file = '/home/jcoreyes/objects/rlkit/output/04-09-iodine-blocks-physics/04-09-iodine-blocks-physics_2019_04_09_21_12_02_0000--s-9028/params.pkl'
     model = pickle.load(open(model_file, 'rb'))
     model.cuda()
     mpc = MPC(model)
     import imageio
-    goal_image = imageio.imread('/home/jcoreyes/objects/object-oriented-prediction/o2p2/planning/executed/mjc_2.png')
+    goal_image = imageio.imread('/home/jcoreyes/objects/object-oriented-prediction/o2p2/planning/executed/mjc_4.png')
     mpc.run(goal_image)
     #  m.to(ptu.device)
 
@@ -257,8 +261,8 @@ if __name__ == "__main__":
             input_channels=3,
             decoder_distribution='gaussian_identity_variance',
             beta=1,
-            K=5,
-            T=5,
+            K=7,
+            T=10,
         ),
         algo_kwargs = dict(
             gamma=0.5,

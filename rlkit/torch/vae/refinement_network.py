@@ -139,6 +139,8 @@ class RefinementNetwork(PyTorchModule):
             hidden1, hidden2 = hidden1.unsqueeze(0), hidden2.unsqueeze(0)
         self.lstm.flatten_parameters()
         output, hidden = self.lstm(output.unsqueeze(1), (hidden1, hidden2))
+        #output1 = self.output_activation(self.last_fc(output.squeeze()))
+
         output1 = self.output_activation(self.last_fc(output.squeeze()))
         output2 = self.output_activation(self.last_fc2(output.squeeze()))
         return output1, output2, hidden[0], hidden[1]

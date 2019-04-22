@@ -17,6 +17,8 @@ class IodineTrainer(Serializable):
             train_dataset,
             test_dataset,
             model,
+            train_seedsteps,
+            test_seedsteps,
             train_actions=None,
             test_actions=None,
             batch_size=128,
@@ -43,6 +45,8 @@ class IodineTrainer(Serializable):
         self.representation_size = model.representation_size
         self.input_channels = model.input_channels
         self.imlength = model.imlength
+        self.train_seedsteps = train_seedsteps
+        self.test_seedsteps = test_seedsteps
 
         self.lr = lr
         params = list(self.model.parameters()) + self.model.lambdas
@@ -119,7 +123,8 @@ class IodineTrainer(Serializable):
         for batch_idx in range(batches):
             next_obs, actions  = self.get_batch()
             self.optimizer.zero_grad()
-            x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions, seedsteps=11)
+            x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions,
+                                                                                    seedsteps=self.train_seedsteps)
             loss.backward()
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()] + self.model.lambdas, 5.0)
             #torch.nn.utils.clip_grad_norm_(self.model.lambdas, 5.0)  # TODO Clip other gradients?
@@ -171,7 +176,8 @@ class IodineTrainer(Serializable):
             self.optimizer.zero_grad()
             next_obs, actions = self.get_batch(train=train)
             T = next_obs.shape[1]
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions, seedsteps=1)
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions,
+                                                                                      seedsteps=self.test_seedsteps)
 
             losses.append(loss.item())
             log_probs.append(x_prob_loss.item())

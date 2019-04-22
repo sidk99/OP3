@@ -87,11 +87,11 @@ imsize64_large_iodine_architecture = dict(
     deconv_args=dict(
         hidden_sizes=[],
 
-        input_width=80,
-        input_height=80,
+        input_width=72,
+        input_height=72,
         input_channels=130,
 
-        kernel_sizes=[5, 5, 5, 5],
+        kernel_sizes=[3, 3, 3, 3],
         n_channels=[64, 64, 64, 64],
         strides=[1, 1, 1, 1],
         paddings=[0, 0, 0, 0]
@@ -105,7 +105,7 @@ imsize64_large_iodine_architecture = dict(
         input_height=64,
         input_channels=17,
         paddings=[0, 0, 0, 0],
-        kernel_sizes=[5, 5, 5, 5],
+        kernel_sizes=[3, 3, 3, 3],
         n_channels=[64, 64, 64, 64],
         strides=[2, 2, 2, 2],
         hidden_sizes=[128, 128],
@@ -272,10 +272,14 @@ class IodineVAE(GaussianLatentVAE):
 
         return torch.cat(final_recons)
 
-    def gen_image(self, input, save_dir, seedsteps=3):
-        input = ptu.from_numpy(np.expand_dims(np.expand_dims(np.swapaxes(np.swapaxes(input, 0, 2), 1, 2), 0), 1).repeat(10, axis=1))
+    def gen_image(self, input, save_dir, action=None, seedsteps=3, T=20):
+        input = ptu.from_numpy(np.expand_dims(np.expand_dims(np.swapaxes(np.swapaxes(input, 0, 2), 1, 2), 0), 1).repeat(T, axis=1))
         self.eval()
-        x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self._forward_dynamic(input, seedsteps=seedsteps)
+        if action is not None:
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self._forward_dynamic_actions(input, ptu.from_numpy(action).unsqueeze(0),
+                                                                                                 seedsteps=seedsteps)
+        else:
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self._forward_dynamic(input, seedsteps=seedsteps)
 
         ground_truth = input
         K = self.K
@@ -286,10 +290,10 @@ class IodineVAE(GaussianLatentVAE):
         x = torch.stack(x_hats)[:, :K].permute(1, 0, 2, 3, 4)
         rec = (m * x)
         full_rec = rec.sum(0, keepdim=True)
-        comparison = torch.cat([ground_truth, full_rec, m, x], 0).view(-1, 3, imsize, imsize)
+        comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize)
 
         save_dir = osp.join(save_dir)
-        save_image(comparison.data.cpu(), save_dir, nrow=10)
+        save_image(comparison.data.cpu(), save_dir, nrow=T)
 
     def _forward_dynamic_actions(self, input, actions, seedsteps):
         """
@@ -311,13 +315,23 @@ class IodineVAE(GaussianLatentVAE):
         x_hats = []
         masks = []
 
-        actionsK = actions.unsqueeze(1).repeat(1, K, 1).view(bs*K, -1)
-
-
-        noopaction = ptu.zeros(actionsK.shape)
+        # choose random latent to contain action by zeroing out others
+        actionsK = actions.unsqueeze(1).repeat(1, K, 1)
+        action_mask = ptu.zeros(bs, K)
+        action_mask[np.arange(0, bs), np.random.randint(0, K, bs)] = 1
+        actionsK *= action_mask.unsqueeze(-1)
+        actionsK = actionsK.view(bs*K, -1)
 
         untiled_k_shape = (bs, K, -1, self.imsize, self.imsize)
         tiled_k_shape = (bs * K, -1, self.imsize, self.imsize)
+
+        # schedule for doing refinement or physics
+        # refinement = 0, physics = 1
+        # when only doing refinement predict same image
+        # when only doing physics predict next image
+        # schedule = np.random.randint(0, 1, (T,))
+        # schedule[:3] = 0
+        # current_step = np.zeros((bs,))
 
         for t in range(1, T + 1):
             z = self.rsample_softplus(lambdas)
@@ -369,8 +383,8 @@ class IodineVAE(GaussianLatentVAE):
             lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2, extra_input=extra_input)
 
             # concatenate actions
-            #lambdas1 = torch.cat([lambdas1, actionsK], -1)
-            lambdas1 = self.physics_net(lambdas1, actionsK)
+            lambdas1 = torch.cat([lambdas1, actionsK], -1)
+            lambdas1 = self.physics_net(lambdas1)
 
             # import pdb; pdb.set_trace()
             lambdas[0] = lambdas1

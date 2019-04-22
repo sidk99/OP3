@@ -23,54 +23,28 @@ class PhysicsNetwork(PyTorchModule):
         self.rep_size = representation_size
         self.action_size = action_size
 
-        self.enc_size = enc_size = 128
+        enc_size = 128
 
-        self.encoder_network = Mlp((256,), enc_size, representation_size, hidden_activation=nn.ELU())
+        self.action_enc_size = 32
 
-        self.action_encoder = Mlp((128, ), enc_size, action_size, hidden_activation=nn.ELU())
+        self.action_encoder = Mlp((128,), self.action_enc_size, action_size, hidden_activation=nn.ELU())
 
-        self.a_attention= Mlp((128,), 1, enc_size*2, hidden_activation=nn.Tanh(),
-                                     output_activation=nn.Sigmoid())
-        self.a_effect = Mlp((256,), enc_size, enc_size*2, hidden_activation=nn.ELU(),
-                                  output_activation=nn.ELU())
-
-
-        self.lns = nn.ModuleList([nn.LayerNorm(enc_size),
-                                 nn.LayerNorm(enc_size),
-                                  nn.LayerNorm(enc_size)]
-                                 )
-
-        self.embedding_network = Mlp((256,), enc_size, enc_size*2, hidden_activation=nn.ELU(),
+        self.embedding_network = Mlp((256,), enc_size, representation_size*2+self.action_enc_size*2,
+                                     hidden_activation=nn.ELU(),
                                      output_activation=nn.ELU())
-        self.effect_network = Mlp((256,), enc_size, enc_size, hidden_activation=nn.ELU(),
+        self.effect_network = Mlp((128,), enc_size, enc_size, hidden_activation=nn.ELU(),
                                      output_activation=nn.ELU())
-        self.attention_network = Mlp((128,), 1, enc_size, hidden_activation=nn.Tanh(),
+        self.attention_network = Mlp((128,), 1, enc_size, hidden_activation=nn.ELU(),
                                      output_activation=nn.Sigmoid())
-
-        self.final_encoder = Mlp((256,), enc_size, enc_size*2, hidden_activation=nn.ELU())
-
-
-
-
-
+        self.encoder_network = Mlp((128,), representation_size, enc_size, hidden_activation=nn.ELU())
 
     def forward(self, input, actions):
         # input is (bs*K, representation_size)
         K = self.K
         rep_size = self.rep_size
-        enc_size = self.enc_size
-
-        lambda_enc = self.encoder_network(input)
-        action_enc = self.lns[0](self.action_encoder(actions))
-        lambdas = torch.cat([lambda_enc, action_enc], -1)
-
-        action_attention = self.a_attention(lambdas)
-        action_effect = self.a_effect(lambdas)
-
-        action_lambdas = action_attention * action_effect
-
-
-        lambdas = action_lambdas.view(-1, K, enc_size)
+        actions_enc = self.action_encoder(actions)
+        input = torch.cat([input, actions_enc], -1)
+        lambdas = input.view(-1, K, rep_size+self.action_enc_size)
         bs = lambdas.shape[0]
 
         pairs = []
@@ -82,16 +56,14 @@ class PhysicsNetwork(PyTorchModule):
 
         all_pairs = torch.stack(pairs, 1).view(bs*K,  K-1, -1)
 
-        interaction = self.lns[1](self.embedding_network(all_pairs))
+        interaction = self.embedding_network(all_pairs)
         effect = self.effect_network(interaction)
 
         attention = self.attention_network(interaction)
 
         total_effect = (attention * effect).view(bs*K, (K-1), -1).sum(1) # TODO check this is right
 
-        new_lambdas = torch.cat([action_lambdas, total_effect], -1) # TODO apply another network after this
-
-        new_lambdas = self.final_encoder(new_lambdas)
+        new_lambdas = self.encoder_network(total_effect)
 
         return new_lambdas
 
