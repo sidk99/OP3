@@ -1,5 +1,6 @@
 import torch
 import torch.utils.data
+from rlkit.torch.networks import Mlp
 from torch import nn
 from torch.autograd import Variable
 from os import path as osp
@@ -203,6 +204,9 @@ class IodineVAE(GaussianLatentVAE):
             hidden_activation=nn.ELU(),
             **deconv_kwargs)
 
+        self.action_lambda_encoder = Mlp((128,), representation_size, representation_size+13,
+                                     hidden_activation=nn.ELU())
+
         l_norm_sizes = [7, 1, 1]
         self.layer_norms = nn.ModuleList([LayerNorm2D(l) for l in l_norm_sizes])
 
@@ -247,10 +251,10 @@ class IodineVAE(GaussianLatentVAE):
     def logprob(self, inputs, obs_distribution_params):
         pass
 
-    def forward(self, input, actions=None, seedsteps=5):
+    def forward(self, input, actions=None, schedule=None, seedsteps=5):
         if actions is None:
             return self._forward_dynamic(input, seedsteps=seedsteps)
-        return self._forward_dynamic_actions(input, actions, seedsteps=seedsteps)
+        return self._forward_dynamic_actions(input, actions, schedule)
 
 
 
@@ -295,7 +299,7 @@ class IodineVAE(GaussianLatentVAE):
         save_dir = osp.join(save_dir)
         save_image(comparison.data.cpu(), save_dir, nrow=T)
 
-    def _forward_dynamic_actions(self, input, actions, seedsteps):
+    def _forward_dynamic_actions(self, input, actions, schedule):
         """
         :param input:
         :return: reconstructed input, obs_distribution_params, latent_distribution_params
@@ -303,7 +307,7 @@ class IodineVAE(GaussianLatentVAE):
         K = self.K
         # input is (bs, T, ch, imsize, imsize)
         bs = input.shape[0]
-        T = input.shape[1]
+        T = schedule.shape[0]
 
         # means and log_vars of latent
         lambdas = [l.repeat(bs * K, 1) for l in self.lambdas]
@@ -325,153 +329,97 @@ class IodineVAE(GaussianLatentVAE):
         untiled_k_shape = (bs, K, -1, self.imsize, self.imsize)
         tiled_k_shape = (bs * K, -1, self.imsize, self.imsize)
 
-        # schedule for doing refinement or physics
-        # refinement = 0, physics = 1
-        # when only doing refinement predict same image
-        # when only doing physics predict next image
-        # schedule = np.random.randint(0, 1, (T,))
-        # schedule[:3] = 0
-        # current_step = np.zeros((bs,))
+
+        current_step = 0
+        first_action = True
 
         for t in range(1, T + 1):
-            z = self.rsample_softplus(lambdas)
-            x_hat, x_var_hat, m_hat_logit = self.decode(z)  # x_hat is (bs*K, 3, imsize, imsize) # TODO clamp x_hat between 0 and 1
-            #x_hat = torch.clamp(x_hat, 0, 1) # doing this clamping causes the alternating mask issue
-            m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
-            mask = F.softmax(m_hat_logit, dim=1) # (bs, K, imsize, simze)
-            x_hats.append(x_hat)
-            masks.append(mask)
 
-            if t > seedsteps:
-                recon = (mask.unsqueeze(2)* x_hat.view(untiled_k_shape)).sum(1, keepdim=True)
-                inputK = recon.repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach()
+
+            # if t > seedsteps:
+            #     recon = (mask.unsqueeze(2)* x_hat.view(untiled_k_shape)).sum(1, keepdim=True)
+            #     inputK = recon.repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach()
+            # else:
+            #     inputK = input[:, t-1].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
+
+            if schedule[t-1] == 0 or current_step > input.shape[1] - 2:
+                z = self.rsample_softplus(lambdas)
+                x_hat, x_var_hat, m_hat_logit = self.decode(
+                    z)  # x_hat is (bs*K, 3, imsize, imsize) # TODO clamp x_hat between 0 and 1
+                # x_hat = torch.clamp(x_hat, 0, 1) # doing this clamping causes the alternating mask issue
+                m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
+                mask = F.softmax(m_hat_logit, dim=1)  # (bs, K, imsize, simze)
+                x_hats.append(x_hat)
+                masks.append(mask)
+                inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
+                pixel_x_prob = self.gaussian_prob(x_hat, inputK, self.sigma).view(bs, K, self.imsize, self.imsize)
+                pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K
+                log_likelihood = -torch.log(pixel_likelihood + 1e-12).sum() / bs
+
+                kle = self.kl_divergence_softplus(lambdas)
+                kle_loss = self.beta * kle.sum() / bs
+                loss = log_likelihood + kle_loss
+                losses.append(loss)
+
+                # Compute inputs a for refinement network
+                posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-8)  # avoid divide by zero
+                leave_out_ll = pixel_likelihood.unsqueeze(1) - mask * pixel_x_prob
+                x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = torch.autograd.grad(loss, [x_hat, mask] + lambdas,
+                                                                                            create_graph=True,
+                                                                                            retain_graph=True)
+
+                a = torch.cat([
+                    torch.cat([inputK, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),
+                    lns[0](torch.cat([
+                        x_hat_grad.detach(),
+                        mask_grad.view(tiled_k_shape).detach(),
+                        posterior_mask.view(tiled_k_shape).detach(),
+                        pixel_likelihood.unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach(),
+                        leave_out_ll.view(tiled_k_shape).detach()], 1))
+
+                ], 1)
+
+                extra_input = torch.cat([lns[1](lambdas_grad_1.view(bs * K, -1).detach()),
+                                         lns[2](lambdas_grad_2.view(bs * K, -1).detach())
+                                         ], -1)
+                extra_input = torch.cat([extra_input, lambdas[0], lambdas[1], z], -1)
+
+                lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2, extra_input=extra_input)
             else:
-                inputK = input[:, t-1].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
+                current_step += 1
+                if first_action:
+                    lambdas1 = self.action_lambda_encoder(torch.cat([lambdas1, actionsK], -1))
+                    first_action = False
+                lambdas1 = self.physics_net(lambdas1)
+                z = self.rsample_softplus(lambdas)
+                x_hat, x_var_hat, m_hat_logit = self.decode(
+                    z)  # x_hat is (bs*K, 3, imsize, imsize) # TODO clamp x_hat between 0 and 1
+                # x_hat = torch.clamp(x_hat, 0, 1) # doing this clamping causes the alternating mask issue
+                m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
+                mask = F.softmax(m_hat_logit, dim=1)  # (bs, K, imsize, simze)
+                x_hats.append(x_hat)
+                masks.append(mask)
 
-            pixel_x_prob = self.gaussian_prob(x_hat, inputK, self.sigma).view(bs, K, self.imsize, self.imsize)
-            pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K
-            log_likelihood = -torch.log(pixel_likelihood + 1e-12).sum() / bs
+                inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
+                pixel_x_prob = self.gaussian_prob(x_hat, inputK, self.sigma).view(bs, K, self.imsize, self.imsize)
+                pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K
+                log_likelihood = -torch.log(pixel_likelihood + 1e-12).sum() / bs
 
-            kle = self.kl_divergence_softplus(lambdas)
-            kle_loss = self.beta * kle.sum() / bs
-            loss = log_likelihood + kle_loss
-            losses.append(t * loss)
+                kle = self.kl_divergence_softplus(lambdas)
+                kle_loss = self.beta * kle.sum() / bs
+                loss = log_likelihood + kle_loss
+                losses.append(loss)
+                # concatenate actions
+                #lambdas1 = torch.cat([lambdas1, actionsK], -1)
 
-            # Compute inputs a for refinement network
-            posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-8)  # avoid divide by zero
-            leave_out_ll = pixel_likelihood.unsqueeze(1) - mask * pixel_x_prob
-            x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = torch.autograd.grad(loss, [x_hat, mask] + lambdas,
-                                                                                        create_graph=True,
-                                                                                        retain_graph=True)
-
-            a = torch.cat([
-                torch.cat([inputK, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),
-                lns[0](torch.cat([
-                    x_hat_grad.detach(),
-                    mask_grad.view(tiled_k_shape).detach(),
-                    posterior_mask.view(tiled_k_shape).detach(),
-                    pixel_likelihood.unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach(),
-                    leave_out_ll.view(tiled_k_shape).detach()], 1))
-
-            ], 1)
-
-            extra_input = torch.cat([lns[1](lambdas_grad_1.view(bs * K, -1).detach()),
-                                     lns[2](lambdas_grad_2.view(bs * K, -1).detach())
-                                     ], -1)
-            extra_input = torch.cat([extra_input, lambdas[0], lambdas[1], z], -1)
-
-            lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2, extra_input=extra_input)
-
-            # concatenate actions
-            lambdas1 = torch.cat([lambdas1, actionsK], -1)
-            lambdas1 = self.physics_net(lambdas1)
 
             # import pdb; pdb.set_trace()
             lambdas[0] = lambdas1
             lambdas[1] = lambdas2
 
-        total_loss = sum(losses) / T
+        total_loss = sum(losses)
 
         final_recon = (mask.unsqueeze(2) * x_hat.view(untiled_k_shape)).sum(1)
-        mse = torch.pow(final_recon - input[:, -1], 2).mean()
-
-        return x_hats, masks, total_loss, kle_loss / self.beta, log_likelihood, mse, final_recon
-
-    def _forward_dynamic(self, input, seedsteps):
-        """
-        :param input:
-        :return: reconstructed input, obs_distribution_params, latent_distribution_params
-        """
-        K = self.K
-        # input is (bs, T, ch, imsize, imsize)
-        bs = input.shape[0]
-        T = input.shape[1]
-
-        # means and log_vars of latent
-        lambdas = [l.repeat(bs * K, 1) for l in self.lambdas]
-
-        # initialize hidden state
-        h1, h2 = self.initialize_hidden(bs*K)
-        lns = self.layer_norms
-        losses = []
-        x_hats = []
-        masks = []
-        inputK_before = input[:, 0].unsqueeze(1).repeat(1, K, 1, 1, 1).view(bs * K, 3, self.imsize, self.imsize)
-        inputK_target = input[:, -1].unsqueeze(1).repeat(1, K, 1, 1, 1).view(bs * K, 3, self.imsize, self.imsize)
-
-        for t in range(1, T + 1):
-            z = self.rsample_softplus(lambdas)
-            x_hat, x_var_hat, m_hat_logit = self.decode(z)  # x_hat is (bs*K, 3, imsize, imsize) # TODO clamp x_hat between 0 and 1
-            m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
-            mask = F.softmax(m_hat_logit, dim=1)
-            x_hats.append(x_hat)
-            masks.append(mask)
-
-            pixel_x_prob = self.gaussian_prob(x_hat, inputK_target, self.sigma).view(bs, K, self.imsize,
-                                                                                                 self.imsize)
-            pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K
-            log_likelihood = -torch.log(pixel_likelihood + 1e-12).sum() / bs
-
-            kle = self.kl_divergence_softplus(lambdas)
-            kle_loss = self.beta * kle.sum() / bs
-            loss = log_likelihood + kle_loss
-            losses.append(t * loss)
-
-            # Compute inputs a for refinement network
-            posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-8)  # avoid divide by zero
-            leave_out_ll = pixel_likelihood.unsqueeze(1) - mask * pixel_x_prob
-            x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = torch.autograd.grad(loss, [x_hat, mask] + lambdas,
-                                                                                        create_graph=True,
-                                                                                        retain_graph=True)
-
-            tiled_k_shape = (bs * K, -1, self.imsize, self.imsize)
-
-            a = torch.cat([
-                torch.cat([inputK_before, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),
-                lns[0](torch.cat([
-                    x_hat_grad.detach(),
-                    mask_grad.view(tiled_k_shape).detach(),
-                    posterior_mask.view(tiled_k_shape).detach(),
-                    pixel_likelihood.unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach(),
-                    leave_out_ll.view(tiled_k_shape).detach()], 1))
-
-            ], 1)
-
-            extra_input = torch.cat([lns[1](lambdas_grad_1.view(bs * K, -1).detach()),
-                                     lns[2](lambdas_grad_2.view(bs * K, -1).detach())
-                                     ], -1)
-            extra_input = torch.cat([extra_input, lambdas[0], lambdas[1], z], -1)
-
-            lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2, extra_input=extra_input)
-            if self.physics_net is not None:
-                lambdas1 = self.physics_net(lambdas1)
-            # import pdb; pdb.set_trace()
-            lambdas[0] = lambdas1
-            lambdas[1] = lambdas2
-
-        total_loss = sum(losses) / T
-
-        final_recon = (mask.unsqueeze(2) * x_hat.view(bs, K, 3, self.imsize, self.imsize)).sum(1)
-        mse = torch.pow(final_recon - input[:, -1], 2).mean()
+        mse = torch.pow(final_recon - input[:, current_step], 2).mean()
 
         return x_hats, masks, total_loss, kle_loss / self.beta, log_likelihood, mse, final_recon

@@ -27,9 +27,9 @@ class PhysicsNetwork(PyTorchModule):
 
         self.action_enc_size = 32
 
-        self.action_encoder = Mlp((128,), self.action_enc_size, action_size, hidden_activation=nn.ELU())
+        #self.action_encoder = Mlp((128,), self.action_enc_size, action_size, hidden_activation=nn.ELU())
 
-        self.embedding_network = Mlp((256,), enc_size, representation_size*2+self.action_enc_size*2,
+        self.embedding_network = Mlp((256,), enc_size, representation_size*2,
                                      hidden_activation=nn.ELU(),
                                      output_activation=nn.ELU())
         self.effect_network = Mlp((128,), enc_size, enc_size, hidden_activation=nn.ELU(),
@@ -38,13 +38,13 @@ class PhysicsNetwork(PyTorchModule):
                                      output_activation=nn.Sigmoid())
         self.encoder_network = Mlp((128,), representation_size, enc_size, hidden_activation=nn.ELU())
 
-    def forward(self, input, actions):
+    def forward(self, input):
         # input is (bs*K, representation_size)
         K = self.K
         rep_size = self.rep_size
-        actions_enc = self.action_encoder(actions)
-        input = torch.cat([input, actions_enc], -1)
-        lambdas = input.view(-1, K, rep_size+self.action_enc_size)
+        #actions_enc = self.action_encoder(actions)
+        #input = torch.cat([input, actions_enc], -1)
+        lambdas = input.view(-1, K, rep_size)
         bs = lambdas.shape[0]
 
         pairs = []

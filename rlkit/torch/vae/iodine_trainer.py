@@ -123,8 +123,15 @@ class IodineTrainer(Serializable):
         for batch_idx in range(batches):
             next_obs, actions  = self.get_batch()
             self.optimizer.zero_grad()
-            x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions,
-                                                                                    seedsteps=self.train_seedsteps)
+
+            # schedule for doing refinement or physics
+            # refinement = 0, physics = 1
+            # when only doing refinement predict same image
+            # when only doing physics predict next image
+            schedule = np.random.randint(0, 2, (self.model.T,))
+            schedule[:4] = 0
+            #import pdb; pdb.set_trace()
+            x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions=actions, schedule=schedule)
             loss.backward()
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()] + self.model.lambdas, 5.0)
             #torch.nn.utils.clip_grad_norm_(self.model.lambdas, 5.0)  # TODO Clip other gradients?
@@ -175,9 +182,12 @@ class IodineTrainer(Serializable):
         for batch_idx in range(batches):
             self.optimizer.zero_grad()
             next_obs, actions = self.get_batch(train=train)
-            T = next_obs.shape[1]
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions,
-                                                                                      seedsteps=self.test_seedsteps)
+            T = 9
+
+            schedule = np.ones((T,))
+            schedule[:4] = 0
+            #import pdb; pdb.set_trace()
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions=actions, schedule=schedule)
 
             losses.append(loss.item())
             log_probs.append(x_prob_loss.item())
@@ -186,7 +196,8 @@ class IodineTrainer(Serializable):
 
 
             if batch_idx == 0 and save_reconstruction:
-                ground_truth = next_obs[0].unsqueeze(0)
+                t_sample = np.cumsum(schedule)
+                ground_truth = next_obs[0][t_sample].unsqueeze(0)
                 K = self.model.K
                 imsize = ground_truth.shape[-1]
 

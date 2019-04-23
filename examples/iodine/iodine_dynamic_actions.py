@@ -40,7 +40,7 @@ def load_dataset(data_path, train=True):
             feats = np.array(hdf5_file['validation']['features'])
             actions = np.array(hdf5_file['validation']['actions'])
 
-        t_sample = np.array([0, 0, 0, 3, 5, 7, 10, 10, 10, 10])
+        t_sample = np.array([0, 2, 4, 6, 8, 10])
         feats = np.moveaxis(feats, -1, 2)[t_sample] # (T, bs, ch, imsize, imsize)
         feats = np.moveaxis(feats, 0, 1)[:8000] # (bs, T, ch, imsize, imsize)
         actions = actions.squeeze() # (bs, action_dim)
@@ -104,7 +104,7 @@ if __name__ == "__main__":
             decoder_distribution='gaussian_identity_variance',
             beta=1,
             K=7,
-            T=5,
+            T=15,
             dataparallel=True
         ),
         algo_kwargs = dict(
