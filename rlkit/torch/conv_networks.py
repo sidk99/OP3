@@ -2,13 +2,17 @@ import torch
 from torch import nn as nn
 
 from rlkit.pythonplusplus import identity
+<<<<<<< HEAD
 from rlkit.torch.core import PyTorchModule
 from rlkit.torch.pytorch_util import from_numpy
 from rlkit.torch import pytorch_util as ptu
+=======
+
+>>>>>>> original/master
 import numpy as np
 
 
-class CNN(PyTorchModule):
+class CNN(nn.Module):
     def __init__(
             self,
             input_width,
@@ -34,7 +38,6 @@ class CNN(PyTorchModule):
                len(n_channels) == \
                len(strides) == \
                len(paddings)
-        self.save_init_params(locals())
         super().__init__()
 
         self.hidden_sizes = hidden_sizes
@@ -132,7 +135,8 @@ class CNN(PyTorchModule):
             h = self.hidden_activation(h)
         return h
 
-class TwoHeadDCNN(PyTorchModule):
+
+class TwoHeadDCNN(nn.Module):
     def __init__(
             self,
             fc_input_size,
@@ -162,7 +166,6 @@ class TwoHeadDCNN(PyTorchModule):
                len(n_channels) == \
                len(strides) == \
                len(paddings)
-        self.save_init_params(locals())
         super().__init__()
 
         self.hidden_sizes = hidden_sizes
