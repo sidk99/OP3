@@ -1,17 +1,13 @@
-from rlkit.torch.vae.monet import MonetVAE
+from rlkit.torch.monet.monet import MonetVAE
 from rlkit.torch.conv_networks import BroadcastCNN
-import rlkit.torch.vae.monet as monet
-from rlkit.torch.vae.vae_trainer import ConvVAETrainer
-import rlkit.torch.vae.conv_vae as conv_vae
-from rlkit.torch.vae.unet import UNet
-from rlkit.torch.vae.monet_trainer import MonetTrainer
+import rlkit.torch.monet.monet as monet
+from rlkit.torch.monet.unet import UNet
+from rlkit.torch.monet.monet_trainer import MonetTrainer
 import rlkit.torch.pytorch_util as ptu
 from rlkit.pythonplusplus import identity
 from rlkit.launchers.launcher_util import run_experiment
-from rlkit.launchers.rig_experiments import grill_her_td3_full_experiment
 from rlkit.core import logger
 import numpy as np
-from scipy import misc
 import h5py
 
 def load_dataset(data_path, train=True):

@@ -7,9 +7,8 @@ from torch.nn import functional as F
 from rlkit.pythonplusplus import identity
 from rlkit.torch import pytorch_util as ptu
 import numpy as np
-from rlkit.torch.core import PyTorchModule
 
-class RefinementNetwork(PyTorchModule):
+class RefinementNetwork(nn.Module):
     def __init__(
             self,
             input_width,
@@ -37,7 +36,6 @@ class RefinementNetwork(PyTorchModule):
                len(n_channels) == \
                len(strides) == \
                len(paddings)
-        self.save_init_params(locals())
         super().__init__()
 
         self.hidden_sizes = hidden_sizes

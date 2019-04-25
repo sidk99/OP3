@@ -6,7 +6,6 @@ from rlkit.pythonplusplus import identity
 from rlkit.torch import pytorch_util as ptu
 from torch.nn.modules.loss import BCEWithLogitsLoss
 import numpy as np
-from rlkit.torch.core import PyTorchModule
 from rlkit.torch.pytorch_util import from_numpy
 from rlkit.torch.conv_networks import CNN, DCNN
 from rlkit.torch.vae.vae_base import GaussianLatentVAE

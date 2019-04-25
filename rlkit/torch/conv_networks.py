@@ -2,13 +2,8 @@ import torch
 from torch import nn as nn
 
 from rlkit.pythonplusplus import identity
-<<<<<<< HEAD
-from rlkit.torch.core import PyTorchModule
 from rlkit.torch.pytorch_util import from_numpy
-from rlkit.torch import pytorch_util as ptu
-=======
 
->>>>>>> original/master
 import numpy as np
 
 
@@ -265,7 +260,7 @@ class DCNN(TwoHeadDCNN):
     def forward(self, x):
         return super().forward(x)[0]
 
-class BroadcastCNN(PyTorchModule):
+class BroadcastCNN(nn.Module):
     def __init__(
             self,
             input_width,
@@ -291,7 +286,6 @@ class BroadcastCNN(PyTorchModule):
                len(n_channels) == \
                len(strides) == \
                len(paddings)
-        self.save_init_params(locals())
         super().__init__()
 
         self.hidden_sizes = hidden_sizes

@@ -1,25 +1,19 @@
 from torch import nn
 
-from rlkit.torch.vae.iodine import IodineVAE
+from rlkit.torch.iodine.iodine import IodineVAE
 
 from rlkit.torch.conv_networks import BroadcastCNN
-import rlkit.torch.vae.iodine as iodine
-from rlkit.torch.vae.refinement_network import RefinementNetwork
-from rlkit.torch.vae.physics_network import PhysicsNetwork
-from rlkit.torch.vae.vae_trainer import ConvVAETrainer
-import rlkit.torch.vae.conv_vae as conv_vae
-from rlkit.torch.vae.unet import UNet
-from rlkit.torch.vae.iodine_trainer import IodineTrainer
+import rlkit.torch.iodine.iodine as iodine
+from rlkit.torch.iodine.refinement_network import RefinementNetwork
+from rlkit.torch.iodine.physics_network import PhysicsNetwork
+from rlkit.torch.iodine.iodine_trainer import IodineTrainer
 import rlkit.torch.pytorch_util as ptu
-from rlkit.pythonplusplus import identity
 from rlkit.launchers.launcher_util import run_experiment
-from rlkit.launchers.rig_experiments import grill_her_td3_full_experiment
 from rlkit.core import logger
 import numpy as np
-from scipy import misc
 import h5py
 
-def load_dataset(data_path, train=True):
+def load_dataset(data_path, train=True, train_size=20):
     hdf5_file = h5py.File(data_path, 'r')  # RV: Data file
     if 'clevr' in data_path:
         return np.array(hdf5_file['features'])
@@ -69,9 +63,8 @@ def train_vae(variant):
 
     refinement_net = RefinementNetwork(**iodine.imsize64_large_iodine_architecture['refine_args'],
                                        hidden_activation=nn.ELU())
-    physics_net = None
-    if variant['physics']:
-        physics_net = PhysicsNetwork(K, rep_size, train_actions.shape[-1])
+
+    physics_net = PhysicsNetwork(K, rep_size, train_actions.shape[-1])
     m = IodineVAE(
         **variant['vae_kwargs'],
         refinement_net=refinement_net,

@@ -8,9 +8,7 @@ from torchvision.utils import save_image
 from torch.nn import functional as F, Parameter
 from rlkit.pythonplusplus import identity
 from rlkit.torch import pytorch_util as ptu
-from torch.nn.modules.loss import BCEWithLogitsLoss
 import numpy as np
-from rlkit.torch.core import PyTorchModule
 from rlkit.torch.pytorch_util import from_numpy
 from rlkit.torch.conv_networks import CNN, DCNN
 from rlkit.torch.vae.vae_base import GaussianLatentVAE
@@ -177,7 +175,6 @@ class IodineVAE(GaussianLatentVAE):
         :param min_variance:
         :param hidden_init:
         """
-        self.save_init_params(locals())
         super().__init__(representation_size)
         if min_variance is None:
             self.log_min_variance = None
@@ -305,12 +302,9 @@ class IodineVAE(GaussianLatentVAE):
         save_image(comparison.data.cpu(), save_dir, nrow=T)
 
     def _forward_dynamic_actions(self, input, actions, schedule):
-        """
-        :param input:
-        :return: reconstructed input, obs_distribution_params, latent_distribution_params
-        """
-        K = self.K
         # input is (bs, T, ch, imsize, imsize)
+        # schedule is (T,): 0 for refinement and 1 for physics
+        K = self.K
         bs = input.shape[0]
         T = schedule.shape[0]
 
@@ -336,21 +330,12 @@ class IodineVAE(GaussianLatentVAE):
 
 
         current_step = 0
-        first_action = True
+        apply_action = True
 
         for t in range(1, T + 1):
-
-
-            # if t > seedsteps:
-            #     recon = (mask.unsqueeze(2)* x_hat.view(untiled_k_shape)).sum(1, keepdim=True)
-            #     inputK = recon.repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach()
-            # else:
-            #     inputK = input[:, t-1].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
-
-            if schedule[t-1] == 0 or current_step > input.shape[1] - 2:
+            if schedule[t-1] == 0:
                 z = self.rsample_softplus(lambdas)
-                x_hat, x_var_hat, m_hat_logit = self.decode(
-                    z)  # x_hat is (bs*K, 3, imsize, imsize) # TODO clamp x_hat between 0 and 1
+                x_hat, x_var_hat, m_hat_logit = self.decode(z)  # x_hat is (bs*K, 3, imsize, imsize)
                 # x_hat = torch.clamp(x_hat, 0, 1) # doing this clamping causes the alternating mask issue
                 m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
                 mask = F.softmax(m_hat_logit, dim=1)  # (bs, K, imsize, simze)
@@ -364,7 +349,7 @@ class IodineVAE(GaussianLatentVAE):
                 kle = self.kl_divergence_softplus(lambdas)
                 kle_loss = self.beta * kle.sum() / bs
                 loss = log_likelihood + kle_loss
-                losses.append(loss)
+                losses.append(loss/t)
 
                 # Compute inputs a for refinement network
                 posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-8)  # avoid divide by zero
@@ -390,10 +375,14 @@ class IodineVAE(GaussianLatentVAE):
                 extra_input = torch.cat([extra_input, lambdas[0], lambdas[1], z], -1)
 
                 lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2, extra_input=extra_input)
+
+                # If haven't applied action yet and still seeding then also do physics on seed images
+                if apply_action:
+                   lambdas1, _ = self.physics_net(lambdas1, lambdas2)
+
             else:
                 z = self.rsample_softplus(lambdas)
-                x_hat, x_var_hat, m_hat_logit = self.decode(
-                    z)  # x_hat is (bs*K, 3, imsize, imsize) # TODO clamp x_hat between 0 and 1
+                x_hat, x_var_hat, m_hat_logit = self.decode(z)
                 # x_hat = torch.clamp(x_hat, 0, 1) # doing this clamping causes the alternating mask issue
                 m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
                 mask = F.softmax(m_hat_logit, dim=1)  # (bs, K, imsize, simze)
@@ -408,24 +397,21 @@ class IodineVAE(GaussianLatentVAE):
                 kle = self.kl_divergence_softplus(lambdas)
                 kle_loss = self.beta * kle.sum() / bs
                 loss = log_likelihood + kle_loss
-                losses.append(loss)
+                losses.append(loss/t)
 
                 current_step += 1
-                if first_action:
+                current_step = min(input.shape[1]-1, current_step)
+                if apply_action:
                     action_enc = self.action_encoder(actionsK)
                     lambdas1 = self.action_lambda_encoder(torch.cat([lambdas1, action_enc], -1))
-                    first_action = False
+                    apply_action = False
                 lambdas1, _ = self.physics_net(lambdas1, lambdas2)
 
-                # concatenate actions
-                #lambdas1 = torch.cat([lambdas1, actionsK], -1)
 
-
-            # import pdb; pdb.set_trace()
             lambdas[0] = lambdas1
             lambdas[1] = lambdas2
 
-        total_loss = sum(losses)
+        total_loss = sum(losses*T)
 
         final_recon = (mask.unsqueeze(2) * x_hat.view(untiled_k_shape)).sum(1)
         mse = torch.pow(final_recon - input[:, current_step], 2).mean()
