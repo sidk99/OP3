@@ -49,7 +49,7 @@ class IodineTrainer(Serializable):
         self.test_seedsteps = test_seedsteps
 
         self.lr = lr
-        params = list(self.model.parameters()) + self.model.lambdas
+        params = list(self.model.parameters())
         self.optimizer = optim.Adam(params, lr=self.lr)
         self.train_dataset, self.test_dataset = train_dataset, test_dataset
         assert self.train_dataset.dtype == np.uint8
@@ -133,7 +133,7 @@ class IodineTrainer(Serializable):
             #import pdb; pdb.set_trace()
             x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions=actions, schedule=schedule)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()] + self.model.lambdas, 5.0)
+            torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()], 5.0)
             #torch.nn.utils.clip_grad_norm_(self.model.lambdas, 5.0)  # TODO Clip other gradients?
             self.optimizer.step()
 

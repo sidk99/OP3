@@ -37,8 +37,10 @@ class PhysicsNetwork(PyTorchModule):
         self.attention_network = Mlp((128,), 1, enc_size, hidden_activation=nn.ELU(),
                                      output_activation=nn.Sigmoid())
         self.encoder_network = Mlp((128,), representation_size, enc_size, hidden_activation=nn.ELU())
+        self.encoder2_network = Mlp((128,), representation_size, representation_size,
+                                    hidden_activation=nn.ELU())
 
-    def forward(self, input):
+    def forward(self, input, lambdas2):
         # input is (bs*K, representation_size)
         K = self.K
         rep_size = self.rep_size
@@ -65,7 +67,9 @@ class PhysicsNetwork(PyTorchModule):
 
         new_lambdas = self.encoder_network(total_effect)
 
-        return new_lambdas
+        lambdas2 = self.encoder2_network(lambdas2)
+
+        return new_lambdas, lambdas2
 
     def initialize_hidden(self, bs):
         return (Variable(ptu.from_numpy(np.zeros((1, bs, self.lstm_size)))),

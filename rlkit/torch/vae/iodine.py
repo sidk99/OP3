@@ -88,11 +88,11 @@ imsize64_large_iodine_architecture = dict(
     deconv_args=dict(
         hidden_sizes=[],
 
-        input_width=72,
-        input_height=72,
+        input_width=80,
+        input_height=80,
         input_channels=130,
 
-        kernel_sizes=[3, 3, 3, 3],
+        kernel_sizes=[5, 5, 5, 5],
         n_channels=[64, 64, 64, 64],
         strides=[1, 1, 1, 1],
         paddings=[0, 0, 0, 0]
@@ -106,7 +106,7 @@ imsize64_large_iodine_architecture = dict(
         input_height=64,
         input_channels=17,
         paddings=[0, 0, 0, 0],
-        kernel_sizes=[3, 3, 3, 3],
+        kernel_sizes=[5, 5, 5, 5],
         n_channels=[64, 64, 64, 64],
         strides=[2, 2, 2, 2],
         hidden_sizes=[128, 128],
@@ -204,7 +204,9 @@ class IodineVAE(GaussianLatentVAE):
             hidden_activation=nn.ELU(),
             **deconv_kwargs)
 
-        self.action_lambda_encoder = Mlp((128,), representation_size, representation_size+13,
+        self.action_encoder = Mlp((128,), 128, 13,
+                                     hidden_activation=nn.ELU())
+        self.action_lambda_encoder = Mlp((256, 256), representation_size, representation_size+128,
                                      hidden_activation=nn.ELU())
 
         l_norm_sizes = [7, 1, 1]
@@ -220,8 +222,8 @@ class IodineVAE(GaussianLatentVAE):
         self.decoder_distribution = decoder_distribution
 
         self.apply(ptu.init_weights)
-        self.lambdas = [Parameter(ptu.zeros((1, self.representation_size))),
-                        Parameter(ptu.ones((1, self.representation_size)) * 0.6)] #+ torch.exp(ptu.ones((1, self.representation_size)))))]
+        self.lambdas = nn.ParameterList([Parameter(ptu.zeros((1, self.representation_size))),
+                        Parameter(ptu.ones((1, self.representation_size)) * 0.6)]) #+ torch.exp(ptu.ones((1, self.representation_size)))))]
 
         self.sigma = from_numpy(np.array([sigma]))
 
@@ -279,9 +281,12 @@ class IodineVAE(GaussianLatentVAE):
     def gen_image(self, input, save_dir, action=None, seedsteps=3, T=20):
         input = ptu.from_numpy(np.expand_dims(np.expand_dims(np.swapaxes(np.swapaxes(input, 0, 2), 1, 2), 0), 1).repeat(T, axis=1))
         self.eval()
+
+        schedule = np.ones((T,))
+        schedule[:4] = 0
         if action is not None:
             x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self._forward_dynamic_actions(input, ptu.from_numpy(action).unsqueeze(0),
-                                                                                                 seedsteps=seedsteps)
+                                                                                                 schedule=schedule)
         else:
             x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self._forward_dynamic(input, seedsteps=seedsteps)
 
@@ -323,7 +328,7 @@ class IodineVAE(GaussianLatentVAE):
         actionsK = actions.unsqueeze(1).repeat(1, K, 1)
         action_mask = ptu.zeros(bs, K)
         action_mask[np.arange(0, bs), np.random.randint(0, K, bs)] = 1
-        actionsK *= action_mask.unsqueeze(-1)
+        #actionsK *= action_mask.unsqueeze(-1)
         actionsK = actionsK.view(bs*K, -1)
 
         untiled_k_shape = (bs, K, -1, self.imsize, self.imsize)
@@ -386,11 +391,6 @@ class IodineVAE(GaussianLatentVAE):
 
                 lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2, extra_input=extra_input)
             else:
-                current_step += 1
-                if first_action:
-                    lambdas1 = self.action_lambda_encoder(torch.cat([lambdas1, actionsK], -1))
-                    first_action = False
-                lambdas1 = self.physics_net(lambdas1)
                 z = self.rsample_softplus(lambdas)
                 x_hat, x_var_hat, m_hat_logit = self.decode(
                     z)  # x_hat is (bs*K, 3, imsize, imsize) # TODO clamp x_hat between 0 and 1
@@ -409,6 +409,14 @@ class IodineVAE(GaussianLatentVAE):
                 kle_loss = self.beta * kle.sum() / bs
                 loss = log_likelihood + kle_loss
                 losses.append(loss)
+
+                current_step += 1
+                if first_action:
+                    action_enc = self.action_encoder(actionsK)
+                    lambdas1 = self.action_lambda_encoder(torch.cat([lambdas1, action_enc], -1))
+                    first_action = False
+                lambdas1, _ = self.physics_net(lambdas1, lambdas2)
+
                 # concatenate actions
                 #lambdas1 = torch.cat([lambdas1, actionsK], -1)
 

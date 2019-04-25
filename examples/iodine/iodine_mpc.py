@@ -229,7 +229,8 @@ def main(variant):
     # test_goals = test_data[:, -1]
 
     #model_file = '/home/jcoreyes/objects/rlkit/output/04-15-iodine-blocks-physics-noseed/04-15-iodine-blocks-physics_noseed_2019_04_15_12_19_02_0000--s-94700/params.pkl'
-    model_file = '/home/jcoreyes/objects/rlkit/output/04-20-iodine-blocks-physics-actions/04-20-iodine-blocks-physics-actions_2019_04_20_08_42_16_0000--s-17038/params.pkl'
+    #model_file = '/home/jcoreyes/objects/rlkit/output/04-20-iodine-blocks-physics-actions/04-20-iodine-blocks-physics-actions_2019_04_20_08_42_16_0000--s-17038/params.pkl'
+    model_file = '/home/jcoreyes/objects/rlkit/output/04-23-iodine-blocks-physics-actions-compare-3v5-conv/04-23-iodine-blocks-physics-actions_compare_3v5_conv_2019_04_23_13_13_54_0000--s-6892/params.pkl'
     #model_file = '/home/jcoreyes/objects/rlkit/output/04-09-iodine-blocks-physics/04-09-iodine-blocks-physics_2019_04_09_21_12_02_0000--s-9028/params.pkl'
     model = pickle.load(open(model_file, 'rb'))
     model.cuda()
