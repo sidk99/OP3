@@ -1,6 +1,6 @@
 import sys
 import os
-import utils
+from rlkit.envs.blocks.mujoco import utils as utils
 
 class XML:
 

@@ -47,7 +47,6 @@ from rlkit.envs.blocks.mujoco.XML import XML
 
 class BlockEnv():
     def __init__(self, max_num_objects_dropped):
-        print(os.path.dirname(os.path.dirname(__file__)))
         self.asset_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data/stl/')
         self.img_dim = 64
         self.polygons = ['cube', 'horizontal_rectangle', 'tetrahedron']
@@ -89,6 +88,8 @@ class BlockEnv():
         self.xml_actions_taken = []
         self.names = []
         self.env_step = 0
+
+        return self.get_observation()
 
 
     def get_observation(self):
@@ -164,6 +165,8 @@ class BlockEnv():
         ##Update state information
         self.xml_actions_taken.append(xml_action)
         # self.names.append(new_name)
+
+        return self.get_observation()
 
 
     #############Internal functions#########

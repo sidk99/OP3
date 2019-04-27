@@ -301,6 +301,23 @@ class IodineVAE(GaussianLatentVAE):
         save_dir = osp.join(save_dir)
         save_image(comparison.data.cpu(), save_dir, nrow=T)
 
+    def refine(self, input, hidden_state):
+        K = self.K
+        bs = input.shape[0]
+        input = input.repeat(2, 1, 1, 1).unsqueeze(1)
+        x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(input, None,
+                                                                                                      schedule=np.zeros((5)))
+
+        return final_recon, lambdas[0][:K]
+
+    def step(self, input, actions):
+        K = self.K
+        bs = input.shape[0]
+        input = input.unsqueeze(1)
+        x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(input, actions,
+                                                                                                      schedule=np.zeros((5)))
+        return final_recon, lambdas[0].view(bs, K, -1)
+
     def _forward_dynamic_actions(self, input, actions, schedule):
         # input is (bs, T, ch, imsize, imsize)
         # schedule is (T,): 0 for refinement and 1 for physics
@@ -319,11 +336,12 @@ class IodineVAE(GaussianLatentVAE):
         masks = []
 
         # choose random latent to contain action by zeroing out others
-        actionsK = actions.unsqueeze(1).repeat(1, K, 1)
-        action_mask = ptu.zeros(bs, K)
-        action_mask[np.arange(0, bs), np.random.randint(0, K, bs)] = 1
-        #actionsK *= action_mask.unsqueeze(-1)
-        actionsK = actionsK.view(bs*K, -1)
+        if actions is not None:
+            actionsK = actions.unsqueeze(1).repeat(1, K, 1)
+            action_mask = ptu.zeros(bs, K)
+            action_mask[np.arange(0, bs), np.random.randint(0, K, bs)] = 1
+            #actionsK *= action_mask.unsqueeze(-1)
+            actionsK = actionsK.view(bs*K, -1)
 
         untiled_k_shape = (bs, K, -1, self.imsize, self.imsize)
         tiled_k_shape = (bs * K, -1, self.imsize, self.imsize)
@@ -416,4 +434,4 @@ class IodineVAE(GaussianLatentVAE):
         final_recon = (mask.unsqueeze(2) * x_hat.view(untiled_k_shape)).sum(1)
         mse = torch.pow(final_recon - input[:, current_step], 2).mean()
 
-        return x_hats, masks, total_loss, kle_loss / self.beta, log_likelihood, mse, final_recon
+        return x_hats, masks, total_loss, kle_loss / self.beta, log_likelihood, mse, final_recon, lambdas
