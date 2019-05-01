@@ -282,10 +282,10 @@ class IodineVAE(GaussianLatentVAE):
         schedule = np.ones((T,))
         schedule[:4] = 0
         if action is not None:
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self._forward_dynamic_actions(input, ptu.from_numpy(action).unsqueeze(0),
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self._forward_dynamic_actions(input, ptu.from_numpy(action).unsqueeze(0),
                                                                                                  schedule=schedule)
         else:
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self._forward_dynamic(input, seedsteps=seedsteps)
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self._forward_dynamic(input, seedsteps=seedsteps)
 
         ground_truth = input
         K = self.K
@@ -306,16 +306,18 @@ class IodineVAE(GaussianLatentVAE):
         bs = input.shape[0]
         input = input.repeat(2, 1, 1, 1).unsqueeze(1)
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(input, None,
-                                                                                                      schedule=np.zeros((5)))
+                                                                                                      schedule=np.zeros((6)))
 
-        return final_recon, lambdas[0][:K]
+        return final_recon[0], lambdas[0][:K]
 
     def step(self, input, actions):
         K = self.K
         bs = input.shape[0]
         input = input.unsqueeze(1)
+        schedule = np.ones((9,))
+        schedule[:4] = 0
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(input, actions,
-                                                                                                      schedule=np.zeros((5)))
+                                                                                                      schedule=schedule)
         return final_recon, lambdas[0].view(bs, K, -1)
 
     def _forward_dynamic_actions(self, input, actions, schedule):

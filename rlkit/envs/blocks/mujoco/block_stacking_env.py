@@ -176,13 +176,19 @@ class BlockEnv():
         #an_action should be of size [15]
         # print(np.where(model_action == 1))
         # print(np.where(model_action == 1)[0], "HI", np.where(model_action == 1)[0][0])
-
+        # ans = {
+        #     "polygon": elf.polygons[np.where(model_action == 1)[0][0]],
+        #     "pos": model_action[3:6],
+        #     "axangle": model_action[6:10],
+        #     "scale": model_action[10],
+        #     "rgba": model_action[11:]
+        # }
         ans = {
-            "polygon": self.polygons[np.where(model_action == 1)[0][0]],
-            "pos": model_action[3:6],
-            "axangle": model_action[6:10],
-            "scale": model_action[10],
-            "rgba": model_action[11:]
+            "polygon": self.polygons[int(model_action[0])],
+            "pos": model_action[1:4],
+            "axangle": model_action[4:8],
+            "scale": model_action[8],
+            "rgba": model_action[9:]
         }
         return ans
 
@@ -206,7 +212,9 @@ class BlockEnv():
 
         for i in range(len(xml_action["rgba"])):
             ans[num_type_polygons +3+4+1 + i] = xml_action["rgba"][i]
-        return ans
+
+        # TODO make into sids 13 for now since model was trained on size 13 version
+        return np.concatenate([np.array([val]), ans[3:]])
 
     def sample_rgba_from_hsv(self, *hsv_bounds):
         hsv = utils.uniform(*hsv_bounds)
