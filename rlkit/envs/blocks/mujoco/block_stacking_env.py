@@ -176,25 +176,25 @@ class BlockEnv():
         #an_action should be of size [15]
         # print(np.where(model_action == 1))
         # print(np.where(model_action == 1)[0], "HI", np.where(model_action == 1)[0][0])
-        # ans = {
-        #     "polygon": elf.polygons[np.where(model_action == 1)[0][0]],
-        #     "pos": model_action[3:6],
-        #     "axangle": model_action[6:10],
-        #     "scale": model_action[10],
-        #     "rgba": model_action[11:]
-        # }
         ans = {
-            "polygon": self.polygons[int(model_action[0])],
-            "pos": model_action[1:4],
-            "axangle": model_action[4:8],
-            "scale": model_action[8],
-            "rgba": model_action[9:]
+            "polygon": self.polygons[np.where(model_action == 1)[0][0]],
+            "pos": model_action[3:6],
+            "axangle": model_action[6:10],
+            "scale": 0.4,
+            "rgba": np.concatenate([model_action[10:], np.array([1])])
         }
+        # ans = {
+        #     "polygon": self.polygons[int(model_action[0])],
+        #     "pos": model_action[1:4],
+        #     "axangle": model_action[4:8],
+        #     "scale": model_action[8],
+        #     "rgba": model_action[9:]
+        # }
         return ans
 
     def xml_action_to_model_action(self, xml_action):
         num_type_polygons = len(self.polygons)
-        total_size_of_array = num_type_polygons+3+4+1+4  #polygon[3], pos[3], axangle[4], scale[1], rgba[4]
+        total_size_of_array = 13 #num_type_polygons+3+4+1+4  #polygon[3], pos[3], axangle[4], scale[1], rgba[4]
         # print(total_size_of_array)
         ans = np.zeros(total_size_of_array)
 
@@ -208,13 +208,13 @@ class BlockEnv():
         for i in range(len(xml_action["axangle"])):
             ans[num_type_polygons + 3 + i] = xml_action["axangle"][i]
 
-        ans[num_type_polygons + 3 + 4] = xml_action["scale"]
+        #ans[num_type_polygons + 3 + 4] = xml_action["scale"]
 
-        for i in range(len(xml_action["rgba"])):
-            ans[num_type_polygons +3+4+1 + i] = xml_action["rgba"][i]
+        for i in range(3):
+            ans[num_type_polygons +3+4+ i] = xml_action["rgba"][i]
 
         # TODO make into sids 13 for now since model was trained on size 13 version
-        return np.concatenate([np.array([val]), ans[3:]])
+        return ans
 
     def sample_rgba_from_hsv(self, *hsv_bounds):
         hsv = utils.uniform(*hsv_bounds)

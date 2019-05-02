@@ -306,7 +306,7 @@ class IodineVAE(GaussianLatentVAE):
         bs = input.shape[0]
         input = input.repeat(2, 1, 1, 1).unsqueeze(1)
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(input, None,
-                                                                                                      schedule=np.zeros((6)))
+                                                                                                      schedule=np.zeros((8)))
 
         return final_recon[0], lambdas[0][:K]
 
@@ -316,6 +316,7 @@ class IodineVAE(GaussianLatentVAE):
         input = input.unsqueeze(1)
         schedule = np.ones((9,))
         schedule[:4] = 0
+
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(input, actions,
                                                                                                       schedule=schedule)
         return final_recon, lambdas[0].view(bs, K, -1)
@@ -344,6 +345,7 @@ class IodineVAE(GaussianLatentVAE):
             action_mask[np.arange(0, bs), np.random.randint(0, K, bs)] = 1
             #actionsK *= action_mask.unsqueeze(-1)
             actionsK = actionsK.view(bs*K, -1)
+
 
         untiled_k_shape = (bs, K, -1, self.imsize, self.imsize)
         tiled_k_shape = (bs * K, -1, self.imsize, self.imsize)
