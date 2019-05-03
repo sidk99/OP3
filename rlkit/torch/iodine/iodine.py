@@ -13,6 +13,7 @@ from rlkit.torch.pytorch_util import from_numpy
 from rlkit.torch.conv_networks import CNN, DCNN
 from rlkit.torch.vae.vae_base import GaussianLatentVAE
 from rlkit.torch.modules import LayerNorm2D
+from rlkit.core import logger
 
 imsize84_iodine_architecture = dict(
     deconv_args=dict(
@@ -261,65 +262,59 @@ class IodineVAE(GaussianLatentVAE):
         return (ptu.from_numpy(np.zeros((bs, self.lstm_size))),
                 ptu.from_numpy(np.zeros((bs, self.lstm_size))))
 
-    def predict(self, input, seedsteps, bs=4):
+    def plot_latents(self, ground_truth, masks, x_hats, mse, idx):
 
-        self.eval()
-        final_recons = []
-        n_batches = input.shape[0] // bs
 
-        for i in range(n_batches):
-            start_idx = i*bs
-            end_idx = start_idx + bs
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self._forward_dynamic(input[start_idx:end_idx], seedsteps)
-            final_recons.append(final_recon.data)
-
-        return torch.cat(final_recons)
-
-    def gen_image(self, input, save_dir, action=None, seedsteps=3, T=20):
-        input = ptu.from_numpy(np.expand_dims(np.expand_dims(np.swapaxes(np.swapaxes(input, 0, 2), 1, 2), 0), 1).repeat(T, axis=1))
-        self.eval()
-
-        schedule = np.ones((T,))
-        schedule[:4] = 0
-        if action is not None:
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self._forward_dynamic_actions(input, ptu.from_numpy(action).unsqueeze(0),
-                                                                                                 schedule=schedule)
-        else:
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self._forward_dynamic(input, seedsteps=seedsteps)
-
-        ground_truth = input
         K = self.K
-        imsize = ground_truth.shape[-1]
-
-        m = torch.stack([m[0] for m in masks]).permute(1, 0, 2, 3).unsqueeze(2).repeat(1, 1, 3, 1,
+        imsize = self.imsize
+        T = len(masks)
+        m = torch.stack([m[idx] for m in masks]).permute(1, 0, 2, 3).unsqueeze(2).repeat(1, 1, 3, 1,
                                                                                        1)  # K, T, 3, imsize, imsize
-        x = torch.stack(x_hats)[:, :K].permute(1, 0, 2, 3, 4)
+        x = torch.stack(x_hats)[:, K*idx:K*idx+K].permute(1, 0, 2, 3, 4)
         rec = (m * x)
         full_rec = rec.sum(0, keepdim=True)
+
         comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize)
 
-        save_dir = osp.join(save_dir)
-        save_image(comparison.data.cpu(), save_dir, nrow=T)
+        save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' %mse, nrow=T)
 
-    def refine(self, input, hidden_state):
+
+
+    def refine(self, input, hidden_state, plot_latents=False):
         K = self.K
-        bs = input.shape[0]
-        input = input.repeat(2, 1, 1, 1).unsqueeze(1)
-        x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(input, None,
-                                                                                                      schedule=np.zeros((8)))
+        bs = 8
+        input = input.repeat(bs, 1, 1, 1).unsqueeze(1)
+        imsize = self.imsize
 
-        return final_recon[0], lambdas[0][:K]
+        x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(input, None,
+                                                                                                  schedule=np.zeros((8)))
+
+        recon = x_hats[-1].view(bs, K, 3, imsize, imsize) * masks[-1].unsqueeze(2)
+        recon = torch.clamp(recon, 0, 1)
+        mse = torch.pow(final_recon - input.squeeze(), 2).mean(3).mean(2).mean(1)
+        best_idx = torch.argmin(mse)
+        if plot_latents:
+            for i in range(8):
+                self.plot_latents(input[0].unsqueeze(0).repeat(1, len(masks), 1, 1, 1), masks, x_hats, mse[i], i)
+        best_lambda = lambdas[0].view(-1, K, self.representation_size)[best_idx]
+
+        return final_recon[best_idx].data, best_lambda.data, recon[best_idx].data, masks[-1][best_idx].data
 
     def step(self, input, actions):
         K = self.K
         bs = input.shape[0]
+        imsize = self.imsize
         input = input.unsqueeze(1)
-        schedule = np.ones((9,))
+        schedule = np.ones((10,))
         schedule[:4] = 0
 
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(input, actions,
                                                                                                       schedule=schedule)
-        return final_recon, lambdas[0].view(bs, K, -1)
+
+        recon = x_hats[-1].view(bs, K, 3, imsize, imsize) * masks[-1].unsqueeze(2)
+        recon = torch.clamp(recon, 0, 1)
+
+        return final_recon.data, lambdas[0].view(bs, K, -1).data, recon.data
 
     def _forward_dynamic_actions(self, input, actions, schedule):
         # input is (bs, T, ch, imsize, imsize)
