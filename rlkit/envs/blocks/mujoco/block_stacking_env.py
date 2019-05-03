@@ -110,6 +110,7 @@ class BlockEnv():
         else:
             axis = [0, 0, 1]
         axangle = utils.random_axangle(axis=axis)
+        axangle[-1] = 0
         scale = utils.uniform(*self.settle_bounds['scale'])
         rgba = self.sample_rgba_from_hsv(*self.settle_bounds['hsv'])
         xml_action = {
@@ -183,6 +184,7 @@ class BlockEnv():
             "scale": 0.4,
             "rgba": np.concatenate([model_action[10:], np.array([1])])
         }
+
         # ans = {
         #     "polygon": self.polygons[int(model_action[0])],
         #     "pos": model_action[1:4],
@@ -214,6 +216,7 @@ class BlockEnv():
             ans[num_type_polygons +3+4+ i] = xml_action["rgba"][i]
 
         # TODO make into sids 13 for now since model was trained on size 13 version
+
         return ans
 
     def sample_rgba_from_hsv(self, *hsv_bounds):
