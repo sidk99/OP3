@@ -15,11 +15,16 @@ class Cost:
 
     def __init__(self, type):
         self.type = type
+        self.remove_goal_latents = True
 
     def best_action(self, mpc_step, goal_latents, goal_latents_recon, goal_image, pred_latents,
              pred_latents_recon, pred_image, actions):
         if self.type == 'min_min_latent':
             return self.min_min_latent(goal_latents, goal_image, pred_latents, pred_latents_recon, actions)
+        if self.type == 'sum_goal_min_latent':
+            self.remove_goal_latents = False
+            return self.sum_goal_min_latent(goal_latents, goal_image, pred_latents, pred_image, actions)
+
         elif self.type == 'goal_pixel':
             return self.goal_pixel(goal_latents, goal_image, pred_latents, pred_image, actions)
         elif self.type == 'latent_pixel':
@@ -53,6 +58,24 @@ class Cost:
                 best_cost = min_cost
                 best_latent_idx = latent_idx[action_idx]
 
+        best_pred_obs = ptu.get_numpy(pred_image[best_action_idx])
+
+        return best_pred_obs, actions[best_action_idx], best_goal_idx
+
+    def sum_goal_min_latent(self, goal_latents, goal_image, pred_latents, pred_image, actions):
+        # obs_latents is (n_actions, K, rep_size)
+        # pred_obs is (n_actions, 3, imsize, imsize)
+        best_goal_idx = 0 # here this is meaningless
+
+        # Compare against each goal latent
+        costs = []
+        for i in range(goal_latents.shape[0]):
+
+            cost = self.mse(goal_latents[i].view(1, 1, -1), pred_latents) # cost is (n_actions, K)
+            cost, latent_idx = cost.min(-1)  # take min among K
+            costs.append(cost)
+
+        _, best_action_idx = torch.stack(costs).sum(0).min(0)
         best_pred_obs = ptu.get_numpy(pred_image[best_action_idx])
 
         return best_pred_obs, actions[best_action_idx], best_goal_idx
@@ -132,16 +155,19 @@ class MPC:
         self.cost = Cost(self.cost_type)
         self.true_actions = true_actions
 
-    def filter_goal_latents(self, goal_latents, goal_latents_mask, goal_latents_recon):
+    def filter_goal_latents(self, goal_latents, goal_latents_mask, goal_latents_recon,
+                            n_goals=4):
         vals, keep = torch.sort(goal_latents_mask.mean(2).mean(1), descending=True)
-        goal_latents_recon[keep[4]] += goal_latents_recon[keep[5]]
-        keep = keep[1:5]
+        goal_latents_recon[keep[n_goals]] += goal_latents_recon[keep[n_goals+1]]
+        keep = keep[1:1+n_goals]
         goal_latents = torch.stack([goal_latents[i] for i in keep])
         goal_latents_recon = torch.stack([goal_latents_recon[i] for i in keep])
         save_image(goal_latents_recon, logger.get_snapshot_dir() + '/mpc_goal_latents_recon.png')
 
         return goal_latents
 
+    def remove_idx(self, array, idx):
+        return torch.stack([array[i] for i in set(range(array.shape[0])) - set([idx])])
 
     def run(self, goal_image):
         goal_image_tensor = ptu.from_numpy(np.moveaxis(goal_image, 2, 0)).unsqueeze(0).float() / 255. # (1, 3, imsize, imsize)
@@ -168,8 +194,9 @@ class MPC:
             if goal_latents.shape[0] == 1:
                 break
             # remove matching goal latent from goal latents
-            goal_latents = torch.stack([goal_latents[i] for i in set(range(goal_latents.shape[0])) - set([goal_idx])])
-            goal_latents_recon = torch.stack([goal_latents_recon[i] for i in set(range(goal_latents_recon.shape[0])) - set([goal_idx])])
+            if self.cost.remove_goal_latents:
+                goal_latents = self.remove_idx(goal_latents, goal_idx)
+                goal_latents_recon = self.remove_idx(goal_latents_recon, goal_idx)
 
         save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst)),
                     logger.get_snapshot_dir() + '/mpc.png', nrow=len(obs_lst))
@@ -230,7 +257,8 @@ def main(variant):
 
         ])
     env = BlockEnv(5)
-    mpc = MPC(model, env, n_actions=7, mpc_steps=4, true_actions=true_actions)
+    mpc = MPC(model, env, n_actions=7, mpc_steps=4, true_actions=true_actions,
+              cost_type=variant['cost_type'])
 
 
     goal_image = imageio.imread(goal_file)
@@ -247,6 +275,7 @@ if __name__ == "__main__":
         algorithm='MPC',
         modelfile=args.modelfile,
         goalfile=args.goalfile,
+        cost_type='sum_goal_min_latent'
     )
 
 
