@@ -10,7 +10,7 @@ from torch import nn
 # from rlkit.torch.conv_networks import CNN, DCNN
 # from rlkit.torch.vae.vae_base import GaussianLatentVAE
 
-import pytorch_utils as ptu
+import rlkit.torch.rnem.pytorch_utils as ptu
 
 
 ######
@@ -178,7 +178,8 @@ class RNEM_MPC(nn.Module):
 #
 
 if __name__ == "__main__":
-    filepath = "../../../../sharedGit/Relational-NEM/experiments/4BlocksActions_s1000s5t0.1n0.00k5_5-2-23_FFTFT/model.pkl"
+    filepath = "saved_models/model.pkl"
+    # filepath = "../../../../sharedGit/Relational-NEM/experiments/4BlocksActions_s1000s5t0.1n0.00k5_5-2-23_FFTFT/model.pkl"
     model = torch.load(open(filepath, 'rb'), map_location='cpu')
     model.eval()
 

@@ -10,6 +10,8 @@ from rlkit.core import logger
 from torchvision.utils import save_image
 from rlkit.util.plot import plot_multi_image
 
+from rlkit.torch.rnem.rnem_mpc import RNEM_MPC
+
 class MPC:
 
     def __init__(self, model, env, n_actions, mpc_steps):
@@ -197,14 +199,18 @@ class MPC:
 
 
 def main(variant):
-
     #model_file = variant['model_file']
     #goal_file = variant['goal_file']
 
-    model_file = '/home/jcoreyes/objects/rlkit/output/04-25-iodine-blocks-physics-actions/04-25-iodine-blocks-physics-actions_2019_04_25_11_36_24_0000--s-98913/params.pkl'
-    goal_file = '/home/jcoreyes/objects/object-oriented-prediction/o2p2/planning/executed/mjc_4.png'
+    # model_file = 'saved_models/rnem_model.pkl'
+    model_file = 'saved_models/iodine_params2.pkl'
+    goal_file = 'goal_images/mjc_4.png'
+    # model_file = '/home/jcoreyes/objects/rlkit/output/04-25-iodine-blocks-physics-actions/04-25-iodine-blocks-physics-actions_2019_04_25_11_36_24_0000--s-98913/params.pkl'
+    # goal_file = '/home/jcoreyes/objects/object-oriented-prediction/o2p2/planning/executed/mjc_4.png'
 
-    model = pickle.load(open(model_file, 'rb'))
+    # model = pickle.load(open(model_file, 'rb'))
+    model = torch.load(open(model_file, 'rb'), map_location='cpu')
+    # model = RNEM_MPC(model, 7)
     #model.cuda()
 
     env = BlockEnv(5)
@@ -233,7 +239,7 @@ if __name__ == "__main__":
         exp_prefix='mpc',
         mode='here_no_doodad',
         variant=variant,
-        use_gpu=True,  # Turn on if you have a GPU
+        use_gpu=False,  # Turn on if you have a GPU
     )
 
 
