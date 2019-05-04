@@ -230,7 +230,8 @@ class MPC:
             start_idx = i * bs
             end_idx = min(start_idx + bs, obs.shape[0])
 
-            pred_obs, obs_latents, obs_latents_recon = self.model.step(obs[start_idx:end_idx], actions[start_idx:end_idx])
+            pred_obs, obs_latents, obs_latents_recon = self.model.step(obs[start_idx:end_idx], actions[start_idx:end_idx],
+                                                                       plot_latents=True)
             outputs[0].append(pred_obs)
             outputs[1].append(obs_latents)
             outputs[2].append(obs_latents_recon)
@@ -265,8 +266,7 @@ def main(variant):
     #goal_file = '/home/jcoreyes/objects/object-oriented-prediction/o2p2/planning/executed/mjc_4.png'
 
 
-    #goal_idxs = [i for i in range(20, 50)]
-    goal_idxs = [26, 27, 28, 29, 30, 33, 51, 52, 55, 58, 59, 61, 62, 63, 65, 71, 81]
+    goal_idxs = [19]
 
 
 
@@ -277,18 +277,19 @@ def main(variant):
     stats = {'mse':0}
     for goal_idx in goal_idxs:
         goal_file = '/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/img_%d.png' %goal_idx
-        true_actions = np.load('/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/actions.npy')[goal_idx]
+        #true_actions = np.load('/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/actions.npy')[goal_idx]
+        found_actions = np.load('/home/jcoreyes/objects/rlkit/output/05-03-mpc/05-03-mpc_2019_05_03_19_56_27_0000--s-15386/optimal_actions.npy')[goal_idx]
         env = BlockEnv(5)
-        mpc = MPC(model, env, n_actions=480, mpc_steps=3, true_actions=None,
+        mpc = MPC(model, env, n_actions=7, mpc_steps=2, true_actions=found_actions,
               cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=3, logger_prefix_dir='/goal_%d' % goal_idx)
         goal_image = imageio.imread(goal_file)
         mse, actions = mpc.run(goal_image)
-        stats['mse'] += mse
-        actions_lst.append(actions)
-        
-    stats['mse'] /= len(goal_idxs)
-    json.dump(stats, open(logger.get_snapshot_dir() + '/stats.json', 'w'))
-    np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
+    #     stats['mse'] += mse
+    #     actions_lst.append(actions)
+    #
+    # stats['mse'] /= len(goal_idxs)
+    # json.dump(stats, open(logger.get_snapshot_dir() + '/stats.json', 'w'))
+    # np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -306,7 +307,7 @@ if __name__ == "__main__":
 
     run_experiment(
         main,
-        exp_prefix='mpc',
+        exp_prefix='mpc_plot',
         mode='here_no_doodad',
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

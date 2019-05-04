@@ -278,7 +278,27 @@ class IodineVAE(GaussianLatentVAE):
 
         save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' %mse, nrow=T)
 
+    def plot_latents_trunc(self, ground_truth, masks, x_hats, mse, idx):
 
+
+        K = self.K
+        imsize = self.imsize
+        T = len(masks)
+        m = torch.stack([m[idx] for m in masks]).permute(1, 0, 2, 3).unsqueeze(2).repeat(1, 1, 3, 1,
+                                                                                       1)  # K, T, 3, imsize, imsize
+        x = torch.stack(x_hats)[:, K*idx:K*idx+K].permute(1, 0, 2, 3, 4)
+        rec = (m * x)
+        full_rec = rec.sum(0, keepdim=True)
+
+        comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize).data
+
+        #import pdb; pdb.set_trace()
+        n_col = 5
+        comparison = comparison.view(-1, T, 3, imsize, imsize)[:, -n_col:]
+        comparison = comparison[1, ]
+        comparison = comparison.contiguous().view(-1, 3, imsize, imsize)
+
+        save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' %mse, nrow=n_col)
 
     def refine(self, input, hidden_state, plot_latents=False):
         K = self.K
@@ -300,7 +320,7 @@ class IodineVAE(GaussianLatentVAE):
 
         return final_recon[best_idx].data, best_lambda.data, recon[best_idx].data, masks[-1][best_idx].data
 
-    def step(self, input, actions):
+    def step(self, input, actions, plot_latents=False):
         K = self.K
         bs = input.shape[0]
         imsize = self.imsize
@@ -313,6 +333,9 @@ class IodineVAE(GaussianLatentVAE):
 
         recon = x_hats[-1].view(bs, K, 3, imsize, imsize) * masks[-1].unsqueeze(2)
         recon = torch.clamp(recon, 0, 1)
+        if plot_latents:
+            i = 0
+            self.plot_latents_trunc(input[0].unsqueeze(0).repeat(1, len(masks), 1, 1, 1), masks, x_hats, 0, i)
 
         return final_recon.data, lambdas[0].view(bs, K, -1).data, recon.data
 
