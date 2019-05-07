@@ -12,6 +12,9 @@ from rlkit.launchers.launcher_util import run_experiment
 from rlkit.core import logger
 import numpy as np
 import h5py
+from rlkit.torch.data_management.dataset import Dataset
+from torch.utils.data.dataset import TensorDataset
+import torch
 
 def load_dataset(data_path, train=True, train_size=20):
     hdf5_file = h5py.File(data_path, 'r')  # RV: Data file
@@ -36,9 +39,12 @@ def load_dataset(data_path, train=True, train_size=20):
 
         t_sample = np.array([0, 2, 4, 6, 8, 10])
         feats = np.moveaxis(feats, -1, 2)[t_sample] # (T, bs, ch, imsize, imsize)
-        feats = np.moveaxis(feats, 0, 1)[:8000] # (bs, T, ch, imsize, imsize)
-        actions = actions.squeeze() # (bs, action_dim)
-        return feats, actions
+        feats = np.moveaxis(feats, 0, 1)[:10] # (bs, T, ch, imsize, imsize)
+        actions = actions.squeeze()[:10] # (bs, action_dim)
+
+        torch_dataset = TensorDataset(torch.Tensor(feats), torch.Tensor(actions))
+        dataset = Dataset(torch_dataset)
+        return dataset
 
 
 def train_vae(variant):
@@ -51,8 +57,8 @@ def train_vae(variant):
     train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10kActions.h5'
     test_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10kActions.h5'
 
-    train_feats, train_actions = load_dataset(train_path, train=True)
-    test_feats, test_actions = load_dataset(test_path, train=False)
+    train_dataset = load_dataset(train_path, train=True)
+    test_dataset = load_dataset(test_path, train=False)
 
     K = variant['vae_kwargs']['K']
     rep_size = variant['vae_kwargs']['representation_size']
@@ -64,7 +70,7 @@ def train_vae(variant):
     refinement_net = RefinementNetwork(**iodine.imsize64_large_iodine_architecture['refine_args'],
                                        hidden_activation=nn.ELU())
 
-    physics_net = PhysicsNetwork(K, rep_size, train_actions.shape[-1])
+    physics_net = PhysicsNetwork(K, rep_size, 13)
     m = IodineVAE(
         **variant['vae_kwargs'],
         refinement_net=refinement_net,
@@ -74,13 +80,12 @@ def train_vae(variant):
 
     m.to(ptu.device)
 
-    t = IodineTrainer(train_feats, test_feats, m, variant['train_seedsteps'], variant['test_seedsteps'],
-                      train_actions=train_actions, test_actions=test_actions,
+    t = IodineTrainer(train_dataset, test_dataset, m, variant['train_seedsteps'], variant['test_seedsteps'],
                        **variant['algo_kwargs'])
     save_period = variant['save_period']
     for epoch in range(variant['num_epochs']):
         should_save_imgs = (epoch % save_period == 0)
-        t.train_epoch(epoch, batches=train_feats.shape[0]//variant['algo_kwargs']['batch_size'])
+        t.train_epoch(epoch)
         t.test_epoch(epoch, save_vae=True, train=False, record_stats=True, batches=1,
                      save_reconstruction=should_save_imgs)
         t.test_epoch(epoch, save_vae=False, train=True, record_stats=False, batches=1,

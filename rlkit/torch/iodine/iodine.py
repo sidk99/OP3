@@ -244,19 +244,11 @@ class IodineVAE(GaussianLatentVAE):
     def gaussian_log_prob(self, inputs, targets, sigma):
         return torch.pow(inputs - targets, 2) / (2 * sigma ** 2)
 
-    def cross_entropy_with_logits(self, x, z):
-        # x is logits, z is labels
-        return torch.max(x, 0)[0] - x * z + torch.log(1 + torch.exp(-torch.abs(x)))
-
     def logprob(self, inputs, obs_distribution_params):
         pass
 
     def forward(self, input, actions=None, schedule=None, seedsteps=5):
-        if actions is None:
-            return self._forward_dynamic(input, seedsteps=seedsteps)
         return self._forward_dynamic_actions(input, actions, schedule)
-
-
 
     def initialize_hidden(self, bs):
         return (ptu.from_numpy(np.zeros((bs, self.lstm_size))),

@@ -3,7 +3,6 @@ import numpy as np
 import torch
 from torch import optim
 from torchvision.utils import save_image
-from multiworld.core.image_env import normalize_image
 from rlkit.core import logger
 from rlkit.core.serializable import Serializable
 from rlkit.core.eval_util import create_stats_ordered_dict
@@ -19,17 +18,10 @@ class IodineTrainer(Serializable):
             model,
             train_seedsteps,
             test_seedsteps,
-            train_actions=None,
-            test_actions=None,
             batch_size=128,
             log_interval=0,
             gamma=0.5,
             lr=1e-3,
-            do_scatterplot=False,
-            normalize=False,
-            mse_weight=0.1,
-            is_auto_encoder=False,
-            background_subtract=False,
     ):
         self.quick_init(locals())
         self.log_interval = log_interval
@@ -37,7 +29,6 @@ class IodineTrainer(Serializable):
         self.beta = model.beta
         self.gamma = gamma
         self.imsize = model.imsize
-        self.do_scatterplot = do_scatterplot
 
         model.to(ptu.device)
 
@@ -52,76 +43,26 @@ class IodineTrainer(Serializable):
         params = list(self.model.parameters())
         self.optimizer = optim.Adam(params, lr=self.lr)
         self.train_dataset, self.test_dataset = train_dataset, test_dataset
-        assert self.train_dataset.dtype == np.uint8
-        assert self.test_dataset.dtype == np.uint8
-        self.train_dataset = train_dataset
-        self.test_dataset = test_dataset
-        self.train_actions = train_actions
-        self.test_actions = test_actions
 
         self.batch_size = batch_size
 
-        self.normalize = normalize
-        self.mse_weight = mse_weight
-        self.background_subtract = background_subtract
-
-        if self.normalize or self.background_subtract:
-            self.train_data_mean = np.mean(self.train_dataset, axis=0)
-            self.train_data_mean = normalize_image(
-                np.uint8(self.train_data_mean)
-            )
         self.vae_logger_stats_for_rl = {}
         self._extra_stats_to_log = None
 
-    def get_dataset_stats(self, data):
-        torch_input = ptu.from_numpy(normalize_image(data))
-        mus, log_vars = self.model.encode(torch_input)
-        mus = ptu.get_numpy(mus)
-        mean = np.mean(mus, axis=0)
-        std = np.std(mus, axis=0)
-        return mus, mean, std
-
-    def _kl_np_to_np(self, np_imgs):
-        torch_input = ptu.from_numpy(normalize_image(np_imgs))
-        mu, log_var = self.model.encode(torch_input)
-        return ptu.get_numpy(
-            - torch.sum(1 + log_var - mu.pow(2) - log_var.exp(), dim=1)
-        )
-
-    def _reconstruction_squared_error_np_to_np(self, np_imgs):
-        torch_input = ptu.from_numpy(normalize_image(np_imgs))
-        recons, *_ = self.model(torch_input)
-        error = torch_input - recons
-        return ptu.get_numpy((error ** 2).sum(dim=1))
-
-    def get_batch(self, train=True):
-        dataset = self.train_dataset if train else self.test_dataset
-        actions = self.train_actions if train else self.test_actions
-        ind = np.random.randint(0, len(dataset), self.batch_size)
-        samples = dataset[ind, :]
-
-        action_samples = ptu.from_numpy(actions[ind, :]) if actions is not None else None
+    def prepare_tensors(self, tensors):
+        imgs = tensors[0].to(ptu.device) / 255.
+        if len(tensors) == 2:
+            return imgs, tensors[1].to(ptu.device)
+        else:
+            return imgs, None
 
 
-        return ptu.from_numpy(samples).float() / 255., action_samples
-
-    def get_debug_batch(self, train=True):
-        dataset = self.train_dataset if train else self.test_dataset
-        X, Y = dataset
-        ind = np.random.randint(0, Y.shape[0], self.batch_size)
-        X = X[ind, :]
-        Y = Y[ind, :]
-        return ptu.from_numpy(X), ptu.from_numpy(Y)
-
-    def train_epoch(self, epoch, batches=20, from_rl=False):
+    def train_epoch(self, epoch):
         self.model.train()
-        losses = []
-        log_probs = []
-        kles = []
-        mses = []
+        losses, log_probs, kles, mses = [], [], [], []
 
-        for batch_idx in range(batches):
-            next_obs, actions  = self.get_batch()
+        for batch_idx, tensors in enumerate(self.train_dataset.dataloader):
+            obs, actions = self.prepare_tensors(tensors)
             self.optimizer.zero_grad()
 
             # schedule for doing refinement or physics
@@ -130,11 +71,9 @@ class IodineTrainer(Serializable):
             # when only doing physics predict next image
             schedule = np.random.randint(0, 2, (self.model.T,))
             schedule[:4] = 0
-            #import pdb; pdb.set_trace()
-            x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions=actions, schedule=schedule)
+            x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(obs, actions=actions, schedule=schedule)
             loss.backward()
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()], 5.0)
-            #torch.nn.utils.clip_grad_norm_(self.model.lambdas, 5.0)  # TODO Clip other gradients?
             self.optimizer.step()
 
             losses.append(loss.item())
@@ -145,22 +84,11 @@ class IodineTrainer(Serializable):
             if self.log_interval and batch_idx % self.log_interval == 0:
                 print(x_prob_loss.item(), kle_loss.item())
 
-
-        if from_rl:
-            self.vae_logger_stats_for_rl['Train VAE Epoch'] = epoch
-            self.vae_logger_stats_for_rl['Train VAE Log Prob'] = np.mean(
-                log_probs)
-            self.vae_logger_stats_for_rl['Train VAE KL'] = np.mean(kles)
-            self.vae_logger_stats_for_rl['Train VAE Loss'] = np.mean(losses)
-        else:
-            logger.record_tabular("train/epoch", epoch)
-            logger.record_tabular("train/Log Prob", np.mean(log_probs))
-            logger.record_tabular("train/KL", np.mean(kles))
-            logger.record_tabular("train/loss", np.mean(losses))
-            logger.record_tabular("train/mse", np.mean(mses))
-            #logger.record_tabular('train/mask_loss', np.mean(m_losses))
-
-
+        logger.record_tabular("train/epoch", epoch)
+        logger.record_tabular("train/Log Prob", np.mean(log_probs))
+        logger.record_tabular("train/KL", np.mean(kles))
+        logger.record_tabular("train/loss", np.mean(losses))
+        logger.record_tabular("train/mse", np.mean(mses))
 
 
     def test_epoch(
@@ -168,26 +96,21 @@ class IodineTrainer(Serializable):
             epoch,
             save_reconstruction=True,
             save_vae=True,
-            from_rl=False,
             record_stats=True,
             train=True,
-            batches=1
+            batches=1,
     ):
+        T = 9
+        schedule = np.ones((T,))
+        schedule[:4] = 0
 
         self.model.eval() #TODO Get around needing gradients during eval mode
-        losses = []
-        log_probs = []
-        kles = []
-        mses = []
-        for batch_idx in range(batches):
+        losses, log_probs, kles, mses = [], [], [], []
+        for batch_idx, tensors in enumerate(self.train_dataset.dataloader):
+            obs, actions = self.prepare_tensors(tensors)
             self.optimizer.zero_grad()
-            next_obs, actions = self.get_batch(train=train)
-            T = 9
 
-            schedule = np.ones((T,))
-            schedule[:4] = 0
-            #import pdb; pdb.set_trace()
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon = self.model(next_obs, actions=actions, schedule=schedule)
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(obs, actions=actions, schedule=schedule)
 
             losses.append(loss.item())
             log_probs.append(x_prob_loss.item())
@@ -197,7 +120,7 @@ class IodineTrainer(Serializable):
 
             if batch_idx == 0 and save_reconstruction:
                 t_sample = np.cumsum(schedule)
-                ground_truth = next_obs[0][t_sample].unsqueeze(0)
+                ground_truth = obs[0][t_sample].unsqueeze(0)
                 K = self.model.K
                 imsize = ground_truth.shape[-1]
 
@@ -212,26 +135,14 @@ class IodineTrainer(Serializable):
                                     '%s_r%d.png' % ('train' if train else 'val', epoch))
                 save_image(comparison.data.cpu(), save_dir, nrow=T)
 
-
-
-        if from_rl:
-            self.vae_logger_stats_for_rl['Test VAE Epoch'] = epoch
-            self.vae_logger_stats_for_rl['Test VAE Log Prob'] = np.mean(
-                log_probs)
-            self.vae_logger_stats_for_rl['Test VAE KL'] = np.mean(kles)
-            self.vae_logger_stats_for_rl['Test VAE loss'] = np.mean(losses)
-            self.vae_logger_stats_for_rl['VAE Beta'] = self.beta
-        else:
-            #for key, value in self.debug_statistics().items():
-            #    logger.record_tabular(key, value)
-            if record_stats:
-                logger.record_tabular("test/Log Prob", np.mean(log_probs))
-                logger.record_tabular("test/KL", np.mean(kles))
-                logger.record_tabular("test/loss", np.mean(losses))
-                logger.record_tabular("test/mse", np.mean(mses))
-                logger.dump_tabular()
-            if save_vae:
-                logger.save_itr_params(epoch, self.model)  # slow...
+        if record_stats:
+            logger.record_tabular("test/Log Prob", np.mean(log_probs))
+            logger.record_tabular("test/KL", np.mean(kles))
+            logger.record_tabular("test/loss", np.mean(losses))
+            logger.record_tabular("test/mse", np.mean(mses))
+            logger.dump_tabular()
+        if save_vae:
+            logger.save_itr_params(epoch, self.model)  # slow...
 
     def debug_statistics(self):
         """
