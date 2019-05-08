@@ -124,6 +124,40 @@ class BlockEnv():
 
         return self.xml_action_to_model_action(xml_action)
 
+    def sample_action_gaussian(self, mean, std):
+        ply = random.choice(self.polygons)
+
+        random_a = np.random.normal(mean, std)
+
+        #ply = np.random.choice(self.polygons, p=mean[:3] / mean[:3].sum())
+
+        pos = np.clip(random_a[3:6], [x[0] for x in self.settle_bounds['pos']],
+                      [x[1] for x in self.settle_bounds['pos']])
+
+
+
+        if 'horizontal' in ply:
+            axis = [1, 0, 0]
+        else:
+            axis = [0, 0, 1]
+        axangle = utils.random_axangle(axis=axis)
+        axangle[-1] = 0
+        scale = utils.uniform(*self.settle_bounds['scale'])
+        #rgba = self.sample_rgba_from_hsv(*self.settle_bounds['hsv'])
+
+        rgba = np.clip(random_a[-3:], [x[0] for x in self.settle_bounds['hsv']],
+                      [x[1] for x in self.settle_bounds['hsv']])
+        xml_action = {
+            'polygon': ply,
+            'pos': pos,
+            'axangle': axangle,
+            'scale': scale,
+            'rgba': rgba
+        }
+        # print(xml_action)
+
+        return self.xml_action_to_model_action(xml_action)
+
     def get_obs_size(self):
         return (self.img_dim, self.img_dim)
 

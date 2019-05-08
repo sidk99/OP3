@@ -1,6 +1,7 @@
 import rlkit.torch.pytorch_util as ptu
 from rlkit.launchers.launcher_util import run_experiment
 import numpy as np
+from torch.distributions import Normal
 import pickle
 import torch
 from argparse import ArgumentParser
@@ -143,7 +144,9 @@ class Cost:
         plot_multi_image(ptu.get_numpy(full_plot),
                          logger.get_snapshot_dir() + '%s/mpc_pred_%d.png' %(self.logger_prefix_dir, mpc_step), caption=caption)
 
-        return best_pred_obs, actions[best_action_idx], best_goal_idx
+        best_action_idxs = costs.min(0)[0].sort()[1]
+
+        return best_pred_obs, actions[best_action_idxs], best_goal_idx
 
 class MPC:
 
@@ -153,6 +156,8 @@ class MPC:
                  filter_goals=False,
                  true_actions=None,
                  logger_prefix_dir=None,
+                 mpc_style="random_shooting", #options are random_shooting, cem
+                 cem_steps=2,
                  ):
         self.model = model
         self.env = env
@@ -163,6 +168,8 @@ class MPC:
         self.cost = Cost(self.cost_type, logger_prefix_dir)
         self.true_actions = true_actions
         self.n_goal_objs = n_goal_objs
+        self.mpc_style = mpc_style
+        self.cem_steps = cem_steps
         if logger_prefix_dir is not None:
             os.mkdir(logger.get_snapshot_dir() + logger_prefix_dir)
         self.logger_prefix_dir = logger_prefix_dir
@@ -238,9 +245,38 @@ class MPC:
         return torch.cat(outputs[0]), torch.cat(outputs[1]), torch.cat(outputs[2])
 
     def step_mpc(self, obs, goal_latents, goal_image, mpc_step, goal_latents_recon):
+        if self.mpc_style == 'random_shooting':
+            best_pred_obs, best_actions, best_goal_idx = self._random_shooting_step(obs, goal_latents, goal_image,
+                                                                                    mpc_step, goal_latents_recon)
+            return best_pred_obs, best_actions[0], best_goal_idx
+        elif self.mpc_style == 'cem':
+            return self._cem_step(obs, goal_latents, goal_image, mpc_step, goal_latents_recon)
+
+    def _cem_step(self, obs, goal_latents, goal_image, mpc_step, goal_latents_recon):
+
+        actions = None
+        filter_idx = int(self.n_actions * 0.1)
+        for i in range(self.cem_steps):
+            best_pred_obs, best_actions, best_goal_idx = self._random_shooting_step(obs, goal_latents, goal_image,
+                                                                                    mpc_step, goal_latents_recon,
+                                                                                    actions=actions)
+            best_actions = best_actions[:filter_idx]
+            mean = best_actions.mean(0)
+            std = best_actions.std(0)
+            actions = np.stack([self.env.sample_action_gaussian(mean, std) for _ in range(self.n_actions)])
+
+
+        return best_pred_obs, best_actions[0], best_goal_idx
+
+
+
+    def _random_shooting_step(self, obs, goal_latents, goal_image, mpc_step, goal_latents_recon,
+                              actions=None):
+
         # obs is (imsize, imsize, 3)
         # goal latents is (<K, rep_size)
-        actions = np.stack([self.env.sample_action() for _ in range(self.n_actions)])
+        if actions is None:
+            actions = np.stack([self.env.sample_action() for _ in range(self.n_actions)])
 
         # polygox_idx, pos, axangle, rgb
         if self.true_actions is not None:
@@ -250,10 +286,10 @@ class MPC:
         pred_obs, obs_latents, obs_latents_recon = self.model_step_batched(obs_rep,
                                                    ptu.from_numpy(actions))
 
-        best_pred_obs, best_action, best_goal_idx = self.cost.best_action(mpc_step, goal_latents, goal_latents_recon, goal_image,
+        best_pred_obs, best_actions, best_goal_idx = self.cost.best_action(mpc_step, goal_latents, goal_latents_recon, goal_image,
                                                                     obs_latents, obs_latents_recon, pred_obs, actions)
 
-        return best_pred_obs, best_action, best_goal_idx
+        return best_pred_obs, best_actions, best_goal_idx
 
 
 def main(variant):
@@ -279,8 +315,9 @@ def main(variant):
         goal_file = '/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/img_%d.png' %goal_idx
         true_actions = np.load('/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/actions.npy')[goal_idx]
         env = BlockEnv(5)
-        mpc = MPC(model, env, n_actions=480, mpc_steps=3, true_actions=None,
-              cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=3, logger_prefix_dir='/goal_%d' % goal_idx)
+        mpc = MPC(model, env, n_actions=960, mpc_steps=3, true_actions=None,
+              cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=3, logger_prefix_dir='/goal_%d' % goal_idx,
+                  mpc_style=variant['mpc_style'], cem_steps=5)
         goal_image = imageio.imread(goal_file)
         mse, actions = mpc.run(goal_image)
         stats['mse'] += mse
@@ -300,7 +337,8 @@ if __name__ == "__main__":
         algorithm='MPC',
         modelfile=args.modelfile,
         goalfile=args.goalfile,
-        cost_type='latent_pixel' # 'sum_goal_min_latent'
+        cost_type='latent_pixel', # 'sum_goal_min_latent'
+        mpc_style='cem',
     )
 
 
