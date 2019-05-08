@@ -13,6 +13,9 @@ from rlkit.util.plot import plot_multi_image
 import json
 import os
 
+from rlkit.torch.rnem.rnem_mpc import RNEM_MPC
+
+
 class Cost:
 
     def __init__(self, type, logger_prefix_dir):
@@ -293,13 +296,30 @@ class MPC:
 
 
 def main(variant):
-
     #model_file = variant['model_file']
     #goal_file = variant['goal_file']
 
+<<<<<<< HEAD
     model_file = '/home/jcoreyes/objects/rlkit/output/04-25-iodine-blocks-physics-actions/04-25-iodine-blocks-physics-actions_2019_04_25_11_36_24_0000--s-98913/params.pkl'
     #goal_file = '/home/jcoreyes/objects/object-oriented-prediction/o2p2/planning/executed/mjc_4.png'
 
+=======
+    # model_file = 'saved_models/rnem_model.pkl'
+    model_file = 'saved_models/iodine_params2.pkl'
+    goal_file = 'goal_images/mjc_4.png'
+    # model_file = '/home/jcoreyes/objects/rlkit/output/04-25-iodine-blocks-physics-actions/04-25-iodine-blocks-physics-actions_2019_04_25_11_36_24_0000--s-98913/params.pkl'
+    # goal_file = '/home/jcoreyes/objects/object-oriented-prediction/o2p2/planning/executed/mjc_4.png'
+
+    # model = pickle.load(open(model_file, 'rb'))
+    model = torch.load(open(model_file, 'rb'), map_location='cpu')
+    # model = RNEM_MPC(model, 7)
+    #model.cuda()
+    true_actions = np.array([
+            [1, 0, 0, -.6, 0, 0, 0, 0, 1, 0, .75, .75, 0.5],
+            [1, 0, 0, -.6, 0, 1, 0, 0, 1, 0, .25, .75, 1.0],
+            [1, 0, 0, .6, 0,  0, 0, 0, 1, 0, 0.5, .5, 1],
+            [1, 0, 0, .6, 0,  1, 0, 0, 1, 0, 0., .75, 0.75],
+>>>>>>> origin/rishi-dev
 
     #goal_idxs = [i for i in range(20, 50)]
     goal_idxs = [26, 27, 28, 29, 30, 33, 51, 52, 55, 58, 59, 61, 62, 63, 65, 71, 81]
@@ -347,7 +367,7 @@ if __name__ == "__main__":
         exp_prefix='mpc',
         mode='here_no_doodad',
         variant=variant,
-        use_gpu=True,  # Turn on if you have a GPU
+        use_gpu=False,  # Turn on if you have a GPU
     )
 
 
