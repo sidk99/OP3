@@ -78,9 +78,11 @@ def train_vae(variant):
 
     logger.get_snapshot_dir()
 
-    m = iodine.create_model(variant['model'], train_dataset.action_dim, dataparallel=True)
+    m = iodine.create_model(variant['model'], train_dataset.action_dim, dataparallel=False)
+    if variant['dataparallel']:
+        m = torch.nn.DataParallel(m)
 
-    m.to(ptu.device)
+    #m.to(ptu.device)
 
     t = IodineTrainer(train_dataset, test_dataset, m,
                        **variant['algo_kwargs'])
@@ -104,10 +106,12 @@ if __name__ == "__main__":
             batch_size=8,
             lr=1e-4,
             log_interval=0,
+            train_T=15,
         ),
         num_epochs=10000,
         algorithm='Iodine',
         save_period=1,
+        dataparallel=True,
     )
 
 

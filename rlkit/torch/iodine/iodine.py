@@ -175,35 +175,6 @@ class IodineVAE(GaussianLatentVAE):
     ):
         """
 
-        :param representation_size:
-        :param conv_args:
-        must be a dictionary specifying the following:
-            kernel_sizes
-            n_channels
-            strides
-        :param conv_kwargs:
-        a dictionary specifying the following:
-            hidden_sizes
-            batch_norm
-        :param deconv_args:
-        must be a dictionary specifying the following:
-            hidden_sizes
-            deconv_input_width
-            deconv_input_height
-            deconv_input_channels
-            deconv_output_kernel_size
-            deconv_output_strides
-            deconv_output_channels
-            kernel_sizes
-            n_channels
-            strides
-        :param deconv_kwargs:
-            batch_norm
-        :param encoder_class:
-        :param decoder_class:
-        :param decoder_output_activation:
-        :param decoder_distribution:
-        :param input_channels:
         :param imsize:
         :param init_w:
         :param min_variance:
@@ -245,8 +216,8 @@ class IodineVAE(GaussianLatentVAE):
         self.epoch = 0
 
         self.apply(ptu.init_weights)
-        self.lambdas = nn.ParameterList([Parameter(ptu.zeros((1, self.representation_size))),
-                        Parameter(ptu.ones((1, self.representation_size)) * 0.6)]) #+ torch.exp(ptu.ones((1, self.representation_size)))))]
+        self.lambdas1 = Parameter(ptu.zeros((self.representation_size)))
+        self.lambdas2 = Parameter(ptu.ones((self.representation_size)) * 0.6)
 
         self.sigma = from_numpy(np.array([sigma]))
 
@@ -254,7 +225,7 @@ class IodineVAE(GaussianLatentVAE):
         pass
 
     def decode(self, latents):
-        broadcast_ones = ptu.ones((latents.shape[0], latents.shape[1], self.decoder_imsize, self.decoder_imsize))
+        broadcast_ones = ptu.ones((latents.shape[0], latents.shape[1], self.decoder_imsize, self.decoder_imsize)).to(latents.device)
         decoded = self.decoder(latents, broadcast_ones)
         x_hat = decoded[:, :3]
         m_hat_logits = decoded[:, 3]
@@ -263,6 +234,7 @@ class IodineVAE(GaussianLatentVAE):
     def gaussian_prob(self, inputs, targets, sigma):
         ch = 3
         # (2pi) ^ ch = 248.05
+        sigma = sigma.to(inputs.device)
         return torch.exp((-torch.pow(inputs - targets, 2).sum(1) / (ch * 2 * sigma ** 2))) / (torch.sqrt(sigma**(2 * ch))*248.05)
 
 
@@ -273,11 +245,16 @@ class IodineVAE(GaussianLatentVAE):
         pass
 
     def forward(self, input, actions=None, schedule=None, seedsteps=5):
+
         return self._forward_dynamic_actions(input, actions, schedule)
 
     def initialize_hidden(self, bs):
         return (ptu.from_numpy(np.zeros((bs, self.lstm_size))),
                 ptu.from_numpy(np.zeros((bs, self.lstm_size))))
+
+    def prepare_lambdas(self, bs):
+        lambdas = [l.repeat(bs * self.K, 1) for l in self.lambdas]
+        return lambdas
 
     def plot_latents(self, ground_truth, masks, x_hats, mse, idx):
 
@@ -356,18 +333,26 @@ class IodineVAE(GaussianLatentVAE):
 
         return final_recon.data, lambdas[0].view(bs, K, -1).data, recon.data
 
+
     def _forward_dynamic_actions(self, input, actions, schedule):
         # input is (bs, T, ch, imsize, imsize)
         # schedule is (T,): 0 for refinement and 1 for physics
+
         K = self.K
         bs = input.shape[0]
         T = schedule.shape[0]
 
         # means and log_vars of latent
-        lambdas = [l.repeat(bs * K, 1) for l in self.lambdas]
 
+        #lambdas = [l.repeat(bs * self.K, 1) for l in self.lambdas]
+        #lambdas = [[], []]
+        lambdas1 = self.lambdas1.unsqueeze(0).repeat(bs*K, 1)
+        lambdas2 = self.lambdas2.unsqueeze(0).repeat(bs*K, 1)
         # initialize hidden state
         h1, h2 = self.initialize_hidden(bs*K)
+        h1.to(input.device)
+        h2.to(input.device)
+
         lns = self.layer_norms
         losses = []
         x_hats = []
@@ -391,20 +376,20 @@ class IodineVAE(GaussianLatentVAE):
 
         for t in range(1, T + 1):
             if schedule[t-1] == 0:
-                z = self.rsample_softplus(lambdas)
+                z = self.rsample_softplus([lambdas1, lambdas2])
                 x_hat, x_var_hat, m_hat_logit = self.decode(z)  # x_hat is (bs*K, 3, imsize, imsize)
 
                 # x_hat = torch.clamp(x_hat, 0, 1) # doing this clamping causes the alternating mask issue
                 m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
                 mask = F.softmax(m_hat_logit, dim=1)  # (bs, K, imsize, simze)
-                x_hats.append(x_hat)
-                masks.append(mask)
+                x_hats.append(x_hat.data)
+                masks.append(mask.data)
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
                 pixel_x_prob = self.gaussian_prob(x_hat, inputK, self.sigma).view(bs, K, self.imsize, self.imsize)
                 pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K
                 log_likelihood = -torch.log(pixel_likelihood + 1e-12).sum() / bs
 
-                kle = self.kl_divergence_softplus(lambdas)
+                kle = self.kl_divergence_softplus([lambdas1, lambdas2])
                 kle_loss = self.beta * kle.sum() / bs
                 loss = log_likelihood + kle_loss
                 losses.append(loss/t)
@@ -412,7 +397,7 @@ class IodineVAE(GaussianLatentVAE):
                 # Compute inputs a for refinement network
                 posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-8)  # avoid divide by zero
                 leave_out_ll = pixel_likelihood.unsqueeze(1) - mask * pixel_x_prob
-                x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = torch.autograd.grad(loss, [x_hat, mask] + lambdas,
+                x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = torch.autograd.grad(loss, [x_hat, mask] + [lambdas1, lambdas2],
                                                                                             create_graph=True,
                                                                                             retain_graph=True)
 
@@ -430,16 +415,16 @@ class IodineVAE(GaussianLatentVAE):
                 extra_input = torch.cat([lns[1](lambdas_grad_1.view(bs * K, -1).detach()),
                                          lns[2](lambdas_grad_2.view(bs * K, -1).detach())
                                          ], -1)
-                extra_input = torch.cat([extra_input, lambdas[0], lambdas[1], z], -1)
 
-                lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2, extra_input=extra_input)
+                lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2,
+                                                                 extra_input=torch.cat([extra_input, lambdas1, lambdas2, z], -1))
 
                 # If haven't applied action yet and still seeding then also do physics on seed images
                 if apply_action:
                    lambdas1, _ = self.physics_net(lambdas1, lambdas2)
 
             else:
-                z = self.rsample_softplus(lambdas)
+                z = self.rsample_softplus([lambdas1, lambdas2])
                 x_hat, x_var_hat, m_hat_logit = self.decode(z)
                 # x_hat = torch.clamp(x_hat, 0, 1) # doing this clamping causes the alternating mask issue
                 m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
@@ -452,7 +437,7 @@ class IodineVAE(GaussianLatentVAE):
                 pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K
                 log_likelihood = -torch.log(pixel_likelihood + 1e-12).sum() / bs
 
-                kle = self.kl_divergence_softplus(lambdas)
+                kle = self.kl_divergence_softplus([lambdas1, lambdas2])
                 kle_loss = self.beta * kle.sum() / bs
                 loss = log_likelihood + kle_loss
                 losses.append(loss/t)
@@ -465,13 +450,12 @@ class IodineVAE(GaussianLatentVAE):
                     apply_action = False
                 lambdas1, _ = self.physics_net(lambdas1, lambdas2)
 
-
-            lambdas[0] = lambdas1
-            lambdas[1] = lambdas2
-
         total_loss = sum(losses*T)
 
         final_recon = (mask.unsqueeze(2) * x_hat.view(untiled_k_shape)).sum(1)
         mse = torch.pow(final_recon - input[:, current_step], 2).mean()
 
-        return x_hats, masks, total_loss, kle_loss / self.beta, log_likelihood, mse, final_recon, lambdas
+        all_x_hats = torch.stack([x.view(untiled_k_shape) for x in x_hats], 1) # (bs, T, K, 3, imsize, imsize)
+        all_masks = torch.stack([x.view(untiled_k_shape) for x in masks], 1) # # (bs, T, K, 1, imsize, imsize)
+        return all_x_hats, all_masks, total_loss, kle_loss.data / self.beta, \
+               log_likelihood.data, mse, final_recon, [lambdas1.data, lambdas2.data]

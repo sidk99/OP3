@@ -42,6 +42,7 @@ class PhysicsNetwork(nn.Module):
     def forward(self, lambda1, lambdas2):
         # input is (bs*K, representation_size)
         K = self.K
+
         lambda1_enc_flat = self.lambda_encoder(lambda1)
 
         lambda1_enc = lambda1_enc_flat.view(-1, K, self.enc_rep_size)
