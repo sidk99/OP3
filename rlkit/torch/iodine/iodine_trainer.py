@@ -16,8 +16,6 @@ class IodineTrainer(Serializable):
             train_dataset,
             test_dataset,
             model,
-            train_seedsteps,
-            test_seedsteps,
             batch_size=128,
             log_interval=0,
             gamma=0.5,
@@ -36,8 +34,6 @@ class IodineTrainer(Serializable):
         self.representation_size = model.representation_size
         self.input_channels = model.input_channels
         self.imlength = model.imlength
-        self.train_seedsteps = train_seedsteps
-        self.test_seedsteps = test_seedsteps
 
         self.lr = lr
         params = list(self.model.parameters())
@@ -136,7 +132,8 @@ class IodineTrainer(Serializable):
                 save_dir = osp.join(logger.get_snapshot_dir(),
                                     '%s_r%d.png' % ('train' if train else 'val', epoch))
                 save_image(comparison.data.cpu(), save_dir, nrow=T)
-            break
+            if batch_idx >= batches - 1:
+                break
 
         if record_stats:
             logger.record_tabular("test/Log Prob", np.mean(log_probs))

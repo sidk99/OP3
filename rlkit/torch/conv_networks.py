@@ -287,7 +287,6 @@ class BroadcastCNN(nn.Module):
                len(strides) == \
                len(paddings)
         super().__init__()
-
         self.hidden_sizes = hidden_sizes
         self.input_width = input_width
         self.input_height = input_height

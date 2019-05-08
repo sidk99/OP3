@@ -1,5 +1,7 @@
 import torch
 import torch.utils.data
+from rlkit.torch.iodine.physics_network import PhysicsNetwork
+from rlkit.torch.iodine.refinement_network import RefinementNetwork
 from rlkit.torch.networks import Mlp
 from torch import nn
 from torch.autograd import Variable
@@ -10,7 +12,7 @@ from rlkit.pythonplusplus import identity
 from rlkit.torch import pytorch_util as ptu
 import numpy as np
 from rlkit.torch.pytorch_util import from_numpy
-from rlkit.torch.conv_networks import CNN, DCNN
+from rlkit.torch.conv_networks import CNN, DCNN, BroadcastCNN
 from rlkit.torch.vae.vae_base import GaussianLatentVAE
 from rlkit.torch.modules import LayerNorm2D
 from rlkit.core import logger
@@ -83,13 +85,25 @@ imsize64_iodine_architecture = dict(
     )
 )
 
+REPSIZE_128 = 128
+
+
 imsize64_large_iodine_architecture = dict(
+    vae_kwargs=dict(
+        imsize=64,
+        representation_size=REPSIZE_128,
+        input_channels=3,
+        # decoder_distribution='gaussian_identity_variance',
+        beta=1,
+        K=7,
+        T=15,
+    ),
     deconv_args=dict(
         hidden_sizes=[],
-
+        output_size=64*64*3,
         input_width=80,
         input_height=80,
-        input_channels=130,
+        input_channels=REPSIZE_128 + 2,
 
         kernel_sizes=[5, 5, 5, 5],
         n_channels=[64, 64, 64, 64],
@@ -109,7 +123,7 @@ imsize64_large_iodine_architecture = dict(
         n_channels=[64, 64, 64, 64],
         strides=[2, 2, 2, 2],
         hidden_sizes=[128, 128],
-        output_size=128,
+        output_size=REPSIZE_128,
         lstm_size=256,
         lstm_input_size=768,
         added_fc_input_size=0
@@ -118,26 +132,43 @@ imsize64_large_iodine_architecture = dict(
 )
 
 
+def create_model(model, action_dim, dataparallel=False):
+
+    K = model['vae_kwargs']['K']
+    rep_size = model['vae_kwargs']['representation_size']
+
+    decoder = BroadcastCNN(**model['deconv_args'], **model['deconv_kwargs'],
+                           hidden_activation=nn.ELU())
+    refinement_net = RefinementNetwork(**model['refine_args'],
+                                       hidden_activation=nn.ELU())
+    physics_net = PhysicsNetwork(K, rep_size, action_dim)
+
+
+    m = IodineVAE(
+        **model['vae_kwargs'],
+        decoder=decoder,
+        refinement_net=refinement_net,
+        physics_net=physics_net,
+        action_dim=action_dim,
+        dataparallel=dataparallel,
+
+    )
+    return m
+
 class IodineVAE(GaussianLatentVAE):
     def __init__(
             self,
             representation_size,
-            architecture,
             refinement_net,
+            decoder,
             action_dim=None,
             physics_net=None,
-            decoder_class=DCNN,
-            decoder_output_activation=identity,
-            decoder_distribution='bernoulli',
             K=3,
             T=5,
             input_channels=1,
             imsize=48,
-            init_w=1e-3,
             min_variance=1e-3,
-            hidden_init=ptu.fanin_init,
             beta=5,
-            dynamic=False,
             dataparallel=False,
             sigma=0.1,
 
@@ -189,20 +220,12 @@ class IodineVAE(GaussianLatentVAE):
         self.imsize = imsize
         self.imlength = self.imsize * self.imsize * self.input_channels
         self.refinement_net = refinement_net
+        self.decoder_imsize = decoder.input_width
         self.beta = beta
-        self.dynamic = dynamic
         self.physics_net = physics_net
         self.lstm_size = 256
-        deconv_args, deconv_kwargs = architecture['deconv_args'], architecture['deconv_kwargs']
 
-        self.decoder_imsize = deconv_args['input_width']
-        self.decoder = decoder_class(
-            **deconv_args,
-            output_size=self.imlength,
-            init_w=init_w,
-            hidden_init=hidden_init,
-            hidden_activation=nn.ELU(),
-            **deconv_kwargs)
+        self.decoder = decoder
 
         if action_dim is not None:
             self.action_encoder = Mlp((128,), 128, action_dim,
@@ -220,7 +243,6 @@ class IodineVAE(GaussianLatentVAE):
 
 
         self.epoch = 0
-        self.decoder_distribution = decoder_distribution
 
         self.apply(ptu.init_weights)
         self.lambdas = nn.ParameterList([Parameter(ptu.zeros((1, self.representation_size))),
@@ -371,11 +393,12 @@ class IodineVAE(GaussianLatentVAE):
             if schedule[t-1] == 0:
                 z = self.rsample_softplus(lambdas)
                 x_hat, x_var_hat, m_hat_logit = self.decode(z)  # x_hat is (bs*K, 3, imsize, imsize)
+
                 # x_hat = torch.clamp(x_hat, 0, 1) # doing this clamping causes the alternating mask issue
                 m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
                 mask = F.softmax(m_hat_logit, dim=1)  # (bs, K, imsize, simze)
-                x_hats.append(x_hat.data)
-                masks.append(mask.data)
+                x_hats.append(x_hat)
+                masks.append(mask)
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
                 pixel_x_prob = self.gaussian_prob(x_hat, inputK, self.sigma).view(bs, K, self.imsize, self.imsize)
                 pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K
