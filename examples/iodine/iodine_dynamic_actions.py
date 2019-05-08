@@ -12,11 +12,11 @@ from rlkit.launchers.launcher_util import run_experiment
 from rlkit.core import logger
 import numpy as np
 import h5py
-from rlkit.torch.data_management.dataset import Dataset
+from rlkit.torch.data_management.dataset import Dataset, BlocksDataset
 from torch.utils.data.dataset import TensorDataset
 import torch
 
-def load_dataset(data_path, train=True, train_size=20):
+def load_dataset(data_path, train=True, size=None, batchsize=8):
     hdf5_file = h5py.File(data_path, 'r')  # RV: Data file
     if 'clevr' in data_path:
         return np.array(hdf5_file['features'])
@@ -58,8 +58,9 @@ def load_dataset(data_path, train=True, train_size=20):
         feats = (feats * 255).astype(np.uint8)
         actions = actions[0] # (bs, action_dim)
 
-        torch_dataset = TensorDataset(torch.Tensor(feats)[:10], torch.Tensor(actions)[:10])
-        dataset = Dataset(torch_dataset)
+        torch_dataset = TensorDataset(torch.Tensor(feats)[:size],
+                                      torch.Tensor(actions)[:size])
+        dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
         return dataset
 
 def train_vae(variant):
@@ -71,9 +72,9 @@ def train_vae(variant):
     #train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10kActions.h5'
     train_path = '/home/jcoreyes/objects/rlkit/data/pickplace1k.h5'
     test_path = train_path
-
-    train_dataset = load_dataset(train_path, train=True)
-    test_dataset = load_dataset(test_path, train=False)
+    bs = variant['algo_kwargs']['batch_size']
+    train_dataset = load_dataset(train_path, train=True, batchsize=bs, size=10)
+    test_dataset = load_dataset(test_path, train=False, batchsize=bs, size=10)
 
     K = variant['vae_kwargs']['K']
     rep_size = variant['vae_kwargs']['representation_size']
@@ -85,12 +86,13 @@ def train_vae(variant):
     refinement_net = RefinementNetwork(**iodine.imsize64_large_iodine_architecture['refine_args'],
                                        hidden_activation=nn.ELU())
 
-    physics_net = PhysicsNetwork(K, rep_size, 6)
+    physics_net = PhysicsNetwork(K, rep_size, train_dataset.action_dim)
     m = IodineVAE(
         **variant['vae_kwargs'],
         refinement_net=refinement_net,
         dynamic=True,
         physics_net=physics_net,
+        action_dim=train_dataset.action_dim,
     )
 
     m.to(ptu.device)

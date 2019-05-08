@@ -124,6 +124,7 @@ class IodineVAE(GaussianLatentVAE):
             representation_size,
             architecture,
             refinement_net,
+            action_dim=None,
             physics_net=None,
             decoder_class=DCNN,
             decoder_output_activation=identity,
@@ -203,10 +204,11 @@ class IodineVAE(GaussianLatentVAE):
             hidden_activation=nn.ELU(),
             **deconv_kwargs)
 
-        self.action_encoder = Mlp((128,), 128, 6,
-                                     hidden_activation=nn.ELU())
-        self.action_lambda_encoder = Mlp((256, 256), representation_size, representation_size+128,
-                                     hidden_activation=nn.ELU())
+        if action_dim is not None:
+            self.action_encoder = Mlp((128,), 128, action_dim,
+                                         hidden_activation=nn.ELU())
+            self.action_lambda_encoder = Mlp((256, 256), representation_size, representation_size+128,
+                                         hidden_activation=nn.ELU())
 
         l_norm_sizes = [7, 1, 1]
         self.layer_norms = nn.ModuleList([LayerNorm2D(l) for l in l_norm_sizes])
@@ -372,8 +374,8 @@ class IodineVAE(GaussianLatentVAE):
                 # x_hat = torch.clamp(x_hat, 0, 1) # doing this clamping causes the alternating mask issue
                 m_hat_logit = m_hat_logit.view(bs, K, self.imsize, self.imsize)
                 mask = F.softmax(m_hat_logit, dim=1)  # (bs, K, imsize, simze)
-                x_hats.append(x_hat)
-                masks.append(mask)
+                x_hats.append(x_hat.data)
+                masks.append(mask.data)
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
                 pixel_x_prob = self.gaussian_prob(x_hat, inputK, self.sigma).view(bs, K, self.imsize, self.imsize)
                 pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K

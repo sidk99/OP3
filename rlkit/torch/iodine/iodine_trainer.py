@@ -106,7 +106,8 @@ class IodineTrainer(Serializable):
 
         self.model.eval() #TODO Get around needing gradients during eval mode
         losses, log_probs, kles, mses = [], [], [], []
-        for batch_idx, tensors in enumerate(self.train_dataset.dataloader):
+        dataloader = self.train_dataset.dataloader if train else self.test_dataset.dataloader
+        for batch_idx, tensors in enumerate(dataloader):
             obs, actions = self.prepare_tensors(tensors)
             self.optimizer.zero_grad()
 
@@ -135,6 +136,7 @@ class IodineTrainer(Serializable):
                 save_dir = osp.join(logger.get_snapshot_dir(),
                                     '%s_r%d.png' % ('train' if train else 'val', epoch))
                 save_image(comparison.data.cpu(), save_dir, nrow=T)
+            break
 
         if record_stats:
             logger.record_tabular("test/Log Prob", np.mean(log_probs))
@@ -179,33 +181,3 @@ class IodineTrainer(Serializable):
             recon_mse
         )[0]
         return stats
-
-    def dump_samples(self, epoch):
-        self.model.eval()
-        sample = ptu.randn(64, self.representation_size)
-        sample = self.model.decode(sample)[0].cpu()
-        save_dir = osp.join(logger.get_snapshot_dir(), 's%d.png' % epoch)
-        save_image(
-            sample.data.view(64, 3, self.imsize, self.imsize),
-            save_dir
-        )
-
-    def _dump_imgs_and_reconstructions(self, idxs, filename):
-        imgs = []
-        recons = []
-        for i in idxs:
-            img_np = self.train_dataset[i]
-            img_torch = ptu.from_numpy(normalize_image(img_np))
-            recon, *_ = self.model(img_torch)
-
-            img = img_torch.view(self.input_channels, self.imsize, self.imsize)
-            rimg = recon.view(self.input_channels, self.imsize, self.imsize)
-            imgs.append(img)
-            recons.append(rimg)
-        all_imgs = torch.stack(imgs + recons)
-        save_file = osp.join(logger.get_snapshot_dir(), filename)
-        save_image(
-            all_imgs.data,
-            save_file,
-            nrow=4,
-        )
