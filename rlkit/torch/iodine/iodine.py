@@ -139,6 +139,7 @@ class IodineVAE(GaussianLatentVAE):
             dynamic=False,
             dataparallel=False,
             sigma=0.1,
+
     ):
         """
 
@@ -202,7 +203,7 @@ class IodineVAE(GaussianLatentVAE):
             hidden_activation=nn.ELU(),
             **deconv_kwargs)
 
-        self.action_encoder = Mlp((128,), 128, 13,
+        self.action_encoder = Mlp((128,), 128, 6,
                                      hidden_activation=nn.ELU())
         self.action_lambda_encoder = Mlp((256, 256), representation_size, representation_size+128,
                                      hidden_activation=nn.ELU())

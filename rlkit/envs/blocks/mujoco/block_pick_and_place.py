@@ -49,7 +49,7 @@ def pickRandomColor(an_int):
 
 class BlockPickAndPlaceEnv():
     def __init__(self, num_objects, num_colors, img_dim):
-        self.asset_path = os.path.join(os.getcwd(), '../data/stl/')
+        self.asset_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data/stl/')
         self.img_dim = img_dim
         self.polygons = ['cube', 'horizontal_rectangle', 'tetrahedron']
         self.num_colors = num_colors

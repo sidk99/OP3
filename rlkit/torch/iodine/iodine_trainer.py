@@ -120,6 +120,7 @@ class IodineTrainer(Serializable):
 
             if batch_idx == 0 and save_reconstruction:
                 t_sample = np.cumsum(schedule)
+                t_sample[t_sample >= obs.shape[1]] = obs.shape[1] - 1
                 ground_truth = obs[0][t_sample].unsqueeze(0)
                 K = self.model.K
                 imsize = ground_truth.shape[-1]

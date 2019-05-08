@@ -45,17 +45,32 @@ def load_dataset(data_path, train=True, train_size=20):
         torch_dataset = TensorDataset(torch.Tensor(feats), torch.Tensor(actions))
         dataset = Dataset(torch_dataset)
         return dataset
+    elif 'pickplace' in data_path:
+        if train:
+            feats = np.array(hdf5_file['training']['features'])
+            actions = np.array(hdf5_file['training']['actions'])
+        else:
+            feats = np.array(hdf5_file['validation']['features'])
+            actions = np.array(hdf5_file['validation']['actions'])
 
+        feats = np.moveaxis(feats, -1, 2) # (T, bs, ch, imsize, imsize)
+        feats = np.moveaxis(feats, 0, 1) # (bs, T, ch, imsize, imsize)
+        feats = (feats * 255).astype(np.uint8)
+        actions = actions[0] # (bs, action_dim)
+
+        torch_dataset = TensorDataset(torch.Tensor(feats)[:10], torch.Tensor(actions)[:10])
+        dataset = Dataset(torch_dataset)
+        return dataset
 
 def train_vae(variant):
     #train_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_train.hdf5'
     #test_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_test.hdf5'
 
     # train_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
-    # test_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
 
-    train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10kActions.h5'
-    test_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10kActions.h5'
+    #train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10kActions.h5'
+    train_path = '/home/jcoreyes/objects/rlkit/data/pickplace1k.h5'
+    test_path = train_path
 
     train_dataset = load_dataset(train_path, train=True)
     test_dataset = load_dataset(test_path, train=False)
@@ -70,7 +85,7 @@ def train_vae(variant):
     refinement_net = RefinementNetwork(**iodine.imsize64_large_iodine_architecture['refine_args'],
                                        hidden_activation=nn.ELU())
 
-    physics_net = PhysicsNetwork(K, rep_size, 13)
+    physics_net = PhysicsNetwork(K, rep_size, 6)
     m = IodineVAE(
         **variant['vae_kwargs'],
         refinement_net=refinement_net,
@@ -122,7 +137,7 @@ if __name__ == "__main__":
 
     run_experiment(
         train_vae,
-        exp_prefix='iodine-blocks-physics-actions',
+        exp_prefix='iodine-blocks-pickplace',
         mode='here_no_doodad',
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
