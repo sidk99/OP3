@@ -18,6 +18,7 @@ class IodineTrainer(Serializable):
             model,
             seed_steps=4,
             train_T=15,
+            test_T=9,
             batch_size=128,
             log_interval=0,
             gamma=0.5,
@@ -30,6 +31,7 @@ class IodineTrainer(Serializable):
 
         self.seed_steps = seed_steps
         self.train_T = train_T
+        self.test_T = test_T
 
         model.to(ptu.device)
 
@@ -70,6 +72,7 @@ class IodineTrainer(Serializable):
             # when only doing refinement predict same image
             # when only doing physics predict next image
             schedule = np.random.randint(0, 2, (self.train_T,))
+            #schedule = np.ones((self.train_T,))
             schedule[:self.seed_steps] = 0
             #inputs = self.prepare_inputs()
             x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(obs, actions=actions, schedule=schedule)
@@ -101,8 +104,8 @@ class IodineTrainer(Serializable):
             train=True,
             batches=1,
     ):
-        T = 9
-        schedule = np.ones((T,))
+
+        schedule = np.ones((self.test_T,))
         schedule[:self.seed_steps] = 0
 
         self.model.eval()
@@ -135,7 +138,7 @@ class IodineTrainer(Serializable):
 
                 save_dir = osp.join(logger.get_snapshot_dir(),
                                     '%s_r%d.png' % ('train' if train else 'val', epoch))
-                save_image(comparison.data.cpu(), save_dir, nrow=T)
+                save_image(comparison.data.cpu(), save_dir, nrow=self.test_T)
             if batch_idx >= batches - 1:
                 break
 

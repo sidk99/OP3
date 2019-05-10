@@ -73,7 +73,7 @@ def train_vae(variant):
     train_path = '/home/jcoreyes/objects/rlkit/data/pickplace1k.h5'
     test_path = train_path
     bs = variant['algo_kwargs']['batch_size']
-    train_dataset = load_dataset(train_path, train=True, batchsize=bs, size=10)
+    train_dataset = load_dataset(train_path, train=True, batchsize=bs, size=None)
     test_dataset = load_dataset(test_path, train=False, batchsize=bs, size=10)
 
     logger.get_snapshot_dir()
@@ -103,10 +103,12 @@ if __name__ == "__main__":
         model=iodine.imsize64_large_iodine_architecture,
         algo_kwargs = dict(
             gamma=0.5,
-            batch_size=8,
+            batch_size=16,
             lr=1e-4,
             log_interval=0,
-            train_T=15,
+            train_T=10,
+            test_T=7,
+            seed_steps=4,
         ),
         num_epochs=10000,
         algorithm='Iodine',

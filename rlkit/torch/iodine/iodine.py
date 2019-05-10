@@ -96,7 +96,7 @@ imsize64_large_iodine_architecture = dict(
         # decoder_distribution='gaussian_identity_variance',
         beta=1,
         K=7,
-        T=15,
+        sigma=0.08
     ),
     deconv_args=dict(
         hidden_sizes=[],
@@ -164,7 +164,6 @@ class IodineVAE(GaussianLatentVAE):
             action_dim=None,
             physics_net=None,
             K=3,
-            T=5,
             input_channels=1,
             imsize=48,
             min_variance=1e-3,
@@ -186,7 +185,6 @@ class IodineVAE(GaussianLatentVAE):
         else:
             self.log_min_variance = float(np.log(min_variance))
         self.K = K
-        self.T = T
         self.input_channels = input_channels
         self.imsize = imsize
         self.imlength = self.imsize * self.imsize * self.input_channels
@@ -392,7 +390,7 @@ class IodineVAE(GaussianLatentVAE):
                 kle = self.kl_divergence_softplus([lambdas1, lambdas2])
                 kle_loss = self.beta * kle.sum() / bs
                 loss = log_likelihood + kle_loss
-                losses.append(loss/t)
+                losses.append(loss*t)
 
                 # Compute inputs a for refinement network
                 posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-8)  # avoid divide by zero
@@ -421,7 +419,7 @@ class IodineVAE(GaussianLatentVAE):
 
                 # If haven't applied action yet and still seeding then also do physics on seed images
                 if apply_action:
-                   lambdas1, _ = self.physics_net(lambdas1, lambdas2)
+                  lambdas1, _ = self.physics_net(lambdas1, lambdas2)
 
             else:
                 z = self.rsample_softplus([lambdas1, lambdas2])
@@ -440,7 +438,7 @@ class IodineVAE(GaussianLatentVAE):
                 kle = self.kl_divergence_softplus([lambdas1, lambdas2])
                 kle_loss = self.beta * kle.sum() / bs
                 loss = log_likelihood + kle_loss
-                losses.append(loss/t)
+                losses.append(loss*t)
 
                 current_step += 1
                 current_step = min(input.shape[1]-1, current_step)
@@ -450,7 +448,7 @@ class IodineVAE(GaussianLatentVAE):
                     apply_action = False
                 lambdas1, _ = self.physics_net(lambdas1, lambdas2)
 
-        total_loss = sum(losses*T)
+        total_loss = sum(losses)/T
 
         final_recon = (mask.unsqueeze(2) * x_hat.view(untiled_k_shape)).sum(1)
         mse = torch.pow(final_recon - input[:, current_step], 2).mean()
