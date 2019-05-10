@@ -289,7 +289,9 @@ def createSingleSim(args):
     return np.array(imgs), np.array(acs)
 
 
-
+"""
+python rlkit/envs/blocks/mujoco/block_pick_and_place.py -f data/pickplace1k.h5 -nmin 3 -nax 3 -nf 2 -ns 1000 -fpick 1 -fplace 0.5
+"""
 
 if __name__ == '__main__':
     parser = ArgumentParser()

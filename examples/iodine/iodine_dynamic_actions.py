@@ -12,6 +12,7 @@ import h5py
 from rlkit.torch.data_management.dataset import Dataset, BlocksDataset
 from torch.utils.data.dataset import TensorDataset
 import torch
+import random
 
 def load_dataset(data_path, train=True, size=None, batchsize=8):
     hdf5_file = h5py.File(data_path, 'r')  # RV: Data file
@@ -53,7 +54,7 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
         feats = np.moveaxis(feats, -1, 2) # (T, bs, ch, imsize, imsize)
         feats = np.moveaxis(feats, 0, 1) # (bs, T, ch, imsize, imsize)
         feats = (feats * 255).astype(np.uint8)
-        actions = actions[0] # (bs, action_dim)
+        actions = np.moveaxis(actions, 0, 1) # (bs, T, action_dim)
 
         torch_dataset = TensorDataset(torch.Tensor(feats)[:size],
                                       torch.Tensor(actions)[:size])
@@ -70,6 +71,12 @@ def train_vae(variant):
     # train_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
 
     #train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10kActions.h5'
+    seed = int(variant['seed'])
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
+
     train_path = '/home/jcoreyes/objects/rlkit/data/pickplace1k.h5'
     test_path = train_path
     bs = variant['algo_kwargs']['batch_size']
@@ -103,11 +110,11 @@ if __name__ == "__main__":
         model=iodine.imsize64_large_iodine_architecture,
         algo_kwargs = dict(
             gamma=0.5,
-            batch_size=16,
+            batch_size=8,
             lr=1e-4,
             log_interval=0,
-            train_T=10,
-            test_T=7,
+            train_T=5,
+            test_T=5,
             seed_steps=4,
         ),
         num_epochs=10000,
@@ -123,6 +130,7 @@ if __name__ == "__main__":
         mode='here_no_doodad',
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
+        seed=100,
     )
 
 

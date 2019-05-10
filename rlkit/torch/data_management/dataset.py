@@ -8,7 +8,8 @@ class Dataset:
         self.dataset = torch_dataset
         self.batchsize = batchsize
 
-        self._dataloader = DataLoader(torch_dataset, batch_size=batchsize, shuffle=True)
+        self._dataloader = DataLoader(torch_dataset, batch_size=batchsize, shuffle=True,
+                                      pin_memory=True)
 
 
     def set_batchsize(self, batchsize):

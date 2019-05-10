@@ -71,8 +71,8 @@ class IodineTrainer(Serializable):
             # refinement = 0, physics = 1
             # when only doing refinement predict same image
             # when only doing physics predict next image
-            schedule = np.random.randint(0, 2, (self.train_T,))
-            #schedule = np.ones((self.train_T,))
+            #schedule = np.random.randint(0, 2, (self.train_T,))
+            schedule = np.ones((self.train_T,))
             schedule[:self.seed_steps] = 0
             #inputs = self.prepare_inputs()
             x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(obs, actions=actions, schedule=schedule)
