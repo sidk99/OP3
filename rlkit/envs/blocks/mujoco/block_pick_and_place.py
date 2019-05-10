@@ -1,6 +1,7 @@
 import os
 import pdb
 import numpy as np
+import shutil
 
 import matplotlib
 matplotlib.use('Agg')
@@ -55,7 +56,7 @@ class BlockPickAndPlaceEnv():
         self.num_colors = num_colors
         self.num_objects = num_objects
         self.internal_steps_per_step = 1000
-        self.bounds = {'x_min':-4, 'x_max':4, 'y_min':-1.5, 'y_max':3, 'z_min':0.05, 'z_max': 2.2}
+        self.bounds = {'x_min':-3.5, 'x_max':3.5, 'y_min':-1.5, 'y_max':3, 'z_min':0.05, 'z_max': 2.2}
 
         self.names = []
         self.blocks = []
@@ -260,6 +261,10 @@ class BlockPickAndPlaceEnv():
             aname = np.random.choice(self.names)
             place = self.get_block_info(aname)["pos"] + np.random.randn(3)/10
             place[2] = 3.5
+        elif action_type == 'remove_block':
+            aname = np.random.choice(self.names)
+            pick = self.get_block_info(aname)["pos"] + np.random.randn(3)/50
+            place = [0, 0, -5] #Place the block under the ground to remove it from scene
         elif action_type is None:
             pick = self.get_random_pos(0.2)
             place = self.get_random_pos(3.5)
@@ -277,12 +282,15 @@ def createSingleSim(args):
     imgs.append(myenv.get_observation())
     rand_float = np.random.uniform()
     for t in range(args.num_frames-1):
-        if rand_float < args.force_pick:
-            ac = myenv.sample_action('pick_block')
-        elif rand_float < args.force_pick + args.force_place:
-            ac = myenv.sample_action('place_block')
+        if args.remove_objects:
+            ac = myenv.sample_action('remove_block')
         else:
-            ac = myenv.sample_action()
+            if rand_float < args.force_pick:
+                ac = myenv.sample_action('pick_block')
+            elif rand_float < args.force_pick + args.force_place:
+                ac = myenv.sample_action('place_block')
+            else:
+                ac = myenv.sample_action()
         imgs.append(myenv.step(ac))
         acs.append(ac)
     acs.append(myenv.sample_action(None))
@@ -303,6 +311,7 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--num_colors', type=int, default=None)
     parser.add_argument('-fpick', '--force_pick', type=float, default=0.3)
     parser.add_argument('-fplace', '--force_place', type=float, default=0.2)
+    parser.add_argument('-r', '--remove_objects', type=bool, default=False)
     parser.add_argument('--output_path', default='', type=str,
                         help='path to save images')
 
@@ -313,7 +322,11 @@ if __name__ == '__main__':
     info["min_num_objects"] = args.min_num_objects
     info["max_num_objects"] = args.max_num_objects
     info["img_dim"] = args.img_dim
-    info["num_frames"] = args
+
+    if args.remove_objects:
+        args.num_frames = 2
+
+    info["num_frames"] = args.num_frames
     single_sim_func = lambda : createSingleSim(args)
     env = BlockPickAndPlaceEnv(1, 1, args.img_dim)
     ac_size = env.get_actions_size()
@@ -321,7 +334,7 @@ if __name__ == '__main__':
     dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func)
 
     dgu.hdf5_to_image(args.filename)
-    for i in range(10):
+    for i in range(min(10, args.num_sims)):
         tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
         dgu.make_gif(tmp, "animation.gif")
         # tmp = os.path.join(args.output_path, "imgs/training/{}/groups".format(str(i)))
