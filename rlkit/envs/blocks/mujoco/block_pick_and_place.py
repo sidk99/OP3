@@ -19,15 +19,15 @@ MODEL_XML_BASE = """
        {}
     </asset>
     <worldbody>
-        <camera name='fixed' pos='0 -12 6' euler='-300 0 0'/>
+        <camera name='fixed' pos='0 -8 6' euler='-300 0 0'/>
         <geom name='wall_left'  type='box' pos='-5 0 0' euler='0 0 0' size='0.1 10 4' material='wall_visible'/>
         <geom name='wall_right'  type='box' pos='5 0 0' euler='0 0 0' size='0.1 10 4' material='wall_visible'/>
         <geom name='wall_back'  type='box' pos='0 5 0' euler='0 0 0' size='10 0.1 4' material='wall_visible'/>
         
-        <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible'/>
+        <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' condim="6" friction="1 1 1"/>
         {}
     </worldbody>
-    <option gravity="0 0 -9.81"/>
+    <option gravity="0 0 -30"/>
 </mujoco>
 """
 #60 = -300
@@ -55,6 +55,7 @@ class BlockPickAndPlaceEnv():
         self.num_colors = num_colors
         self.num_objects = num_objects
         self.internal_steps_per_step = 1000
+        self.bounds = {'x_min':-4, 'x_max':4, 'y_min':-1.5, 'y_max':3, 'z_min':0.05, 'z_max': 2.2}
 
         self.names = []
         self.blocks = []
@@ -96,9 +97,10 @@ class BlockPickAndPlaceEnv():
         body_base = '''
           <body name='{}' pos='{}' quat='{}'>
             <joint type='free' name='{}' damping="1"/>
-            <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim="6" friction="1 1 1"/>
+            <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim="6" friction="1 0.005 0.0001"/>
           </body>
         '''
+        # '''<geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim="6" friction="1 1 1"/>'''
         body_list = [body_base.format(m['name'], self.convert_to_str(m['pos']), self.convert_to_str(m['quat']), m['name'],
                                       m['name'], m['name'], m['material'])
             for m in self.blocks]
@@ -113,11 +115,13 @@ class BlockPickAndPlaceEnv():
         return tmp[:-1]
 
     def get_random_pos(self, height=None):
+        x = np.random.uniform(self.bounds['x_min'], self.bounds['x_max'])
+        y = np.random.uniform(self.bounds['y_min'], self.bounds['y_max'])
         if height is None:
-            tmp = list(np.random.randn(2)) + list(np.abs(np.random.rand(1))+0.2)
-            return tmp
-        tmp = list(np.random.randn(2)) #Get random x,y position
-        return tmp + [height]
+            z = np.random.uniform(self.bounds['z_min'], self.bounds['z_max'])
+        else:
+            z = height
+        return np.array([x, y, z])
 
     def get_random_rbga(self, num_colors):
         rgb = list(pickRandomColor(num_colors))
@@ -245,16 +249,22 @@ class BlockPickAndPlaceEnv():
     def get_actions_size(self):
         return [6]
 
-    def sample_action(self, should_cause_change=False):
-        if should_cause_change:
+    def sample_action(self, action_type=None):
+        if action_type == 'pick_block': #pick block, place randomly
             aname = np.random.choice(self.names)
             place = self.get_random_pos(3.5)
             pick = self.get_block_info(aname)["pos"] + np.random.randn(3)/10
-            # self.add_block(aname, place)
-            return list(pick) + list(place)
-
-        pick = self.get_random_pos(0.2)
-        place = self.get_random_pos(3.5)
+        elif action_type == 'place_block': #pick block, place on top of existing block
+            aname = np.random.choice(self.names)
+            pick = self.get_block_info(aname)["pos"] + np.random.randn(3)/10
+            aname = np.random.choice(self.names)
+            place = self.get_block_info(aname)["pos"] + np.random.randn(3)/10
+            place[2] = 3.5
+        elif action_type is None:
+            pick = self.get_random_pos(0.2)
+            place = self.get_random_pos(3.5)
+        else:
+            raise KeyError("Wrong input action_type!")
         return np.array(list(pick) + list(place))
 
 
@@ -265,14 +275,17 @@ def createSingleSim(args):
     imgs = []
     acs = []
     imgs.append(myenv.get_observation())
+    rand_float = np.random.uniform()
     for t in range(args.num_frames-1):
-        if np.random.rand() < args.force_movement:
-            ac = myenv.sample_action(True)
+        if rand_float < args.force_pick:
+            ac = myenv.sample_action('pick_block')
+        elif rand_float < args.force_pick + args.force_place:
+            ac = myenv.sample_action('place_block')
         else:
-            ac = myenv.sample_action(False)
+            ac = myenv.sample_action()
         imgs.append(myenv.step(ac))
         acs.append(ac)
-    acs.append(myenv.sample_action(False))
+    acs.append(myenv.sample_action(None))
     return np.array(imgs), np.array(acs)
 
 
@@ -288,7 +301,8 @@ if __name__ == '__main__':
     parser.add_argument('-ns', '--num_sims', type=int, default=5)
     parser.add_argument('-mi', '--make_images', type=bool, default=False)
     parser.add_argument('-c', '--num_colors', type=int, default=None)
-    parser.add_argument('-fm', '--force_movement', type=float, default=0.5)
+    parser.add_argument('-fpick', '--force_pick', type=float, default=0.3)
+    parser.add_argument('-fplace', '--force_place', type=float, default=0.2)
     parser.add_argument('--output_path', default='', type=str,
                         help='path to save images')
 
@@ -314,7 +328,7 @@ if __name__ == '__main__':
         # dgu.make_gif(tmp, "animation.gif")
 
 
-    #Running and rendering example
+    ##Running and rendering example
     # b = BlockPickAndPlaceEnv(4, None, 64)
     # for i in range(10000):
     #     # pdb.set_trace()
@@ -323,10 +337,10 @@ if __name__ == '__main__':
     #     #     cur_pos = b.get_block_info("cube_0")["pos"]
     #     #     ac = list(cur_pos) + [-0.5, -0.5, 1]
     #     #     b.step(ac)
-    #     if i < 2000:
+    #     if i < 2000:# and i %100 == 0:
     #         # cur_pos = b.get_block_info("cube_0")["pos"]
     #         # ac = list(cur_pos) + [-0.5, -0.5, 1]
-    #         b.step(b.sample_action(True))
+    #         b.step(b.sample_action("pick_block"))
     #     b.viewer.render()
 
     #Plotting images
