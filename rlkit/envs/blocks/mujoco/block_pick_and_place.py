@@ -249,7 +249,7 @@ class BlockPickAndPlaceEnv():
     def get_actions_size(self):
         return [6]
 
-    def sample_action(self, action_type=None):
+    def sample_action(self, action_type=None, pickname=None):
         if action_type == 'pick_block': #pick block, place randomly
             aname = np.random.choice(self.names)
             place = self.get_random_pos(3.5)
@@ -290,7 +290,7 @@ def createSingleSim(args):
 
 
 """
-python rlkit/envs/blocks/mujoco/block_pick_and_place.py -f data/pickplace1k.h5 -nmin 3 -nax 3 -nf 2 -ns 1000 -fpick 1 -fplace 0.5
+python rlkit/envs/blocks/mujoco/block_pick_and_place.py -f data/pickplace50k.h5 -nmin 3 -nax 4 -nf 2 -ns 50000 -fpick 0.3 -fplace 0.4
 """
 
 if __name__ == '__main__':
