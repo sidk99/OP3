@@ -21,18 +21,18 @@ MODEL_XML_BASE = """
     </asset>
     <worldbody>
         <camera name='fixed' pos='0 -8 6' euler='-300 0 0'/>
-        <geom name='wall_left'  type='box' pos='-5 0 0' euler='0 0 0' size='0.1 10 4' material='wall_visible'/>
-        <geom name='wall_right'  type='box' pos='5 0 0' euler='0 0 0' size='0.1 10 4' material='wall_visible'/>
-        <geom name='wall_back'  type='box' pos='0 5 0' euler='0 0 0' size='10 0.1 4' material='wall_visible'/>
-        
-        <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' condim="6" friction="1 1 1"/>
+        <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' 
+        condim="6" friction="1 1 1"/>
         {}
     </worldbody>
-    <option gravity="0 0 -30"/>
+    <option gravity="0 0 -10"/>
 </mujoco>
 """
 #60 = -300
 # <geom name='wall_front'  type='box' pos='0 -5 0' euler='0 0 0' size='10 0.1 4' material='wall_visible'/>
+# <geom name='wall_left'  type='box' pos='-5 0 0' euler='0 0 0' size='0.1 10 4' material='wall_visible'/>
+# <geom name='wall_right'  type='box' pos='5 0 0' euler='0 0 0' size='0.1 10 4' material='wall_visible'/>
+# <geom name='wall_back'  type='box' pos='0 5 0' euler='0 0 0' size='10 0.1 4' material='wall_visible'/>
 
 # <body name="floor" pos="0 0 0.025">
 #     <geom size="3.0 3.0 0.02" rgba="0 1 0 1" type="box"/>
@@ -49,21 +49,23 @@ def pickRandomColor(an_int):
 
 
 class BlockPickAndPlaceEnv():
-    def __init__(self, num_objects, num_colors, img_dim):
+    def __init__(self, num_objects, num_colors, img_dim, include_z):
         self.asset_path = os.path.join(os.getcwd(), '../data/stl/')
         self.img_dim = img_dim
         self.polygons = ['cube', 'horizontal_rectangle', 'tetrahedron']
         self.num_colors = num_colors
         self.num_objects = num_objects
         self.internal_steps_per_step = 1000
-        self.bounds = {'x_min':-3.5, 'x_max':3.5, 'y_min':-1.5, 'y_max':3, 'z_min':0.05, 'z_max': 2.2}
+        self.bounds = {'x_min':-3, 'x_max':3, 'y_min':-1.5, 'y_max':3, 'z_min':0.05, 'z_max': 2.2}
+        self.include_z = include_z
 
         self.names = []
         self.blocks = []
 
-        poly = 'cube'
+        # poly = 'cube'
         quat = [1, 0, 0, 0]
         for i in range(self.num_objects):
+            poly = np.random.choice(self.polygons)
             self.add_mesh(poly, self.get_random_pos(), quat, self.get_random_rbga(num_colors))
         self.initialize()
 
@@ -97,8 +99,8 @@ class BlockPickAndPlaceEnv():
     def get_body_str(self):
         body_base = '''
           <body name='{}' pos='{}' quat='{}'>
-            <joint type='free' name='{}' damping="1"/>
-            <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim="6" friction="1 0.005 0.0001"/>
+            <joint type='free' name='{}' damping="0"/>
+            <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim="3" friction="1 1 1"/>
           </body>
         '''
         # '''<geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim="6" friction="1 1 1"/>'''
@@ -248,26 +250,46 @@ class BlockPickAndPlaceEnv():
         return [self.img_dim, self.img_dim]
 
     def get_actions_size(self):
+        if self.include_z:
+            return [4]
         return [6]
+
+    def get_rand_block_byz(self):
+        if self.include_z:
+            aname = np.random.choice(self.names)
+        else:
+            z_lim = 0.5
+            tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
+            while (len(tmp) == 0):
+                z_lim += 0.5
+                tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
+            aname = np.random.choice(tmp)
+        return aname
 
     def sample_action(self, action_type=None):
         if action_type == 'pick_block': #pick block, place randomly
-            aname = np.random.choice(self.names)
-            place = self.get_random_pos(3.5)
+            # aname = np.random.choice(self.names)
+            aname = self.get_rand_block_byz()
             pick = self.get_block_info(aname)["pos"] + np.random.randn(3)/10
+            place = self.get_random_pos(3.5)
         elif action_type == 'place_block': #pick block, place on top of existing block
-            aname = np.random.choice(self.names)
+            # aname = np.random.choice(self.names)
+            aname = self.get_rand_block_byz()
             pick = self.get_block_info(aname)["pos"] + np.random.randn(3)/10
             aname = np.random.choice(self.names)
             place = self.get_block_info(aname)["pos"] + np.random.randn(3)/10
             place[2] = 3.5
         elif action_type == 'remove_block':
-            aname = np.random.choice(self.names)
+            aname = self.get_rand_block_byz()
             pick = self.get_block_info(aname)["pos"] + np.random.randn(3)/50
             place = [0, 0, -5] #Place the block under the ground to remove it from scene
         elif action_type is None:
-            pick = self.get_random_pos(0.2)
-            place = self.get_random_pos(3.5)
+            if self.include_z:
+                pick = self.get_random_pos()
+                place = self.get_random_pos(3.5)
+            else:
+                pick = self.get_random_pos(0.2)
+                place = self.get_random_pos(3.5)
         else:
             raise KeyError("Wrong input action_type!")
         return np.array(list(pick) + list(place))
@@ -275,7 +297,7 @@ class BlockPickAndPlaceEnv():
 
 def createSingleSim(args):
     num_blocks = np.random.randint(args.min_num_objects, args.max_num_objects+1)
-    myenv = BlockPickAndPlaceEnv(num_blocks, args.num_colors, args.img_dim)
+    myenv = BlockPickAndPlaceEnv(num_blocks, args.num_colors, args.img_dim, args.include_z)
     myenv.img_dim = args.img_dim
     imgs = []
     acs = []
@@ -292,7 +314,6 @@ def createSingleSim(args):
             else:
                 ac = myenv.sample_action()
         imgs.append(myenv.step(ac))
-        acs.append(ac)
     acs.append(myenv.sample_action(None))
     return np.array(imgs), np.array(acs)
 
@@ -309,9 +330,10 @@ if __name__ == '__main__':
     parser.add_argument('-ns', '--num_sims', type=int, default=5)
     parser.add_argument('-mi', '--make_images', type=bool, default=False)
     parser.add_argument('-c', '--num_colors', type=int, default=None)
-    parser.add_argument('-fpick', '--force_pick', type=float, default=0.3)
-    parser.add_argument('-fplace', '--force_place', type=float, default=0.2)
+    parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
+    parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
     parser.add_argument('-r', '--remove_objects', type=bool, default=False)
+    parser.add_argument('-z', '--include_z', type=bool, default=False)
     parser.add_argument('--output_path', default='', type=str,
                         help='path to save images')
 
@@ -328,7 +350,7 @@ if __name__ == '__main__':
 
     info["num_frames"] = args.num_frames
     single_sim_func = lambda : createSingleSim(args)
-    env = BlockPickAndPlaceEnv(1, 1, args.img_dim)
+    env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z)
     ac_size = env.get_actions_size()
     obs_size = env.get_obs_size()
     dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func)
@@ -342,8 +364,8 @@ if __name__ == '__main__':
 
 
     ##Running and rendering example
-    # b = BlockPickAndPlaceEnv(4, None, 64)
-    # for i in range(10000):
+    # b = BlockPickAndPlaceEnv(4, None, 64, False)
+    # for i in range(10):
     #     # pdb.set_trace()
     #     # b.step()
     #     # if i == 2000:
@@ -354,7 +376,10 @@ if __name__ == '__main__':
     #         # cur_pos = b.get_block_info("cube_0")["pos"]
     #         # ac = list(cur_pos) + [-0.5, -0.5, 1]
     #         b.step(b.sample_action("pick_block"))
-    #     b.viewer.render()
+    #         print(i)
+    #         for aname in b.names:
+    #             print(b.get_block_info(aname))
+    #     # b.viewer.render()
 
     #Plotting images
     # cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
