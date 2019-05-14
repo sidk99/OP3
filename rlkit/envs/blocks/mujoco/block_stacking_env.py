@@ -203,6 +203,37 @@ class BlockEnv():
 
         return self.get_observation()
 
+    ##Tries an action and returns the direct observation of the action (e.g. the block in the air)
+    ##  but does not actually take a step in the environment
+    def try_action(self, an_action):
+        xml = XML(self.asset_path)
+        # Note: We need to recreate the entire scene
+        for ind, prev_action in enumerate(self.xml_actions_taken):  # Adding previous actions
+            prev_action['pos'][-1] = ind * 2
+            xml.add_mesh(**prev_action)
+
+        xml_action = self.model_action_to_xml_action(an_action)
+        new_name = xml.add_mesh(**xml_action)  # Note name is name of action (name of block dropped)
+        new_names = self.names + [new_name]
+
+        xml_str = xml.instantiate()
+        model = mjc.load_model_from_xml(xml_str)
+        sim = mjc.MjSim(model)
+
+        logger = Logger(xml, sim, steps=self.max_num_objects_dropped + 1, img_dim=self.img_dim)
+        for act_ind, act in enumerate(new_names[:-1]):
+            logger.hold_drop_execute(new_names[act_ind+1:], new_names[act_ind], self.settle_steps)
+        logger.log(0)
+
+        original_logger = self.logger
+        self.logger = logger
+        obs = self.get_observation()
+        self.logger = original_logger
+        #Recreate original scene
+        return obs
+
+
+
 
     #############Internal functions#########
     def model_action_to_xml_action(self, model_action):
@@ -273,8 +304,11 @@ if __name__ == '__main__':
 
     for i in range(4):
         an_action = myenv.sample_action()
-        myenv.step(an_action)
-        tmp = myenv.get_observation()
+        if i>=1:
+            tmp = myenv.try_action(an_action)
+        else:
+            myenv.step(an_action)
+            tmp = myenv.get_observation()
         # print(np.max(tmp), np.min(tmp), np.mean(tmp))
         axes[i+1].imshow(tmp, interpolation='nearest')
         # for k in range(5):
