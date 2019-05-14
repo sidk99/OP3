@@ -14,7 +14,7 @@ import dateutil.tz
 import numpy as np
 
 from rlkit.core import logger
-import railrl.pythonplusplus as ppp
+import rlkit.pythonplusplus as ppp
 from rlkit.launchers import config
 
 GitInfo = namedtuple(
@@ -551,7 +551,7 @@ def save_experiment_data(dictionary, log_dir):
 
 
 def resume_torch_algorithm(variant):
-    from railrl.torch import pytorch_util as ptu
+    from rlkit.torch import pytorch_util as ptu
     import joblib
     load_file = variant.get('params_file', None)
     if load_file is not None and osp.exists(load_file):
@@ -617,7 +617,7 @@ def continue_experiment_simple(load_experiment_dir, resume_function):
 
 
 def resume_torch_algorithm_simple(variant):
-    from railrl.torch import pytorch_util as ptu
+    from rlkit.torch import pytorch_util as ptu
     import joblib
     load_file = variant.get('params_file', None)
     if load_file is not None and osp.exists(load_file):
@@ -684,7 +684,7 @@ def run_experiment_here(
     )
 
     set_seed(seed)
-    from railrl.torch.pytorch_util import set_gpu_mode
+    from rlkit.torch.pytorch_util import set_gpu_mode
     set_gpu_mode(use_gpu, gpu_id)
     os.environ['gpu_id'] = str(gpu_id)
     run_experiment_here_kwargs = dict(

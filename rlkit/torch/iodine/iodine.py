@@ -87,7 +87,6 @@ imsize64_iodine_architecture = dict(
 
 REPSIZE_128 = 128
 
-
 imsize64_large_iodine_architecture = dict(
     vae_kwargs=dict(
         imsize=64,
@@ -100,7 +99,7 @@ imsize64_large_iodine_architecture = dict(
     ),
     deconv_args=dict(
         hidden_sizes=[],
-        output_size=64*64*3,
+        output_size=64 * 64 * 3,
         input_width=80,
         input_height=80,
         input_channels=REPSIZE_128 + 2,
@@ -133,7 +132,6 @@ imsize64_large_iodine_architecture = dict(
 
 
 def create_model(model, action_dim, dataparallel=False):
-
     K = model['vae_kwargs']['K']
     rep_size = model['vae_kwargs']['representation_size']
 
@@ -142,7 +140,6 @@ def create_model(model, action_dim, dataparallel=False):
     refinement_net = RefinementNetwork(**model['refine_args'],
                                        hidden_activation=nn.ELU())
     physics_net = PhysicsNetwork(K, rep_size, action_dim)
-
 
     m = IodineVAE(
         **model['vae_kwargs'],
@@ -154,6 +151,7 @@ def create_model(model, action_dim, dataparallel=False):
 
     )
     return m
+
 
 class IodineVAE(GaussianLatentVAE):
     def __init__(
@@ -243,8 +241,8 @@ class IodineVAE(GaussianLatentVAE):
         ch = 3
         # (2pi) ^ ch = 248.05
         sigma = sigma.to(inputs.device)
-        return torch.exp((-torch.pow(inputs - targets, 2).sum(1) / (ch * 2 * sigma ** 2))) / (torch.sqrt(sigma**(2 * ch))*248.05)
-
+        return torch.exp((-torch.pow(inputs - targets, 2).sum(1) / (ch * 2 * sigma ** 2))) / (
+                    torch.sqrt(sigma ** (2 * ch)) * 248.05)
 
     def logprob(self, inputs, obs_distribution_params):
         pass
@@ -262,41 +260,38 @@ class IodineVAE(GaussianLatentVAE):
 
     def plot_latents(self, ground_truth, masks, x_hats, mse, idx):
 
-
         K = self.K
         imsize = self.imsize
         T = len(masks)
         m = torch.stack([m[idx] for m in masks]).permute(1, 0, 2, 3).unsqueeze(2).repeat(1, 1, 3, 1,
-                                                                                       1)  # K, T, 3, imsize, imsize
-        x = torch.stack(x_hats)[:, K*idx:K*idx+K].permute(1, 0, 2, 3, 4)
+                                                                                         1)  # K, T, 3, imsize, imsize
+        x = torch.stack(x_hats)[:, K * idx:K * idx + K].permute(1, 0, 2, 3, 4)
         rec = (m * x)
         full_rec = rec.sum(0, keepdim=True)
 
         comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize)
 
-        save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' %mse, nrow=T)
+        save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' % mse, nrow=T)
 
     def plot_latents_trunc(self, ground_truth, masks, x_hats, mse, idx):
-
 
         K = self.K
         imsize = self.imsize
         T = len(masks)
-        m = torch.stack([m[idx] for m in masks]).permute(1, 0, 2, 3).unsqueeze(2).repeat(1, 1, 3, 1,
-                                                                                       1)  # K, T, 3, imsize, imsize
-        x = torch.stack(x_hats)[:, K*idx:K*idx+K].permute(1, 0, 2, 3, 4)
+        m = masks[idx].permute(1, 0, 2, 3, 4).repeat(1, 1, 3, 1, 1)  # (K, T, ch, imsize, imsize)
+        x = x_hats[idx].permute(1, 0, 2, 3, 4)
         rec = (m * x)
         full_rec = rec.sum(0, keepdim=True)
 
         comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize).data
 
-        #import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         n_col = 5
         comparison = comparison.view(-1, T, 3, imsize, imsize)[:, -n_col:]
-        comparison = comparison[1, ]
+        comparison = comparison[1,]
         comparison = comparison.contiguous().view(-1, 3, imsize, imsize)
 
-        save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' %mse, nrow=n_col)
+        save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' % mse, nrow=n_col)
 
     def refine(self, input, hidden_state, plot_latents=False):
         K = self.K
@@ -304,11 +299,11 @@ class IodineVAE(GaussianLatentVAE):
         input = input.repeat(bs, 1, 1, 1).unsqueeze(1)
         imsize = self.imsize
 
-        x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(input, None,
-                                                                                                  schedule=np.zeros((8)))
-
-        recon = x_hats[-1].view(bs, K, 3, imsize, imsize) * masks[-1].unsqueeze(2)
-        recon = torch.clamp(recon, 0, 1)
+        x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(
+            input, None,
+            schedule=np.zeros((5)))
+        lambda_recon = (x_hats * masks)
+        recon = torch.clamp(final_recon, 0, 1)
         mse = torch.pow(final_recon - input.squeeze(), 2).mean(3).mean(2).mean(1)
         best_idx = torch.argmin(mse)
         if plot_latents:
@@ -316,26 +311,29 @@ class IodineVAE(GaussianLatentVAE):
                 self.plot_latents(input[0].unsqueeze(0).repeat(1, len(masks), 1, 1, 1), masks, x_hats, mse[i], i)
         best_lambda = lambdas[0].view(-1, K, self.representation_size)[best_idx]
 
-        return final_recon[best_idx].data, best_lambda.data, recon[best_idx].data, masks[-1][best_idx].data
+        return recon[best_idx].data, best_lambda.data, lambda_recon[best_idx, -1].data, masks[best_idx,
+                                                                                              -1].data.squeeze()
 
     def step(self, input, actions, plot_latents=False):
         K = self.K
         bs = input.shape[0]
         imsize = self.imsize
         input = input.unsqueeze(1)
-        schedule = np.ones((12,))
+        schedule = np.ones((9,))
         schedule[:5] = 0
 
-        x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(input, actions,
-                                                                                                      schedule=schedule)
+        x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(
+            input, actions,
+            schedule=schedule)
 
-        recon = x_hats[-1].view(bs, K, 3, imsize, imsize) * masks[-1].unsqueeze(2)
-        recon = torch.clamp(recon, 0, 1)
+        lambda_recon = (x_hats * masks)
+        recon = torch.clamp(final_recon, 0, 1)
         if plot_latents:
             i = 0
             self.plot_latents_trunc(input[0].unsqueeze(0).repeat(1, len(masks), 1, 1, 1), masks, x_hats, 0, i)
+        # pred_obs, obs_latents, obs_latents_recon
 
-        return final_recon.data, lambdas[0].view(bs, K, -1).data, recon.data
+        return recon.data, lambdas[0].view(bs, K, -1).data, lambda_recon[:, -1].data
 
     def refine_lambdas(self, pixel_x_prob, pixel_likelihood, mask, m_hat_logit, loss, x_hat,
                        lambdas1, lambdas2, inputK, latents, h1, h2, tiled_k_shape, bs):
@@ -376,10 +374,10 @@ class IodineVAE(GaussianLatentVAE):
         T = schedule.shape[0]
 
         # means and log_vars of latent
-        lambdas1 = self.lambdas1.unsqueeze(0).repeat(bs*K, 1)
-        lambdas2 = self.lambdas2.unsqueeze(0).repeat(bs*K, 1)
+        lambdas1 = self.lambdas1.unsqueeze(0).repeat(bs * K, 1)
+        lambdas2 = self.lambdas2.unsqueeze(0).repeat(bs * K, 1)
         # initialize hidden state
-        h1, h2 = self.initialize_hidden(bs*K)
+        h1, h2 = self.initialize_hidden(bs * K)
 
         h1 = h1.to(input.device)
         h2 = h2.to(input.device)
@@ -400,10 +398,12 @@ class IodineVAE(GaussianLatentVAE):
 
         for t in range(1, T + 1):
             # Refine
-            if schedule[t-1] == 0 or actions_done:
+            if schedule[t - 1] == 0 or actions_done:
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
-                lambdas1, lambdas2, h1, h2 = self.refine_lambdas(pixel_x_prob, pixel_likelihood, mask, m_hat_logit, loss, x_hat,
-                       lambdas1, lambdas2, inputK, latents, h1, h2, tiled_k_shape, bs)
+                lambdas1, lambdas2, h1, h2 = self.refine_lambdas(pixel_x_prob, pixel_likelihood, mask, m_hat_logit,
+                                                                 loss, x_hat,
+                                                                 lambdas1, lambdas2, inputK, latents, h1, h2,
+                                                                 tiled_k_shape, bs)
                 # if not applied_action: # Do physics on static scene if haven't applied action yet
                 #     lambdas1, _ = self.physics_net(lambdas1, lambdas2, None)
                 loss_w = t
@@ -415,33 +415,34 @@ class IodineVAE(GaussianLatentVAE):
                 #     actions_done = True
                 applied_action = True
                 if actions is not None:
-                    actionsK = actions[:, current_step-1].unsqueeze(1).repeat(1, K, 1).view(bs*K, -1)
+                    actionsK = actions[:, current_step - 1].unsqueeze(1).repeat(1, K, 1).view(bs * K, -1)
                 else:
                     actionsK = None
 
                 if current_step >= input.shape[1] - 1:
                     actions_done = True
-                inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
+                    current_step = input.shape[1] - 1
+                inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1,
+                                                                                       1).view(tiled_k_shape)
 
                 lambdas1, _ = self.physics_net(lambdas1, lambdas2, actionsK)
                 loss_w = t * 2
 
-
-
             # Decode and get loss
-            x_hat, mask, m_hat_logit, latents, pixel_x_prob, pixel_likelihood, kle_loss, loss, log_likelihood = self.decode(
+            x_hat, mask, m_hat_logit, latents, pixel_x_prob, pixel_likelihood, kle_loss, loss, log_likelihood = \
+                self.decode(
                 lambdas1, lambdas2, inputK, bs)
 
             x_hats.append(x_hat.data)
             masks.append(mask.data)
             losses.append(loss * loss_w)
 
-        total_loss = sum(losses)/T
+        total_loss = sum(losses) / T
 
         final_recon = (mask.unsqueeze(2) * x_hat.view(untiled_k_shape)).sum(1)
         mse = torch.pow(final_recon - input[:, -1], 2).mean()
 
-        all_x_hats = torch.stack([x.view(untiled_k_shape) for x in x_hats], 1) # (bs, T, K, 3, imsize, imsize)
-        all_masks = torch.stack([x.view(untiled_k_shape) for x in masks], 1) # # (bs, T, K, 1, imsize, imsize)
+        all_x_hats = torch.stack([x.view(untiled_k_shape) for x in x_hats], 1)  # (bs, T, K, 3, imsize, imsize)
+        all_masks = torch.stack([x.view(untiled_k_shape) for x in masks], 1)  # # (bs, T, K, 1, imsize, imsize)
         return all_x_hats, all_masks, total_loss, kle_loss.data / self.beta, \
                log_likelihood.data, mse, final_recon.data, [lambdas1.data, lambdas2.data]

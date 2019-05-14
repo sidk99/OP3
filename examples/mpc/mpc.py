@@ -12,9 +12,8 @@ from torchvision.utils import save_image
 from rlkit.util.plot import plot_multi_image
 import json
 import os
-
-from rlkit.torch.rnem.rnem_mpc import RNEM_MPC
-
+import rlkit.torch.iodine.iodine as iodine
+from collections import OrderedDict
 
 class Cost:
     def __init__(self, type, logger_prefix_dir):
@@ -322,15 +321,26 @@ class MPC:
 def main(variant):
     # model_file = variant['model_file']
     # goal_file = variant['goal_file']
-    model_file = '/home/jcoreyes/objects/rlkit/output/04-25-iodine-blocks-physics-actions/04-25' \
-                 '-iodine-blocks-physics-actions_2019_04_25_11_36_24_0000--s-98913/params.pkl'
+    #model_file = '/home/jcoreyes/objects/rlkit/output/04-25-iodine-blocks-physics-actions/04-25' \
+    #             '-iodine-blocks-physics-actions_2019_04_25_11_36_24_0000--s-98913/params.pkl'
+    model_file = '/home/jcoreyes/objects/op3_exps/05-12-iodine-blocks-stack-multistep1k/05-12' \
+                 '-iodine-blocks-stack_multistep1k_2019_05_12_12_32_43_0000--s-53655/params.pkl'
     # goal_file = '/home/jcoreyes/objects/object-oriented-prediction/o2p2/planning/executed/mjc_4
     # .png'
 
     # goal_idxs = [i for i in range(20, 50)]
     goal_idxs = [26, 27, 28, 29, 30, 33, 51, 52, 55, 58, 59, 61, 62, 63, 65, 71, 81]
 
-    model = pickle.load(open(model_file, 'rb'))
+    m = iodine.create_model(variant['model'], 0, dataparallel=False)
+    state_dict = torch.load(model_file)
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        name = k
+        if 'module.' in k:
+            name = k[7:]  # remove 'module.' of dataparallel
+        new_state_dict[name] = v
+    m.load_state_dict(new_state_dict)
+
     # model.cuda()
 
     actions_lst = []
@@ -366,6 +376,7 @@ if __name__ == "__main__":
         goalfile=args.goalfile,
         cost_type='latent_pixel',  # 'sum_goal_min_latent'
         mpc_style='cem',
+        model=iodine.imsize64_large_iodine_architecture
     )
 
     run_experiment(
