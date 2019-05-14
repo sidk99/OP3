@@ -20,10 +20,8 @@ MODEL_XML_BASE = """
     </asset>
     <worldbody>
         <camera name='fixed' pos='0 -8 6' euler='-300 0 0'/>
-        <geom name='wall_left'  type='box' pos='-5 0 0' euler='0 0 0' size='0.1 10 4' material='wall_visible'/>
-        <geom name='wall_right'  type='box' pos='5 0 0' euler='0 0 0' size='0.1 10 4' material='wall_visible'/>
-        <geom name='wall_back'  type='box' pos='0 5 0' euler='0 0 0' size='10 0.1 4' material='wall_visible'/>
-        
+        <light diffuse='1.5 1.5 1.5' pos='0 -7 8' dir='0 -1 -1'/>  
+        <light diffuse='1.5 1.5 1.5' pos='0 -7 6' dir='0 -1 -1'/>  
         <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' condim="6" friction="1 1 1"/>
         {}
     </worldbody>
@@ -45,7 +43,7 @@ def pickRandomColor(an_int):
         return np.random.uniform(low=0.0, high=1.0, size=3)
     tmp = np.random.randint(0, an_int)
     return np.array(COLOR_LIST[tmp])/255
-
+import copy
 
 class BlockPickAndPlaceEnv():
     def __init__(self, num_objects, num_colors, img_dim):
@@ -55,7 +53,9 @@ class BlockPickAndPlaceEnv():
         self.num_colors = num_colors
         self.num_objects = num_objects
         self.internal_steps_per_step = 500
-        self.bounds = {'x_min':-4, 'x_max':4, 'y_min':-1.5, 'y_max':3, 'z_min':0.05, 'z_max': 2.2}
+        self.bounds = {'x_min': -2.5, 'x_max': 2.5, 'y_min': -2, 'y_max': 1., 'z_min': 0.05,
+                       'z_max':
+            2.2}
 
         self.names = []
         self.blocks = []
@@ -257,7 +257,9 @@ class BlockPickAndPlaceEnv():
         elif action_type == 'place_block': #pick block, place on top of existing block
             aname = np.random.choice(self.names)
             pick = self.get_block_info(aname)["pos"] + np.random.randn(3)/10
-            aname = np.random.choice(self.names)
+            names = copy.deepcopy(self.names)
+            names.remove(aname)
+            aname = np.random.choice(names)
             place = self.get_block_info(aname)["pos"] + np.random.randn(3)/10
             place[2] = 3.5
         elif action_type is None:
@@ -325,7 +327,7 @@ if __name__ == '__main__':
 
     dgu.hdf5_to_image(args.filename)
     for i in range(10):
-        tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
+        tmp = os.path.join(args.output_path, "data/imgs/training/{}/features".format(str(i)))
         dgu.make_gif(tmp, "animation.gif")
         # tmp = os.path.join(args.output_path, "imgs/training/{}/groups".format(str(i)))
         # dgu.make_gif(tmp, "animation.gif")
