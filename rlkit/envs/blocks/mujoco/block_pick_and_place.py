@@ -250,8 +250,6 @@ class BlockPickAndPlaceEnv():
         return [self.img_dim, self.img_dim]
 
     def get_actions_size(self):
-        if self.include_z:
-            return [4]
         return [6]
 
     def get_rand_block_byz(self):
