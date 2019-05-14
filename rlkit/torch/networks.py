@@ -42,7 +42,7 @@ class Mlp(nn.Module):
         self.hidden_activation = hidden_activation
         self.output_activation = output_activation
         self.layer_norm = layer_norm
-        self.fcs = []
+        self.fcs = nn.ModuleList()
         self.layer_norms = []
         in_size = input_size
 
@@ -51,7 +51,7 @@ class Mlp(nn.Module):
             in_size = next_size
             hidden_init(fc.weight)
             fc.bias.data.fill_(b_init_value)
-            self.__setattr__("fc{}".format(i), fc)
+            #self.__setattr__("fc{}".format(i), fc)
             self.fcs.append(fc)
 
             if self.layer_norm:

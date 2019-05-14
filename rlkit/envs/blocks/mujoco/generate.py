@@ -18,6 +18,8 @@ import utils
 import numpy as np
 import imageio
 import cv2
+import pathos.pools as pp
+
 
 parser = argparse.ArgumentParser()
 ## stuff you might want to edit
@@ -49,6 +51,7 @@ parser.add_argument('--save_images', default=True, type=bool,
         help='if true, saves images as png (alongside pickle files)')
 parser.add_argument('--filename', default="blocks.h5", type=str,   #RV: Added
         help='Name of the file. Please include .h5 at the end.')
+parser.add_argument('-p', '--num_workers', type=int, default=1)
 args = parser.parse_args()
 
 
@@ -70,16 +73,17 @@ drop_bounds = {
           }  
 
 ## folder with object meshes
-asset_path = os.path.join(os.getcwd(), '../data/stl/')
+asset_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data/stl/')
 
-utils.mkdir(args.output_path)
+#utils.mkdir(args.output_path)
 
 metadata = {'polygons': polygons, 'max_steps': args.drop_steps_max, 
             'min_objects': min(num_objects), 
             'max_objects': max(num_objects)}
-pickle.dump( metadata, open(os.path.join(args.output_path, 'metadata.p'), 'wb') )
+#pickle.dump( metadata, open(os.path.join(args.output_path, 'metadata.p'), 'wb') )
 
 num_images_per_scene = int(args.drop_steps_max / args.render_freq)
+
 end = args.start + args.num_images
 # for img_num in tqdm.tqdm( range(args.start, end) ):
 #
@@ -158,7 +162,7 @@ def action_to_vector(dict_with_info):
     return ans
 
 
-def createSingleSim():
+def createSingleSim(_):
     sim, xml, drop_name = contacts.sample_settled(asset_path, num_objects, polygons, settle_bounds)
     # print(drop_name) #RV: Drop name is a string ending with _number
     logger = Logger(xml, sim, steps=num_images_per_scene+1, img_dim=args.img_dim)
@@ -199,30 +203,26 @@ def createSingleSim():
     action_vec = action_to_vector(logger.get_state()[drop_name]) #RV addition
 
     # print(args.render_freq, args.drop_steps_max)
+    logger.log(0)
     for i in range(args.drop_steps_max):
         ## log every [ render_freq ] steps
         if i % args.render_freq == 0:
-            # print(i, (i // args.render_freq) + 1)
-            logger.log((i // args.render_freq) + 1)
+            ## print(i, (i // args.render_freq) + 1)
+           logger.log((i // args.render_freq) + 1)
         ## simulate one timestep
         sim.step()
-
+    #logger.log(1)
     data, images, masks = logger.get_logs()
-    groupFrame = np.zeros(list(images.shape[:-1]) + [1]) #(T, M, N, 1)
-    counter = 1
-    for aKey in masks:
-        tmp = np.sum(masks[aKey], axis=-1, keepdims=True)
-        groupFrame = np.where(tmp >= 1, counter, groupFrame)
-        counter += 1
 
-    return images/255.0, groupFrame, action_vec
+    return images, action_vec
 
 
 filename = os.path.join(args.output_path, args.filename)
-def createMultipleSims():
+def createMultipleSims(num_workers=1):
     datasets = {'training':args.num_images,'validation':min(args.num_images, 1000)}
-    n_frames = (args.drop_steps_max-1) // args.render_freq + 1 + 1 #Default: 500//25=20. Make it 500//15 = 33
+    n_frames =  (args.drop_steps_max-1) // args.render_freq + 1 + 1 #Default: 500//25=20. Make it 500//15 = 33
     image_res = args.img_dim
+    pool = pp.ProcessPool(num_workers)
     with h5py.File(filename, 'w') as f:
         for folder in datasets:
             cur_folder = f.create_group(folder)
@@ -231,28 +231,21 @@ def createMultipleSims():
 
             # create datasets, write to disk
             image_data_shape = (n_frames, num_sims, image_res, image_res, 3)
-            groups_data_shape = (n_frames, num_sims, image_res, image_res, 1)
+            #groups_data_shape = (n_frames, num_sims, image_res, image_res, 1)
             action_data_shape = (1, num_sims, len(polygons) + 7 + 3)
-            features_dataset = cur_folder.create_dataset('features', image_data_shape, dtype='float32')
-            groups_dataset = cur_folder.create_dataset('groups', groups_data_shape, dtype='float32')
+            features_dataset = cur_folder.create_dataset('features', image_data_shape, dtype='uint8')
             action_dataset = cur_folder.create_dataset('actions', action_data_shape, dtype='float32')
 
-            # for i in range(num_sims):
-            i = 0
-            while i < num_sims:
-                frames, group_frames, action_vec = createSingleSim() #(T, M, N, C), (T, M, N, 1)
+            results = pool.map(createSingleSim, [(0) for _ in range(num_sims)])
+            for i in range(num_sims):
+                frames, action_vec = results[i] #(T, M, N, C), (T, M, N, 1)
 
                 # RV: frames is numpy with shape (T, M, N, C)
                 # Bouncing balls dataset has shape (T, 1, M, N, C)
                 frames = np.expand_dims(frames, 1)
-                group_frames = np.expand_dims(group_frames, 1)
 
                 features_dataset[:, [i], :, :, :] = frames
-                groups_dataset[:, [i], :, :, :] = group_frames
                 action_dataset[0, i, :] = action_vec
-                i += 1
-
-
 
             print("Done with dataset: {}".format(folder))
 
@@ -298,7 +291,7 @@ def hdf5_to_image(filename):
                             assert False
 
 
-createMultipleSims()
+createMultipleSims(int(args.num_workers))
 print("Done with creating the dataset, now creating visuals")
 hdf5_to_image(filename)
 for i in range(10):

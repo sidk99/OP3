@@ -21,14 +21,19 @@ class PhysicsNetwork(nn.Module):
         self.rep_size = representation_size
         self.action_size = action_size
 
+        self.action_enc_size = 16 if action_size > 0 else 0
         self.effect_size = 16
         self.enc_rep_size = representation_size - self.effect_size
         self.interaction_size = 128
 
         #self.action_encoder = Mlp((128,), self.action_enc_size, action_size, hidden_activation=nn.ELU())
 
+        if action_size > 0:
+            self.action_encoder = Mlp((128,), self.action_enc_size, action_size,
+                                      hidden_activation=nn.ELU())
         self.lambda_encoder = Mlp((128, ), self.enc_rep_size, representation_size, hidden_activation=nn.ELU())
-        self.embedding_network = Mlp((256,), self.interaction_size, self.enc_rep_size*2,
+
+        self.embedding_network = Mlp((256,), self.interaction_size, (self.enc_rep_size + self.action_enc_size)*2,
                                      hidden_activation=nn.ELU(),
                                      output_activation=nn.ELU())
         self.effect_network = Mlp((128,), self.interaction_size, self.interaction_size, hidden_activation=nn.ELU(),
@@ -39,12 +44,21 @@ class PhysicsNetwork(nn.Module):
         #self.encoder2_network = Mlp((128,), representation_size, representation_size,
         #                            hidden_activation=nn.ELU())
 
-    def forward(self, lambda1, lambdas2):
+
+
+    def forward(self, lambda1, lambdas2, actions):
         # input is (bs*K, representation_size)
         K = self.K
+
         lambda1_enc_flat = self.lambda_encoder(lambda1)
 
-        lambda1_enc = lambda1_enc_flat.view(-1, K, self.enc_rep_size)
+        if actions is not None:
+            action_enc = self.action_encoder(actions)
+            lambda1_enc_actions = torch.cat([lambda1_enc_flat, action_enc], -1)
+            lambda1_enc = lambda1_enc_actions.view(-1, K, self.enc_rep_size + self.action_enc_size)
+        else:
+            lambda1_enc = lambda1_enc_flat.view(-1, K, self.enc_rep_size)
+
         bs = lambda1_enc.shape[0]
 
         pairs = []

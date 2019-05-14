@@ -244,7 +244,7 @@ class BlockPickAndPlaceEnv():
     def get_observation(self):
         img = self.sim.render(self.img_dim, self.img_dim, camera_name="fixed") #img is upside down, values btwn 0-255
         img = img[::-1, :, :]
-        return img/255 #values btwn 0-255
+        return img #values btwn 0-255
 
     def get_obs_size(self):
         return [self.img_dim, self.img_dim]
@@ -316,7 +316,9 @@ def createSingleSim(args):
     return np.array(imgs), np.array(acs)
 
 
-
+"""
+python rlkit/envs/blocks/mujoco/block_pick_and_place.py -f data/pickplace50k.h5 -nmin 3 -nax 4 -nf 2 -ns 50000 -fpick 0.3 -fplace 0.4
+"""
 
 if __name__ == '__main__':
     parser = ArgumentParser()
@@ -334,6 +336,7 @@ if __name__ == '__main__':
     parser.add_argument('-z', '--include_z', type=bool, default=False)
     parser.add_argument('--output_path', default='', type=str,
                         help='path to save images')
+    parser.add_argument('-p', '--num_workers', type=int, default=1)
 
     args = parser.parse_args()
     print(args)
@@ -351,7 +354,7 @@ if __name__ == '__main__':
     env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z)
     ac_size = env.get_actions_size()
     obs_size = env.get_obs_size()
-    dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func)
+    dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
 
     dgu.hdf5_to_image(args.filename)
     for i in range(min(10, args.num_sims)):

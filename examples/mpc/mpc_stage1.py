@@ -153,8 +153,7 @@ class Cost:
 
         best_action_idxs = costs.min(0)[0].sort()[1]
 
-        return best_pred_obs, actions[best_action_idxs], best_goal_idx
-
+        return best_pred_obs, actions[ptu.get_numpy(best_action_idxs)], best_goal_idx
 
 class MPC:
     def __init__(self, model, env, n_actions, mpc_steps,
@@ -165,6 +164,7 @@ class MPC:
                  logger_prefix_dir=None,
                  mpc_style="random_shooting",  # options are random_shooting, cem
                  cem_steps=2,
+                 use_action_image=True, # True for stage 1, False for stage 3
                  ):
         self.model = model
         self.env = env
@@ -180,14 +180,17 @@ class MPC:
         if logger_prefix_dir is not None:
             os.mkdir(logger.get_snapshot_dir() + logger_prefix_dir)
         self.logger_prefix_dir = logger_prefix_dir
+        self.use_action_image = use_action_image
 
     def filter_goal_latents(self, goal_latents, goal_latents_mask, goal_latents_recon):
+        # Keep top goal latents with highest mask area except first
         n_goals = self.n_goal_objs
         vals, keep = torch.sort(goal_latents_mask.mean(2).mean(1), descending=True)
         goal_latents_recon[keep[n_goals]] += goal_latents_recon[keep[n_goals + 1]]
         keep = keep[1:1 + n_goals]
         goal_latents = torch.stack([goal_latents[i] for i in keep])
         goal_latents_recon = torch.stack([goal_latents_recon[i] for i in keep])
+
         save_image(goal_latents_recon,
                    logger.get_snapshot_dir() + '%s/mpc_goal_latents_recon.png' %
                    self.logger_prefix_dir)
@@ -251,9 +254,9 @@ class MPC:
         for i in range(n_batches):
             start_idx = i * bs
             end_idx = min(start_idx + bs, obs.shape[0])
-
+            actions_batch = actions[start_idx:end_idx] if not self.use_action_image else None
             pred_obs, obs_latents, obs_latents_recon = self.model.step(obs[start_idx:end_idx],
-                                                                       actions[start_idx:end_idx])
+                                                                       actions_batch)
             outputs[0].append(pred_obs)
             outputs[1].append(obs_latents)
             outputs[2].append(obs_latents_recon)
@@ -302,7 +305,10 @@ class MPC:
         if self.true_actions is not None:
             actions = np.concatenate([self.true_actions[mpc_step].reshape((1, -1)), actions])
 
-        obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0], 1, 1,
+        if self.use_action_image:
+            obs_rep = np.stack([self.env.try_action(action) for action in actions])
+        else:
+            obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0], 1, 1,
                                                                              1)
         pred_obs, obs_latents, obs_latents_recon = self.model_step_batched(obs_rep,
                                                                            ptu.from_numpy(actions))
@@ -341,16 +347,16 @@ def main(variant):
         new_state_dict[name] = v
     m.load_state_dict(new_state_dict)
 
-    # model.cuda()
+    m.cuda()
 
     actions_lst = []
     stats = {'mse': 0}
     for goal_idx in goal_idxs:
         goal_file = '/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/img_%d.png' % goal_idx
-        true_actions = np.load('/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/actions.npy')[
-            goal_idx]
+        true_actions =  None #np.load('/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/actions.npy')[
+            # goal_idx]
         env = BlockEnv(5)
-        mpc = MPC(model, env, n_actions=960, mpc_steps=3, true_actions=None,
+        mpc = MPC(m, env, n_actions=32, mpc_steps=3, true_actions=None,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=3,
                   logger_prefix_dir='/goal_%d' % goal_idx,
                   mpc_style=variant['mpc_style'], cem_steps=5)
@@ -384,5 +390,5 @@ if __name__ == "__main__":
         exp_prefix='mpc',
         mode='here_no_doodad',
         variant=variant,
-        use_gpu=False,  # Turn on if you have a GPU
+        use_gpu=True,  # Turn on if you have a GPU
     )

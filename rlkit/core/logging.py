@@ -15,9 +15,20 @@ import csv
 import json
 import pickle
 import errno
+from collections import OrderedDict
 
 from rlkit.core.tabulate import tabulate
 
+def add_prefix(log_dict: OrderedDict, prefix: str):
+    with_prefix = OrderedDict()
+    for key, val in log_dict.items():
+        with_prefix[prefix + key] = val
+    return with_prefix
+
+def append_log(log_dict, to_add_dict, prefix=None):
+    if prefix is not None:
+        to_add_dict = add_prefix(to_add_dict, prefix=prefix)
+    return log_dict.update(to_add_dict)
 
 class TerminalTablePrinter(object):
     def __init__(self):
@@ -78,6 +89,7 @@ class Logger(object):
 
         self._text_outputs = []
         self._tabular_outputs = []
+        self._tabular_keys = None
 
         self._text_fds = {}
         self._tabular_fds = {}
@@ -259,11 +271,17 @@ class Logger(object):
                 for line in tabulate(self._tabular).split('\n'):
                     self.log(line, *args, **kwargs)
             tabular_dict = dict(self._tabular)
-            # Also write to the csv files
-            # This assumes that the keys in each iteration won't change!
+
+            # Only saves keys in first iteration to CSV!
+            # (But every key is printed out in text)
+            if self._tabular_keys is None:
+                self._tabular_keys = list(sorted(tabular_dict.keys()))
+
+            # Write to the csv files
             for tabular_fd in list(self._tabular_fds.values()):
                 writer = csv.DictWriter(tabular_fd,
-                                        fieldnames=list(tabular_dict.keys()))
+                                        fieldnames=self._tabular_keys,
+                                        extrasaction="ignore",)
                 if wh or (
                         wh is None and tabular_fd not in self._tabular_header_written):
                     writer.writeheader()
@@ -302,4 +320,3 @@ class Logger(object):
 
 
 logger = Logger()
-
