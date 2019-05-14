@@ -306,7 +306,8 @@ class MPC:
             actions = np.concatenate([self.true_actions[mpc_step].reshape((1, -1)), actions])
 
         if self.use_action_image:
-            obs_rep = np.stack([self.env.try_action(action) for action in actions])
+            obs_rep = ptu.from_numpy(np.moveaxis(np.stack([self.env.try_action(action) for action in
+                                               actions]), 3, 1))
         else:
             obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0], 1, 1,
                                                                              1)
@@ -353,13 +354,13 @@ def main(variant):
     stats = {'mse': 0}
     for goal_idx in goal_idxs:
         goal_file = '/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/img_%d.png' % goal_idx
-        true_actions =  None #np.load('/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/actions.npy')[
-            # goal_idx]
+        true_actions =  np.load('/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/actions.npy')[
+             goal_idx]
         env = BlockEnv(5)
-        mpc = MPC(m, env, n_actions=32, mpc_steps=3, true_actions=None,
+        mpc = MPC(m, env, n_actions=7, mpc_steps=2, true_actions=true_actions,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=3,
                   logger_prefix_dir='/goal_%d' % goal_idx,
-                  mpc_style=variant['mpc_style'], cem_steps=5)
+                  mpc_style=variant['mpc_style'], cem_steps=1, use_action_image=True)
         goal_image = imageio.imread(goal_file)
         mse, actions = mpc.run(goal_image)
         stats['mse'] += mse
@@ -381,7 +382,7 @@ if __name__ == "__main__":
         modelfile=args.modelfile,
         goalfile=args.goalfile,
         cost_type='latent_pixel',  # 'sum_goal_min_latent'
-        mpc_style='cem',
+        mpc_style='random_shooting', # random_shooting or cem
         model=iodine.imsize64_large_iodine_architecture
     )
 
