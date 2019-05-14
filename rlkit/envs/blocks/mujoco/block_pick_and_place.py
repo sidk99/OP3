@@ -54,7 +54,7 @@ class BlockPickAndPlaceEnv():
         self.polygons = ['cube', 'horizontal_rectangle', 'tetrahedron']
         self.num_colors = num_colors
         self.num_objects = num_objects
-        self.internal_steps_per_step = 1000
+        self.internal_steps_per_step = 500
         self.bounds = {'x_min':-4, 'x_max':4, 'y_min':-1.5, 'y_max':3, 'z_min':0.05, 'z_max': 2.2}
 
         self.names = []
@@ -241,7 +241,7 @@ class BlockPickAndPlaceEnv():
     def get_observation(self):
         img = self.sim.render(self.img_dim, self.img_dim, camera_name="fixed") #img is upside down, values btwn 0-255
         img = img[::-1, :, :]
-        return img/255 #values btwn 0-255
+        return img #values btwn 0-255
 
     def get_obs_size(self):
         return [self.img_dim, self.img_dim]
@@ -307,6 +307,7 @@ if __name__ == '__main__':
     parser.add_argument('-fplace', '--force_place', type=float, default=0.2)
     parser.add_argument('--output_path', default='', type=str,
                         help='path to save images')
+    parser.add_argument('-p', '--num_workers', type=int, default=1)
 
     args = parser.parse_args()
     print(args)
@@ -316,11 +317,11 @@ if __name__ == '__main__':
     info["max_num_objects"] = args.max_num_objects
     info["img_dim"] = args.img_dim
     info["num_frames"] = args
-    single_sim_func = lambda : createSingleSim(args)
+    single_sim_func = createSingleSim
     env = BlockPickAndPlaceEnv(1, 1, args.img_dim)
     ac_size = env.get_actions_size()
     obs_size = env.get_obs_size()
-    dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func)
+    dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
 
     dgu.hdf5_to_image(args.filename)
     for i in range(10):

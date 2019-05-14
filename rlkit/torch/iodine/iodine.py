@@ -380,8 +380,9 @@ class IodineVAE(GaussianLatentVAE):
         lambdas2 = self.lambdas2.unsqueeze(0).repeat(bs*K, 1)
         # initialize hidden state
         h1, h2 = self.initialize_hidden(bs*K)
-        h1.to(input.device)
-        h2.to(input.device)
+
+        h1 = h1.to(input.device)
+        h2 = h2.to(input.device)
 
         losses, x_hats, masks = [], [], []
         untiled_k_shape = (bs, K, -1, self.imsize, self.imsize)
@@ -395,6 +396,7 @@ class IodineVAE(GaussianLatentVAE):
         losses.append(loss)
 
         actions_done = False
+        applied_action = False
 
         for t in range(1, T + 1):
             # Refine
@@ -402,6 +404,8 @@ class IodineVAE(GaussianLatentVAE):
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
                 lambdas1, lambdas2, h1, h2 = self.refine_lambdas(pixel_x_prob, pixel_likelihood, mask, m_hat_logit, loss, x_hat,
                        lambdas1, lambdas2, inputK, latents, h1, h2, tiled_k_shape, bs)
+                # if not applied_action: # Do physics on static scene if haven't applied action yet
+                #     lambdas1, _ = self.physics_net(lambdas1, lambdas2, None)
                 loss_w = t
             # Physics
             else:
@@ -409,13 +413,18 @@ class IodineVAE(GaussianLatentVAE):
                 # if current_step == input.shape[1]:
                 #     current_step = input.shape[1] - 1
                 #     actions_done = True
+                applied_action = True
+                if actions is not None:
+                    actionsK = actions[:, current_step-1].unsqueeze(1).repeat(1, K, 1).view(bs*K, -1)
+                else:
+                    actionsK = None
 
-                actionsK = actions[:, current_step-1].unsqueeze(1).repeat(1, K, 1).view(bs*K, -1)
-
+                if current_step >= input.shape[1] - 1:
+                    actions_done = True
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
 
                 lambdas1, _ = self.physics_net(lambdas1, lambdas2, actionsK)
-                loss_w = t * T
+                loss_w = t * 2
 
 
 

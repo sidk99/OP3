@@ -1,11 +1,14 @@
+from rlkit.torch.vae.ray_image_logger import ImageLogger
 from torch import nn
 
 from rlkit.torch.iodine.iodine import IodineVAE
 
 import rlkit.torch.iodine.iodine as iodine
 from rlkit.torch.iodine.iodine_trainer import IodineTrainer
-import rlkit.torch.pytorch_util as ptu
-from rlkit.launchers.launcher_util import run_experiment
+import ray
+import ray.tune as tune
+from rlkit.torch.vae.ray_vae_trainer import RayVAETrainer
+from rlkit.launchers.ray.launcher import launch_experiment
 from rlkit.core import logger
 import numpy as np
 import h5py
@@ -63,48 +66,50 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
         return dataset
 
 
-
-
-def train_vae(variant):
+def run_experiment_func(variant):
     #train_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_train.hdf5'
     #test_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_test.hdf5'
 
     # train_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
 
     #train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10kActions.h5'
-    seed = int(variant['seed'])
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
+    # seed = int(variant['seed'])
+    # torch.manual_seed(seed)
+    # np.random.seed(seed)
+    # random.seed(seed)
 
 
-    train_path = '/home/jcoreyes/objects/rlkit/data/%s.h5' % variant['dataset']
+    train_path = '/home/ubuntu/objects/rlkit/data/%s.h5' % variant['dataset']
     test_path = train_path
     bs = variant['algo_kwargs']['batch_size']
-    train_size = 32 if variant['debug'] == 1 else None
+    train_size = 4 if variant['debug'] == 1 else None
     train_dataset = load_dataset(train_path, train=True, batchsize=bs, size=train_size)
     test_dataset = load_dataset(test_path, train=False, batchsize=bs, size=100)
 
     logger.get_snapshot_dir()
 
     m = iodine.create_model(variant['model'], train_dataset.action_dim, dataparallel=False)
-    if variant['dataparallel']:
-        m = torch.nn.DataParallel(m)
-
-    #m.to(ptu.device)
-
+    # if variant['dataparallel']:
+    #     m = torch.nn.DataParallel(m)
+    #
+    # #m.to(ptu.device)
+    #
     t = IodineTrainer(train_dataset, test_dataset, m,
                        **variant['algo_kwargs'])
-    save_period = variant['save_period']
-    for epoch in range(variant['num_epochs']):
-        should_save_imgs = (epoch % save_period == 0)
-        t.train_epoch(epoch)
-        t.test_epoch(epoch, save_vae=False, train=False, record_stats=True, batches=1,
-                     save_reconstruction=should_save_imgs)
-        t.test_epoch(epoch, save_vae=False, train=True, record_stats=False, batches=1,
-                     save_reconstruction=should_save_imgs)
-        torch.save(m.state_dict(), open(logger._snapshot_dir + '/params.pkl', "wb"))
-    logger.save_extra_data(m, 'vae.pkl', mode='pickle')
+    # save_period = variant['save_period']
+    # for epoch in range(variant['num_epochs']):
+    #     should_save_imgs = (epoch % save_period == 0)
+    #     t.train_epoch(epoch)
+    #     t.test_epoch(epoch, save_vae=False, train=False, record_stats=True, batches=1,
+    #                  save_reconstruction=should_save_imgs)
+    #     t.test_epoch(epoch, save_vae=False, train=True, record_stats=False, batches=1,
+    #                  save_reconstruction=should_save_imgs)
+    #     torch.save(m.state_dict(), open(logger._snapshot_dir + '/params.pkl', "wb"))
+    # logger.save_extra_data(m, 'vae.pkl', mode='pickle')
+
+    algo = RayVAETrainer(t, train_dataset, test_dataset, variant)
+
+    return algo
 
 
 if __name__ == "__main__":
@@ -118,7 +123,7 @@ if __name__ == "__main__":
         model=iodine.imsize64_large_iodine_architecture,
         algo_kwargs = dict(
             gamma=0.5,
-            batch_size=8,
+            batch_size=2,
             lr=1e-4,
             log_interval=0,
             train_T=5,  # 15
@@ -128,21 +133,37 @@ if __name__ == "__main__":
         num_epochs=10000,
         algorithm='Iodine',
         save_period=1,
-        dataparallel=True,
+        dataparallel=False,
         dataset=args.dataset,
         debug=args.debug
     )
 
-    mode = 'here_no_doodad'
-    mode = 'local_docker'
-    run_experiment(
-        train_vae,
-        exp_prefix='iodine-blocks-%s' % args.dataset,
-        mode='here_no_doodad',
-        variant=variant,
-        use_gpu=True,  # Turn on if you have a GPU
-        seed=None,
+    n_seeds = 1
+    mode = 'aws' #'local_docker'
+    exp_prefix = 'iodine-blocks-%s' % args.dataset
+
+    launch_experiment(
+        mode=mode,
+        use_gpu=False,
+
+        local_launch_variant=dict(
+            seeds=n_seeds,
+            init_algo_functions_and_log_fnames=[(run_experiment_func, 'progress.csv')],
+            exp_variant=variant,
+            checkpoint_freq=20,
+            exp_prefix=exp_prefix,
+            #custom_loggers=[ImageLogger],
+            # resources_per_trial={
+            #     'cpu': 2,
+            # }
+        ),
+        remote_launch_variant=dict(
+            # head_instance_type='m1.xlarge',
+            max_spot_price=.2,
+        ),
+        docker_variant=dict(),
     )
+
 
 
 

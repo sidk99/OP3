@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from os import path as osp
 import numpy as np
 import torch
@@ -8,7 +9,7 @@ from rlkit.core.serializable import Serializable
 from rlkit.core.eval_util import create_stats_ordered_dict
 from rlkit.torch import pytorch_util as ptu
 from rlkit.torch.pytorch_util import from_numpy
-
+import os
 
 class IodineTrainer(Serializable):
     def __init__(
@@ -88,11 +89,20 @@ class IodineTrainer(Serializable):
             if self.log_interval and batch_idx % self.log_interval == 0:
                 print(x_prob_loss.item(), kle_loss.item())
 
-        logger.record_tabular("train/epoch", epoch)
-        logger.record_tabular("train/Log Prob", np.mean(log_probs))
-        logger.record_tabular("train/KL", np.mean(kles))
-        logger.record_tabular("train/loss", np.mean(losses))
-        logger.record_tabular("train/mse", np.mean(mses))
+        # logger.record_tabular("train/epoch", epoch)
+        # logger.record_tabular("train/Log Prob", np.mean(log_probs))
+        # logger.record_tabular("train/KL", np.mean(kles))
+        # logger.record_tabular("train/loss", np.mean(losses))
+        # logger.record_tabular("train/mse", np.mean(mses))
+
+        stats = OrderedDict([
+            ("train/epoch", epoch),
+            ("train/Log Prob", np.mean(log_probs)),
+            ("train/KL", np.mean(kles)),
+            ("train/loss", np.mean(losses)),
+            ("train/mse", np.mean(mses))
+        ])
+        return stats
 
 
     def test_epoch(
@@ -135,18 +145,29 @@ class IodineTrainer(Serializable):
                 full_rec = rec.sum(0, keepdim=True)
 
                 comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize)
-
-                save_dir = osp.join(logger.get_snapshot_dir(),
+                #import pdb; pdb.set_trace()
+                save_dir = osp.join(os.getcwd(),
                                     '%s_r%d.png' % ('train' if train else 'val', epoch))
+
                 save_image(comparison.data.cpu(), save_dir, nrow=self.test_T)
             if batch_idx >= batches - 1:
                 break
 
-        if record_stats:
-            logger.record_tabular("test/Log Prob", np.mean(log_probs))
-            logger.record_tabular("test/KL", np.mean(kles))
-            logger.record_tabular("test/loss", np.mean(losses))
-            logger.record_tabular("test/mse", np.mean(mses))
-            logger.dump_tabular()
-        if save_vae:
-            logger.save_itr_params(epoch, self.model)  # slow...
+        # if record_stats:
+        #     logger.record_tabular("test/Log Prob", np.mean(log_probs))
+        #     logger.record_tabular("test/KL", np.mean(kles))
+        #     logger.record_tabular("test/loss", np.mean(losses))
+        #     logger.record_tabular("test/mse", np.mean(mses))
+        #     logger.dump_tabular()
+        # if save_vae:
+        #     logger.save_itr_params(epoch, self.model)  # slow...
+
+        stats = OrderedDict([
+            ("test/Log Prob", np.mean(log_probs)),
+            ("test/KL", np.mean(kles)),
+            ("test/loss", np.mean(losses)),
+            ("test/mse", np.mean(mses))
+        ])
+
+        return stats
+

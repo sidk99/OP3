@@ -14,10 +14,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import imageio
 import cv2
+import pathos.pools as pp
 
-def createMultipleSims(args, obs_size, ac_size, createSingleSim):
+def createMultipleSims(args, obs_size, ac_size, createSingleSim, num_workers=1):
     datasets = {'training':args.num_sims,'validation':min(args.num_sims, 100)}
     n_frames = args.num_frames
+    pool = pp.ProcessPool(num_workers)
     with h5py.File(args.filename, 'w') as f:
         for folder in datasets:
             cur_folder = f.create_group(folder)
@@ -30,14 +32,15 @@ def createMultipleSims(args, obs_size, ac_size, createSingleSim):
             # groups_data_shape = [n_frames, num_sims] + list(env.get_obs_size()) + [1]
             # action_data_shape = (1, num_sims, len(polygons) + 7 + 3)
             action_data_shape = [n_frames, num_sims] + ac_size
-            features_dataset = cur_folder.create_dataset('features', image_data_shape, dtype='float32')
+            features_dataset = cur_folder.create_dataset('features', image_data_shape, dtype='uint8')
             # groups_dataset = cur_folder.create_dataset('groups', groups_data_shape, dtype='float32')
             action_dataset = cur_folder.create_dataset('actions', action_data_shape, dtype='float32')
 
+
+            results = pool.map(createSingleSim, [args for _ in range(num_sims)])
             # for i in range(num_sims):
-            i = 0
-            while i < num_sims:
-                frames, action_vec = createSingleSim()  # (T, M, N, C), (T, A)
+            for i in range(num_sims):
+                frames, action_vec = results[i] #createSingleSim()  # (T, M, N, C), (T, A)
                 # frames, group_frames, action_vec = createSingleSim() #(T, M, N, C), (T, M, N, 1)
                 # pdb.set_trace()
 
@@ -49,7 +52,6 @@ def createMultipleSims(args, obs_size, ac_size, createSingleSim):
                 features_dataset[:, [i], :, :, :] = frames
                 # groups_dataset[:, [i], :, :, :] = group_frames
                 action_dataset[:, i, :] = action_vec
-                i += 1
 
             print("Done with dataset: {}".format(folder))
 
