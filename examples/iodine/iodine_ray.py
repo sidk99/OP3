@@ -99,7 +99,7 @@ if __name__ == "__main__":
     if args.debug == 1:
         bs = 8
     else:
-        bs = 32
+        bs = 64
         mode = 'aws'
 
     variant = dict(

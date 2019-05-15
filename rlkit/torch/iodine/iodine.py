@@ -131,11 +131,17 @@ imsize64_large_iodine_architecture = dict(
     physics_kwargs=dict(
         action_enc_size=32,
     ),
+    # schedule_kwargs=dict(
+    #     train_T=5,
+    #     test_T=5,
+    #     seed_steps=4,
+    #     schedule_type='single_step_physics'
+    # )
     schedule_kwargs=dict(
-        train_T=5,
-        test_T=5,
+        train_T=15,
+        test_T=9,
         seed_steps=4,
-        schedule_type='single_step_physics'
+        schedule_type='random_alternating'
     )
 )
 
@@ -240,7 +246,14 @@ class IodineVAE(GaussianLatentVAE):
 
         self.sigma = from_numpy(np.array([sigma]))
 
-
+    # loss weight just for physics
+    def get_loss_weight(self, t, T):
+        if self.schedule_type == 'single_step_physics':
+            return T
+     
+        elif self.schedule_type == 'random_alternating':
+            return t * 2
+        
     def encode(self, input):
         pass
 
@@ -428,7 +441,7 @@ class IodineVAE(GaussianLatentVAE):
 
         for t in range(1, T + 1):
             # Refine
-            if schedule[t - 1] == 0 or actions_done:
+            if schedule[t - 1] == 0:
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
                 lambdas1, lambdas2, h1, h2 = self.refine_lambdas(pixel_x_prob, pixel_likelihood, mask, m_hat_logit,
                                                                  loss, x_hat,
@@ -456,7 +469,7 @@ class IodineVAE(GaussianLatentVAE):
                     tiled_k_shape)
 
                 lambdas1, _ = self.physics_net(lambdas1, lambdas2, actionsK)
-                loss_w = T
+                loss_w = self.get_loss_weight(t, T)
 
             # Decode and get loss
             x_hat, mask, m_hat_logit, latents, pixel_x_prob, pixel_likelihood, kle_loss, loss, log_likelihood = \
