@@ -95,7 +95,7 @@ imsize64_large_iodine_architecture = dict(
         # decoder_distribution='gaussian_identity_variance',
         beta=1,
         K=7,
-        sigma=0.1
+        sigma=0.1,
     ),
     deconv_args=dict(
         hidden_sizes=[],
@@ -127,11 +127,20 @@ imsize64_large_iodine_architecture = dict(
         lstm_input_size=768,
         added_fc_input_size=0
 
+    ),
+    physics_kwargs=dict(
+        action_enc_size=32,
+    ),
+    schedule_kwargs=dict(
+        train_T=5,
+        test_T=5,
+        seed_steps=4,
+        schedule_type='single_step_physics'
     )
 )
 
 
-def create_model(model, action_dim, dataparallel=False):
+def create_model(model, action_dim):
     K = model['vae_kwargs']['K']
     rep_size = model['vae_kwargs']['representation_size']
 
@@ -139,19 +148,32 @@ def create_model(model, action_dim, dataparallel=False):
                            hidden_activation=nn.ELU())
     refinement_net = RefinementNetwork(**model['refine_args'],
                                        hidden_activation=nn.ELU())
-    physics_net = PhysicsNetwork(K, rep_size, action_dim)
+    physics_net = PhysicsNetwork(K, rep_size, action_dim, **model['physics_kwargs'])
 
     m = IodineVAE(
         **model['vae_kwargs'],
+        **model['schedule_kwargs'],
         decoder=decoder,
         refinement_net=refinement_net,
         physics_net=physics_net,
         action_dim=action_dim,
-        dataparallel=dataparallel,
 
     )
     return m
 
+def create_schedule(train, T, schedule_type, seed_steps):
+    if schedule_type == 'single_step_physics':
+        schedule = np.ones((T,))
+        schedule[:-1] = 0
+    elif schedule_type == 'random_alternating':
+        if train:
+            schedule = np.random.randint(0, 2, (T,))
+        else:
+            schedule = np.ones((T,))
+        schedule[:seed_steps] = 0
+    else:
+        raise Exception
+    return schedule
 
 class IodineVAE(GaussianLatentVAE):
     def __init__(
@@ -166,8 +188,11 @@ class IodineVAE(GaussianLatentVAE):
             imsize=48,
             min_variance=1e-3,
             beta=5,
-            dataparallel=False,
             sigma=0.1,
+            train_T=5,
+            test_T=5,
+            seed_steps=4,
+            schedule_type='single_step_physics'
 
     ):
         """
@@ -191,6 +216,10 @@ class IodineVAE(GaussianLatentVAE):
         self.beta = beta
         self.physics_net = physics_net
         self.lstm_size = 256
+        self.train_T = train_T
+        self.test_T = test_T
+        self.seed_steps = seed_steps
+        self.schedule_type = schedule_type
 
         self.decoder = decoder
 
@@ -210,6 +239,7 @@ class IodineVAE(GaussianLatentVAE):
         self.lambdas2 = Parameter(ptu.ones((self.representation_size)) * 0.6)
 
         self.sigma = from_numpy(np.array([sigma]))
+
 
     def encode(self, input):
         pass
@@ -422,11 +452,11 @@ class IodineVAE(GaussianLatentVAE):
                 if current_step >= input.shape[1] - 1:
                     actions_done = True
                     current_step = input.shape[1] - 1
-                inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1,
-                                                                                       1).view(tiled_k_shape)
+                inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(
+                    tiled_k_shape)
 
                 lambdas1, _ = self.physics_net(lambdas1, lambdas2, actionsK)
-                loss_w = t * 2
+                loss_w = T
 
             # Decode and get loss
             x_hat, mask, m_hat_logit, latents, pixel_x_prob, pixel_likelihood, kle_loss, loss, log_likelihood = \

@@ -7,6 +7,7 @@ import rlkit.torch.iodine.iodine as iodine
 from rlkit.torch.iodine.iodine_trainer import IodineTrainer
 import ray
 import ray.tune as tune
+import torch.nn as nn
 from rlkit.torch.vae.ray_vae_trainer import RayVAETrainer
 from rlkit.launchers.ray.launcher import launch_experiment
 from rlkit.core import logger
@@ -17,6 +18,7 @@ from torch.utils.data.dataset import TensorDataset
 import torch
 import random
 from argparse import ArgumentParser
+import os
 
 def load_dataset(data_path, train=True, size=None, batchsize=8):
     hdf5_file = h5py.File(data_path, 'r')  # RV: Data file
@@ -38,11 +40,9 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
         else:
             feats = np.array(hdf5_file['validation']['features'])
             actions = np.array(hdf5_file['validation']['actions'])
-        t_sample = [0, 2, 4, 6, 9]
-        feats = np.moveaxis(feats, -1, 2)[t_sample] # (T, bs, ch, imsize, imsize)
+        #t_sample = [0, 2, 4, 6, 9]
+        feats = np.moveaxis(feats, -1, 2) #[t_sample] # (T, bs, ch, imsize, imsize)
         feats = np.moveaxis(feats, 0, 1) # (bs, T, ch, imsize, imsize)
-        #feats = (feats * 255).astype(np.uint8)
-        #actions = np.moveaxis(actions, 0, 1) # (bs, T, action_dim)
         torch_dataset = TensorDataset(torch.Tensor(feats)[:size])
         dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
 
@@ -57,7 +57,6 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
 
         feats = np.moveaxis(feats, -1, 2) # (T, bs, ch, imsize, imsize)
         feats = np.moveaxis(feats, 0, 1) # (bs, T, ch, imsize, imsize)
-        #feats = (feats * 255).astype(np.uint8)
         actions = np.moveaxis(actions, 0, 1) # (bs, T, action_dim)
 
         torch_dataset = TensorDataset(torch.Tensor(feats)[:size],
@@ -67,19 +66,8 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
 
 
 def run_experiment_func(variant):
-    #train_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_train.hdf5'
-    #test_path = '/home/jcoreyes/objects/rlkit/examples/monet/clevr_test.hdf5'
 
-    # train_path = '/home/jcoreyes/objects/RailResearch/DataGeneration/ColorBigTwoBallSmall.h5'
-
-    #train_path = '/home/jcoreyes/objects/RailResearch/BlocksGeneration/rendered/fiveBlock10kActions.h5'
-    # seed = int(variant['seed'])
-    # torch.manual_seed(seed)
-    # np.random.seed(seed)
-    # random.seed(seed)
-
-
-    train_path = '/home/ubuntu/objects/rlkit/data/%s.h5' % variant['dataset']
+    train_path = os.path.expanduser('~') + '/objects/rlkit/data/%s.h5' % variant['dataset']
     test_path = train_path
     bs = variant['algo_kwargs']['batch_size']
     train_size = 4 if variant['debug'] == 1 else None
@@ -88,26 +76,14 @@ def run_experiment_func(variant):
 
     logger.get_snapshot_dir()
 
-    m = iodine.create_model(variant['model'], train_dataset.action_dim, dataparallel=False)
-    # if variant['dataparallel']:
-    #     m = torch.nn.DataParallel(m)
-    #
-    # #m.to(ptu.device)
-    #
+    m = iodine.create_model(variant['model'], train_dataset.action_dim)
+    if variant['dataparallel']:
+        m = nn.DataParallel(m)
     t = IodineTrainer(train_dataset, test_dataset, m,
+                      **variant['model']['schedule_kwargs'],
                        **variant['algo_kwargs'])
-    # save_period = variant['save_period']
-    # for epoch in range(variant['num_epochs']):
-    #     should_save_imgs = (epoch % save_period == 0)
-    #     t.train_epoch(epoch)
-    #     t.test_epoch(epoch, save_vae=False, train=False, record_stats=True, batches=1,
-    #                  save_reconstruction=should_save_imgs)
-    #     t.test_epoch(epoch, save_vae=False, train=True, record_stats=False, batches=1,
-    #                  save_reconstruction=should_save_imgs)
-    #     torch.save(m.state_dict(), open(logger._snapshot_dir + '/params.pkl', "wb"))
-    # logger.save_extra_data(m, 'vae.pkl', mode='pickle')
 
-    algo = RayVAETrainer(t, train_dataset, test_dataset, variant)
+    algo = RayVAETrainer(t, train_dataset, test_dataset, variant, variant['num_epochs'])
 
     return algo
 
@@ -119,43 +95,46 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    mode = 'local'
+    if args.debug == 1:
+        bs = 8
+    else:
+        bs = 32
+        mode = 'aws'
+
     variant = dict(
         model=iodine.imsize64_large_iodine_architecture,
         algo_kwargs = dict(
             gamma=0.5,
-            batch_size=2,
+            batch_size=bs,
             lr=1e-4,
             log_interval=0,
-            train_T=5,  # 15
-            test_T=5,   # 9
-            seed_steps=4,
         ),
-        num_epochs=10000,
+        num_epochs=1000,
         algorithm='Iodine',
         save_period=1,
-        dataparallel=False,
+        dataparallel=True,
         dataset=args.dataset,
         debug=args.debug
     )
 
     n_seeds = 1
-    mode = 'aws' #'local_docker'
     exp_prefix = 'iodine-blocks-%s' % args.dataset
 
     launch_experiment(
         mode=mode,
-        use_gpu=False,
+        use_gpu=True,
 
         local_launch_variant=dict(
             seeds=n_seeds,
             init_algo_functions_and_log_fnames=[(run_experiment_func, 'progress.csv')],
             exp_variant=variant,
-            checkpoint_freq=20,
+            checkpoint_freq=1,
             exp_prefix=exp_prefix,
-            #custom_loggers=[ImageLogger],
-            # resources_per_trial={
-            #     'cpu': 2,
-            # }
+            resources_per_trial={
+                'cpu': 2,
+                'gpu': 4,
+            }
         ),
         remote_launch_variant=dict(
             # head_instance_type='m1.xlarge',

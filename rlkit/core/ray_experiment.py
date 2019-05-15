@@ -90,7 +90,7 @@ class SequentialRayExperiment(tune.Trainable):
             'cur_algo_idx': self.cur_algo_idx
         }
         with open(algo_path, 'wb') as f:
-            cloudpickle.dump(info_to_save, f)
+            cloudpickle.dump(info_to_save, f, protocol=4)
         return algo_path
 
     def _restore(self, checkpoint_path):
