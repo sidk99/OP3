@@ -24,7 +24,7 @@ class Cost:
     def best_action(self, mpc_step, goal_latents, goal_latents_recon, goal_image, pred_latents,
                     pred_latents_recon, pred_image, actions):
         if self.type == 'min_min_latent':
-            return self.min_min_latent(goal_latents, goal_image, pred_latents, pred_latents_recon,
+            return self.min_min_latent(goal_latents, goal_image, pred_latents, pred_image,
                                        actions)
         if self.type == 'sum_goal_min_latent':
             self.remove_goal_latents = False
@@ -36,6 +36,8 @@ class Cost:
         elif self.type == 'latent_pixel':
             return self.latent_pixel(mpc_step, goal_latents_recon, goal_image, pred_latents_recon,
                                      pred_image, actions)
+        else:
+            raise Exception
 
     def mse(self, l1, l2):
         # l1 is (..., rep_size) l2 is (..., rep_size)
@@ -49,12 +51,13 @@ class Cost:
         best_cost = np.inf
         best_latent_idx = 0
 
+        costs = []
         # Compare against each goal latent
         for i in range(goal_latents.shape[0]):
 
             cost = self.mse(goal_latents[i].view(1, 1, -1), pred_latents)  # cost is (n_actions, K)
             cost, latent_idx = cost.min(-1)  # take min among K
-
+            costs.append(cost)
             min_cost, action_idx = cost.min(0)  # take min among n_actions
 
             if min_cost <= best_cost:
@@ -64,8 +67,11 @@ class Cost:
                 best_latent_idx = latent_idx[action_idx]
 
         best_pred_obs = ptu.get_numpy(pred_image[best_action_idx])
+        costs = torch.stack(costs)  # (n_goal_latents, n_actions )
 
-        return best_pred_obs, actions[best_action_idx], best_goal_idx
+        best_action_idxs = costs.min(0)[0].sort()[1]
+
+        return best_pred_obs, actions[ptu.get_numpy(best_action_idxs)], best_goal_idx
 
     def sum_goal_min_latent(self, goal_latents, goal_image, pred_latents, pred_image, actions):
         # obs_latents is (n_actions, K, rep_size)
@@ -186,7 +192,7 @@ class MPC:
         # Keep top goal latents with highest mask area except first
         n_goals = self.n_goal_objs
         vals, keep = torch.sort(goal_latents_mask.mean(2).mean(1), descending=True)
-        goal_latents_recon[keep[n_goals]] += goal_latents_recon[keep[n_goals + 1]]
+        #goal_latents_recon[keep[n_goals]] += goal_latents_recon[keep[n_goals + 1]]
         keep = keep[1:1 + n_goals]
         goal_latents = torch.stack([goal_latents[i] for i in keep])
         goal_latents_recon = torch.stack([goal_latents_recon[i] for i in keep])
@@ -330,15 +336,16 @@ def main(variant):
     # goal_file = variant['goal_file']
     #model_file = '/home/jcoreyes/objects/rlkit/output/04-25-iodine-blocks-physics-actions/04-25' \
     #             '-iodine-blocks-physics-actions_2019_04_25_11_36_24_0000--s-98913/params.pkl'
-    model_file = '/home/jcoreyes/objects/op3_exps/05-12-iodine-blocks-stack-multistep1k/05-12' \
-                 '-iodine-blocks-stack_multistep1k_2019_05_12_12_32_43_0000--s-53655/params.pkl'
-    # goal_file = '/home/jcoreyes/objects/object-oriented-prediction/o2p2/planning/executed/mjc_4
-    # .png'
+    #model_file = '/home/jcoreyes/objects/op3_exps/05-12-iodine-blocks-stack-multistep1k/05-12' \
+    #             '-iodine-blocks-stack_multistep1k_2019_05_12_12_32_43_0000--s-53655/params.pkl'
+
+    module_path = '/home/jcoreyes/objects/rlkit'
+    model_file = '/home/jcoreyes/objects/op3-s3-logs/iodine-blocks-stack50k/SequentialRayExperiment_0_2019-05-15_01-24-38zy_wn4_6/model_params.pkl'
 
     # goal_idxs = [i for i in range(20, 50)]
     goal_idxs = [26, 27, 28, 29, 30, 33, 51, 52, 55, 58, 59, 61, 62, 63, 65, 71, 81]
 
-    m = iodine.create_model(variant['model'], 0, dataparallel=False)
+    m = iodine.create_model(variant['model'], 0)
     state_dict = torch.load(model_file)
     new_state_dict = OrderedDict()
     for k, v in state_dict.items():
@@ -353,14 +360,14 @@ def main(variant):
     actions_lst = []
     stats = {'mse': 0}
     for goal_idx in goal_idxs:
-        goal_file = '/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/img_%d.png' % goal_idx
-        true_actions =  np.load('/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/actions.npy')[
-             goal_idx]
+        goal_file = module_path + '/examples/mpc/stage1/goals_3/img_%d.png' % goal_idx
+        true_actions = np.load(module_path + '/examples/mpc/stage1/goals_3/actions.npy')[
+            goal_idx]
         env = BlockEnv(5)
-        mpc = MPC(m, env, n_actions=7, mpc_steps=2, true_actions=true_actions,
+        mpc = MPC(m, env, n_actions=7, mpc_steps=3, true_actions=true_actions,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=3,
                   logger_prefix_dir='/goal_%d' % goal_idx,
-                  mpc_style=variant['mpc_style'], cem_steps=1, use_action_image=True)
+                  mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True)
         goal_image = imageio.imread(goal_file)
         mse, actions = mpc.run(goal_image)
         stats['mse'] += mse
@@ -381,7 +388,7 @@ if __name__ == "__main__":
         algorithm='MPC',
         modelfile=args.modelfile,
         goalfile=args.goalfile,
-        cost_type='latent_pixel',  # 'sum_goal_min_latent'
+        cost_type='min_min_latent',  # 'sum_goal_min_latent'
         mpc_style='random_shooting', # random_shooting or cem
         model=iodine.imsize64_large_iodine_architecture
     )

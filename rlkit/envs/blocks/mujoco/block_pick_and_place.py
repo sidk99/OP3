@@ -54,8 +54,7 @@ class BlockPickAndPlaceEnv():
         self.num_objects = num_objects
         self.internal_steps_per_step = 500
         self.bounds = {'x_min': -2.5, 'x_max': 2.5, 'y_min': -2, 'y_max': 1., 'z_min': 0.05,
-                       'z_max':
-            2.2}
+                       'z_max':2.2}
 
         self.names = []
         self.blocks = []

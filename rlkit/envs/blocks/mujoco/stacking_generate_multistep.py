@@ -225,10 +225,9 @@ def createMultipleSims(num_workers=1):
     pool = pp.ProcessPool(num_workers)
     with h5py.File(filename, 'w') as f:
         for folder in datasets:
-            cur_folder = f.create_group(folder)
-
             num_sims = datasets[folder]
-
+            results = pool.map(createSingleSim, [(0) for _ in range(num_sims)])
+            cur_folder = f.create_group(folder)
             # create datasets, write to disk
             image_data_shape = (n_frames, num_sims, image_res, image_res, 3)
             #groups_data_shape = (n_frames, num_sims, image_res, image_res, 1)
@@ -236,7 +235,7 @@ def createMultipleSims(num_workers=1):
             features_dataset = cur_folder.create_dataset('features', image_data_shape, dtype='uint8')
             action_dataset = cur_folder.create_dataset('actions', action_data_shape, dtype='float32')
 
-            results = pool.map(createSingleSim, [(0) for _ in range(num_sims)])
+
             for i in range(num_sims):
                 frames, action_vec = results[i] #(T, M, N, C), (T, M, N, 1)
 

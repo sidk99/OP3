@@ -27,3 +27,4 @@ def plot_multi_image(imgs, save_dir, caption=None):
             count += 1
 
     plt.savefig(save_dir)
+    plt.close('all')

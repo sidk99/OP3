@@ -131,18 +131,18 @@ imsize64_large_iodine_architecture = dict(
     physics_kwargs=dict(
         action_enc_size=32,
     ),
-    # schedule_kwargs=dict(
-    #     train_T=5,
-    #     test_T=5,
-    #     seed_steps=4,
-    #     schedule_type='single_step_physics'
-    # )
     schedule_kwargs=dict(
-        train_T=15,
-        test_T=9,
+        train_T=5,
+        test_T=5,
         seed_steps=4,
-        schedule_type='random_alternating'
+        schedule_type='single_step_physics'
     )
+    # schedule_kwargs=dict(
+    #     train_T=15,
+    #     test_T=9,
+    #     seed_steps=4,
+    #     schedule_type='random_alternating'
+    # )
 )
 
 
@@ -362,8 +362,8 @@ class IodineVAE(GaussianLatentVAE):
         bs = input.shape[0]
         imsize = self.imsize
         input = input.unsqueeze(1).repeat(1, 9, 1, 1, 1)
-        schedule = np.ones((9,))
-        schedule[:4] = 0
+
+        schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps)
 
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(
             input, actions,
