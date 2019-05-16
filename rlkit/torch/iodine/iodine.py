@@ -318,9 +318,9 @@ class IodineVAE(GaussianLatentVAE):
         K = self.K
         bs = input.shape[0]
         imsize = self.imsize
-        input = input.unsqueeze(1)
+        input = input.unsqueeze(1).repeat(1, 9, 1, 1, 1)
         schedule = np.ones((9,))
-        schedule[:5] = 0
+        schedule[:4] = 0
 
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(
             input, actions,

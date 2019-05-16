@@ -21,8 +21,9 @@ MODEL_XML_BASE = """
     </asset>
     <worldbody>
         <camera name='fixed' pos='0 -8 6' euler='-300 0 0'/>
-        <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' 
-        condim="6" friction="1 1 1"/>
+        <light diffuse='1.5 1.5 1.5' pos='0 -7 8' dir='0 -1 -1'/>  
+        <light diffuse='1.5 1.5 1.5' pos='0 -7 6' dir='0 -1 -1'/>  
+        <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' condim="6" friction="1 1 1"/>
         {}
     </worldbody>
     <option gravity="0 0 -10"/>
@@ -46,7 +47,7 @@ def pickRandomColor(an_int):
         return np.random.uniform(low=0.0, high=1.0, size=3)
     tmp = np.random.randint(0, an_int)
     return np.array(COLOR_LIST[tmp])/255
-
+import copy
 
 class BlockPickAndPlaceEnv():
     def __init__(self, num_objects, num_colors, img_dim, include_z):
@@ -56,7 +57,7 @@ class BlockPickAndPlaceEnv():
         self.num_colors = num_colors
         self.num_objects = num_objects
         self.internal_steps_per_step = 1000
-        self.bounds = {'x_min':-3, 'x_max':3, 'y_min':-1.5, 'y_max':3, 'z_min':0.05, 'z_max': 2.2}
+        self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min':-2, 'y_max':1, 'z_min':0.05, 'z_max': 2.2}
         self.include_z = include_z
 
         self.names = []
@@ -274,7 +275,9 @@ class BlockPickAndPlaceEnv():
             # aname = np.random.choice(self.names)
             aname = self.get_rand_block_byz()
             pick = self.get_block_info(aname)["pos"] + np.random.randn(3)/10
-            aname = np.random.choice(self.names)
+            names = copy.deepcopy(self.names)
+            names.remove(aname)
+            aname = np.random.choice(names)
             place = self.get_block_info(aname)["pos"] + np.random.randn(3)/10
             place[2] = 3.5
         elif action_type == 'remove_block':
@@ -350,7 +353,8 @@ if __name__ == '__main__':
         args.num_frames = 2
 
     info["num_frames"] = args.num_frames
-    single_sim_func = lambda : createSingleSim(args)
+    # single_sim_func = lambda : createSingleSim(args)
+    single_sim_func = createSingleSim
     env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z)
     ac_size = env.get_actions_size()
     obs_size = env.get_obs_size()

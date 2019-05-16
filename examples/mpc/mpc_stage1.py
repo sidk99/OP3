@@ -306,7 +306,8 @@ class MPC:
             actions = np.concatenate([self.true_actions[mpc_step].reshape((1, -1)), actions])
 
         if self.use_action_image:
-            obs_rep = np.stack([self.env.try_action(action) for action in actions])
+            obs_rep = ptu.from_numpy(np.moveaxis(np.stack([self.env.try_action(action) for action in
+                                               actions]), 3, 1))
         else:
             obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0], 1, 1,
                                                                              1)
@@ -329,16 +330,18 @@ def main(variant):
     # goal_file = variant['goal_file']
     #model_file = '/home/jcoreyes/objects/rlkit/output/04-25-iodine-blocks-physics-actions/04-25' \
     #             '-iodine-blocks-physics-actions_2019_04_25_11_36_24_0000--s-98913/params.pkl'
-    model_file = '/home/jcoreyes/objects/op3_exps/05-12-iodine-blocks-stack-multistep1k/05-12' \
-                 '-iodine-blocks-stack_multistep1k_2019_05_12_12_32_43_0000--s-53655/params.pkl'
+    # model_file = '/home/jcoreyes/objects/op3_exps/05-12-iodine-blocks-stack-multistep1k/05-12' \
+    #              '-iodine-blocks-stack_multistep1k_2019_05_12_12_32_43_0000--s-53655/params.pkl'
     # goal_file = '/home/jcoreyes/objects/object-oriented-prediction/o2p2/planning/executed/mjc_4
     # .png'
+    model_file = 'saved_models/iodine_params_5_12.pkl'
 
     # goal_idxs = [i for i in range(20, 50)]
-    goal_idxs = [26, 27, 28, 29, 30, 33, 51, 52, 55, 58, 59, 61, 62, 63, 65, 71, 81]
+    # goal_idxs = [26, 27, 28, 29, 30, 33, 51, 52, 55, 58, 59, 61, 62, 63, 65, 71, 81]
+    goal_idxs = [26]
 
     m = iodine.create_model(variant['model'], 0, dataparallel=False)
-    state_dict = torch.load(model_file)
+    state_dict = torch.load(model_file, map_location='cpu')
     new_state_dict = OrderedDict()
     for k, v in state_dict.items():
         name = k
@@ -347,19 +350,22 @@ def main(variant):
         new_state_dict[name] = v
     m.load_state_dict(new_state_dict)
 
-    m.cuda()
+    # m.cuda()
 
     actions_lst = []
     stats = {'mse': 0}
+
+    goal_path = '/Users/aiflab/Downloads/goals_3/' #RV
     for goal_idx in goal_idxs:
-        goal_file = '/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/img_%d.png' % goal_idx
-        true_actions =  None #np.load('/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/actions.npy')[
-            # goal_idx]
+        # goal_file = '/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/img_%d.png' % goal_idx
+        # true_actions =  np.load('/home/jcoreyes/objects/rlkit/examples/mpc/goals_3/actions.npy')[goal_idx]
+        goal_file = goal_path + "img_{}.png".format(goal_idx) #RV
+        true_actions = np.load(goal_path + 'actions.npy')[goal_idx] #RV
         env = BlockEnv(5)
-        mpc = MPC(m, env, n_actions=32, mpc_steps=3, true_actions=None,
+        mpc = MPC(m, env, n_actions=7, mpc_steps=2, true_actions=true_actions,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=3,
                   logger_prefix_dir='/goal_%d' % goal_idx,
-                  mpc_style=variant['mpc_style'], cem_steps=5)
+                  mpc_style=variant['mpc_style'], cem_steps=1, use_action_image=True)
         goal_image = imageio.imread(goal_file)
         mse, actions = mpc.run(goal_image)
         stats['mse'] += mse
@@ -381,7 +387,7 @@ if __name__ == "__main__":
         modelfile=args.modelfile,
         goalfile=args.goalfile,
         cost_type='latent_pixel',  # 'sum_goal_min_latent'
-        mpc_style='cem',
+        mpc_style='random_shooting', # random_shooting or cem
         model=iodine.imsize64_large_iodine_architecture
     )
 
@@ -390,5 +396,5 @@ if __name__ == "__main__":
         exp_prefix='mpc',
         mode='here_no_doodad',
         variant=variant,
-        use_gpu=True,  # Turn on if you have a GPU
+        use_gpu=False,  # Turn on if you have a GPU
     )
