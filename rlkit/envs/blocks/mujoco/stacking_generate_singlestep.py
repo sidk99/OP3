@@ -82,7 +82,7 @@ metadata = {'polygons': polygons, 'max_steps': args.drop_steps_max,
             'max_objects': max(num_objects)}
 #pickle.dump( metadata, open(os.path.join(args.output_path, 'metadata.p'), 'wb') )
 
-num_images_per_scene = int(args.drop_steps_max / args.render_freq)
+num_images_per_scene =  2 #int(args.drop_steps_max / args.render_freq)
 
 end = args.start + args.num_images
 # for img_num in tqdm.tqdm( range(args.start, end) ):
@@ -165,7 +165,7 @@ def action_to_vector(dict_with_info):
 def createSingleSim(_):
     sim, xml, drop_name = contacts.sample_settled(asset_path, num_objects, polygons, settle_bounds)
     # print(drop_name) #RV: Drop name is a string ending with _number
-    logger = Logger(xml, sim, steps=num_images_per_scene+1, img_dim=args.img_dim)
+    logger = Logger(xml, sim, steps=num_images_per_scene, img_dim=args.img_dim)
 
     ## drop all objects except [ drop_name ]
     logger.settle_sim(drop_name, args.settle_steps_min, args.settle_steps_max)
@@ -206,12 +206,12 @@ def createSingleSim(_):
     logger.log(0)
     for i in range(args.drop_steps_max):
         ## log every [ render_freq ] steps
-        if i % args.render_freq == 0:
+        #if i % args.render_freq == 0:
             ## print(i, (i // args.render_freq) + 1)
-           logger.log((i // args.render_freq) + 1)
+        #   logger.log((i // args.render_freq) + 1)
         ## simulate one timestep
         sim.step()
-    #logger.log(1)
+    logger.log(1)
     data, images, masks = logger.get_logs()
 
     return images, action_vec
@@ -219,8 +219,9 @@ def createSingleSim(_):
 
 filename = os.path.join(args.output_path, args.filename)
 def createMultipleSims(num_workers=1):
-    datasets = {'training':args.num_images,'validation':min(args.num_images, 1000)}
-    n_frames =  (args.drop_steps_max-1) // args.render_freq + 1 + 1 #Default: 500//25=20. Make it 500//15 = 33
+    datasets = {'training':args.num_images,'validation':min(args.num_images, 100)}
+    n_frames =   2 #(args.drop_steps_max-1) // args.render_freq + 1 + 1 #Default: 500//25=20. Make
+    # it 500//15 = 33
     image_res = args.img_dim
     pool = pp.ProcessPool(num_workers)
     with h5py.File(filename, 'w') as f:
@@ -242,9 +243,9 @@ def createMultipleSims(num_workers=1):
 
                 # RV: frames is numpy with shape (T, M, N, C)
                 # Bouncing balls dataset has shape (T, 1, M, N, C)
-                frames = np.expand_dims(frames, 1)
+                #frames = np.expand_dims(frames, 1)
 
-                features_dataset[:, [i], :, :, :] = frames
+                features_dataset[:, i, :, :, :] = frames
                 action_dataset[0, i, :] = action_vec
 
             print("Done with dataset: {}".format(folder))

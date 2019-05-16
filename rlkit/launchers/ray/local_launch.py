@@ -1,6 +1,7 @@
 import cloudpickle
 import logging
 
+import os
 import ray
 import ray.tune as tune
 from ray.tune.logger import JsonLogger
@@ -68,6 +69,7 @@ def launch_local_experiment(init_algo_functions_and_log_fnames,
         checkpoint_freq=checkpoint_freq,
         loggers=[JsonLogger, SequentialCSVLogger] + custom_loggers,
     )
+
     tune.run(
         exp,
         resume=resume,

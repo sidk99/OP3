@@ -37,14 +37,14 @@ EXPERIMENT_INFO_PKL_FILEPATH = '/tmp/local_exp.pkl'
 LAUNCH_FILEPATH = '/tmp/autoscaler_launch.yaml'
 
 # TODO:Steven remove this. File syncing from s3 still uses this.
-LOCAL_LOG_DIR = '/home/jcoreyes/logs'
+LOCAL_LOG_DIR = '/home/jcoreyes/objects/s3_logs'
 
 AWS_CONFIG_NO_GPU=dict(
     REGION='us-west-2',
     INSTANCE_TYPE = 'c5.xlarge',
     SPOT_PRICE = 0.1,
     REGION_TO_AWS_IMAGE_ID = {
-        'us-west-2': 'ami-0b294f219d14e6a82'
+        'us-west-2': 'ami-01a4e5be5f289dd12'
     },
     REGION_TO_AWS_AVAIL_ZONE = {
         'us-west-2': 'us-west-2a,us-west-2b'
@@ -54,10 +54,10 @@ AWS_CONFIG_NO_GPU=dict(
 
 AWS_CONFIG_GPU = dict(
     REGION='us-west-2',
-    INSTANCE_TYPE = 'g3.4xlarge',
-    SPOT_PRICE = 0.6,
+    INSTANCE_TYPE = 'p3.8xlarge',
+    SPOT_PRICE = 4.00,
     REGION_TO_AWS_IMAGE_ID = {
-        'us-west-2': 'ami-0b294f219d14e6a82'
+        'us-west-2': 'ami-076347b8649dddb00'
     },
     REGION_TO_AWS_AVAIL_ZONE = {
         'us-west-2': 'us-west-2a,us-west-2b'

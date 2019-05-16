@@ -127,6 +127,8 @@ class BlockEnv():
     def sample_action_gaussian(self, mean, std):
         ply = random.choice(self.polygons)
 
+        std = np.maximum(std, 0.01)
+
         random_a = np.random.normal(mean, std)
 
         #ply = np.random.choice(self.polygons, p=mean[:3] / mean[:3].sum())
@@ -145,8 +147,9 @@ class BlockEnv():
         scale = utils.uniform(*self.settle_bounds['scale'])
         #rgba = self.sample_rgba_from_hsv(*self.settle_bounds['hsv'])
 
-        rgba = np.clip(random_a[-3:], [x[0] for x in self.settle_bounds['hsv']],
-                      [x[1] for x in self.settle_bounds['hsv']])
+        # rgba = np.clip(random_a[-3:], [x[0] for x in self.settle_bounds['hsv']],
+        #               [x[1] for x in self.settle_bounds['hsv']])
+        rgba = np.clip(random_a[-3:], 0, 1)
         xml_action = {
             'polygon': ply,
             'pos': pos,

@@ -83,7 +83,7 @@ def generate_gcp_config(region=None, head_instance_type=None,
 
 def generate_aws_config(region=None, head_instance_type=None,
                         worker_instance_type=None, source_image=None,
-                        max_spot_price=None, disk_size=100, avail_zones=None,
+                        max_spot_price=None, disk_size=200, avail_zones=None,
                         use_gpu=False):
     default_config = config.AWS_CONFIG[use_gpu]
     if region is None:
@@ -168,6 +168,7 @@ def generate_docker_config(docker_image=None, use_gpu=False):
         # Make the worker do the GPU work and let the head node schedule without
         # GPU.
         worker_run_options.append('--runtime=nvidia')
+        docker_run_options.append('--runtime=nvidia')
     return {
         'docker': {
             'image': docker_image,
@@ -222,6 +223,7 @@ def launch_remote_experiment(mode, local_launch_variant, use_gpu,
     # signal to the instance that this should be a remote experiment
     local_launch_variant['from_remote'] = True
     local_launch_variant['resume'] = True
+
     with open(config.EXPERIMENT_INFO_PKL_FILEPATH, 'wb') as f:
         cloudpickle.dump(local_launch_variant, f)
     with open(config.LAUNCH_FILEPATH, 'w') as f:
@@ -230,6 +232,7 @@ def launch_remote_experiment(mode, local_launch_variant, use_gpu,
         cluster_name = str(uuid.uuid4())
     remote_command = 'python {launch_file}'.format(
         launch_file=ray_local_launch.__file__)
+
     exec_cluster(config_file=config.LAUNCH_FILEPATH, docker=True,
                  cmd=remote_command, start=True, stop=True, tmux=False,
                  screen=False, override_cluster_name=cluster_name,

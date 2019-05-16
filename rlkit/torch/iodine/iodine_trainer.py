@@ -2,6 +2,7 @@ from collections import OrderedDict
 from os import path as osp
 import numpy as np
 import torch
+from rlkit.torch.iodine.iodine import create_schedule
 from torch import optim
 from torchvision.utils import save_image
 from rlkit.core import logger
@@ -17,9 +18,10 @@ class IodineTrainer(Serializable):
             train_dataset,
             test_dataset,
             model,
+            train_T=5,
+            test_T=5,
             seed_steps=4,
-            train_T=15,
-            test_T=9,
+            schedule_type='single_step_physics',
             batch_size=128,
             log_interval=0,
             gamma=0.5,
@@ -33,6 +35,8 @@ class IodineTrainer(Serializable):
         self.seed_steps = seed_steps
         self.train_T = train_T
         self.test_T = test_T
+        self.seed_steps = seed_steps
+        self.schedule_type = schedule_type
 
         model.to(ptu.device)
 
@@ -72,10 +76,7 @@ class IodineTrainer(Serializable):
             # refinement = 0, physics = 1
             # when only doing refinement predict same image
             # when only doing physics predict next image
-            #schedule = np.random.randint(0, 2, (self.train_T,))
-            schedule = np.ones((self.train_T,))
-            schedule[:self.seed_steps] = 0
-            #inputs = self.prepare_inputs()
+            schedule = create_schedule(True, self.train_T, self.schedule_type, self.seed_steps)
             x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(obs, actions=actions, schedule=schedule)
             loss.mean().backward()
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()], 5.0)
@@ -115,8 +116,7 @@ class IodineTrainer(Serializable):
             batches=1,
     ):
 
-        schedule = np.ones((self.test_T,))
-        schedule[:self.seed_steps] = 0
+        schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps)
 
         self.model.eval()
         losses, log_probs, kles, mses = [], [], [], []

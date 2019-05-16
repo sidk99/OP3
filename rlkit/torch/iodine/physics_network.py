@@ -15,14 +15,15 @@ class PhysicsNetwork(nn.Module):
             K,
             representation_size,
             action_size,
+            action_enc_size,
     ):
         super().__init__()
         self.K = K
         self.rep_size = representation_size
         self.action_size = action_size
 
-        self.action_enc_size = 16 if action_size > 0 else 0
-        self.effect_size = 16
+        self.action_enc_size = action_enc_size if action_size > 0 else 0
+        self.effect_size = action_enc_size
         self.enc_rep_size = representation_size - self.effect_size
         self.interaction_size = 128
 
