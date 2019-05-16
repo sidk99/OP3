@@ -125,13 +125,17 @@ class BlockEnv():
         return self.xml_action_to_model_action(xml_action)
 
     def sample_action_gaussian(self, mean, std):
-        ply = random.choice(self.polygons)
+        #ply = random.choice(self.polygons)
+
+        ply_t = .1
+        ply_p = (mean[:3] + ply_t) / (mean[:3] + ply_t).sum()
+        ply = np.random.choice(self.polygons, p=ply_p)
+
 
         std = np.maximum(std, 0.01)
-
         random_a = np.random.normal(mean, std)
 
-        #ply = np.random.choice(self.polygons, p=mean[:3] / mean[:3].sum())
+
 
         pos = np.clip(random_a[3:6], [x[0] for x in self.drop_bounds['pos']],
                       [x[1] for x in self.drop_bounds['pos']])

@@ -246,6 +246,8 @@ class IodineVAE(GaussianLatentVAE):
 
         self.sigma = from_numpy(np.array([sigma]))
 
+        self.eval = False
+
     # loss weight just for physics
     def get_loss_weight(self, t, T):
         if self.schedule_type == 'single_step_physics':
@@ -256,6 +258,9 @@ class IodineVAE(GaussianLatentVAE):
         
     def encode(self, input):
         pass
+
+    def set_eval_mode(self, eval):
+        self.eval = eval
 
     def decode(self, lambdas1, lambdas2, inputK, bs):
 
@@ -378,6 +383,7 @@ class IodineVAE(GaussianLatentVAE):
 
         return recon.data, lambdas[0].view(bs, K, -1).data, lambda_recon[:, -1].data
 
+
     def refine_lambdas(self, pixel_x_prob, pixel_likelihood, mask, m_hat_logit, loss, x_hat,
                        lambdas1, lambdas2, inputK, latents, h1, h2, tiled_k_shape, bs):
         K = self.K
@@ -386,8 +392,7 @@ class IodineVAE(GaussianLatentVAE):
         leave_out_ll = pixel_likelihood.unsqueeze(1) - mask * pixel_x_prob
         x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = torch.autograd.grad(loss, [x_hat, mask] + [lambdas1,
                                                                                                            lambdas2],
-                                                                                    create_graph=True,
-                                                                                    retain_graph=True)
+                                                                                    retain_graph=not self.eval)
 
         a = torch.cat([
             torch.cat([inputK, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),

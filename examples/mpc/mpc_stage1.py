@@ -4,6 +4,7 @@ import numpy as np
 from torch.distributions import Normal
 import pickle
 import torch
+import torch.nn as nn
 from argparse import ArgumentParser
 import imageio
 from rlkit.envs.blocks.mujoco.block_stacking_env import BlockEnv
@@ -24,12 +25,12 @@ class Cost:
     def best_action(self, mpc_step, goal_latents, goal_latents_recon, goal_image, pred_latents,
                     pred_latents_recon, pred_image, actions):
         if self.type == 'min_min_latent':
-            return self.min_min_latent(goal_latents, goal_image, pred_latents, pred_image,
-                                       actions)
+            return self.min_min_latent(mpc_step, goal_latents, goal_latents_recon, goal_image,
+                                            pred_latents, pred_latents_recon, pred_image, actions)
         if self.type == 'sum_goal_min_latent':
             self.remove_goal_latents = False
-            return self.sum_goal_min_latent(goal_latents, goal_image, pred_latents, pred_image,
-                                            actions)
+            return self.sum_goal_min_latent(mpc_step, goal_latents, goal_latents_recon, goal_image,
+                                            pred_latents, pred_latents_recon, pred_image, actions)
 
         elif self.type == 'goal_pixel':
             return self.goal_pixel(goal_latents, goal_image, pred_latents, pred_image, actions)
@@ -43,21 +44,29 @@ class Cost:
         # l1 is (..., rep_size) l2 is (..., rep_size)
         return torch.pow(l1 - l2, 2).mean(-1)
 
-    def min_min_latent(self, goal_latents, goal_image, pred_latents, pred_image, actions):
+    def min_min_latent(self, mpc_step, goal_latents, goal_latents_recon, goal_image,
+                            pred_latents, pred_latents_recon, pred_image, actions):
         # obs_latents is (n_actions, K, rep_size)
         # pred_obs is (n_actions, 3, imsize, imsize)
         best_goal_idx = 0
         best_action_idx = 0
         best_cost = np.inf
         best_latent_idx = 0
+        n_actions = actions.shape[0]
+        K = pred_latents_recon.shape[1]
 
-        costs = []
+        rep_size = 128
         # Compare against each goal latent
+        costs = []
+        costs_latent = []
+        latent_idxs = []
         for i in range(goal_latents.shape[0]):
-
-            cost = self.mse(goal_latents[i].view(1, 1, -1), pred_latents)  # cost is (n_actions, K)
+            cost = torch.pow(goal_latents[i].view(1, 1, rep_size) - pred_latents,
+                             2).mean(2)
+            costs_latent.append(cost)
             cost, latent_idx = cost.min(-1)  # take min among K
             costs.append(cost)
+            latent_idxs.append(latent_idx)
             min_cost, action_idx = cost.min(0)  # take min among n_actions
 
             if min_cost <= best_cost:
@@ -66,28 +75,87 @@ class Cost:
                 best_cost = min_cost
                 best_latent_idx = latent_idx[action_idx]
 
-        best_pred_obs = ptu.get_numpy(pred_image[best_action_idx])
         costs = torch.stack(costs)  # (n_goal_latents, n_actions )
+        latent_idxs = torch.stack(latent_idxs)  # (n_goal_latents, n_actions )
 
+        matching_costs, matching_goal_idx = costs.min(0)
+
+        matching_latent_idx = latent_idxs[matching_goal_idx, np.arange(n_actions)]
+
+        matching_goal_rec = torch.stack([goal_latents_recon[j] for j in matching_goal_idx])
+        matching_latent_rec = torch.stack(
+            [pred_latents_recon[i][matching_latent_idx[i]] for i in range(n_actions)])
+        best_pred_obs = ptu.get_numpy(pred_image[best_action_idx])
+
+        full_plot = torch.cat([pred_image.unsqueeze(0),
+                               pred_latents_recon.permute(1, 0, 2, 3, 4),
+                               matching_latent_rec.unsqueeze(0),
+                               matching_goal_rec.unsqueeze(0)], 0)
         best_action_idxs = costs.min(0)[0].sort()[1]
+        plot_size = 8
+        full_plot = full_plot[:, ptu.get_numpy(best_action_idxs[:plot_size])]
+        caption = np.zeros(full_plot.shape[:2])
+        caption[1:1 + K, :] = ptu.get_numpy(torch.stack(costs_latent).min(0)[0].permute(1, 0))[:,
+                              :plot_size]
+        caption[-2, :] = matching_costs.cpu().numpy()[ptu.get_numpy(best_action_idxs[:plot_size])]
+
+        plot_multi_image(ptu.get_numpy(full_plot),
+                         logger.get_snapshot_dir() + '%s/mpc_pred_%d.png' % (
+                         self.logger_prefix_dir, mpc_step),
+                         caption=caption)
+
+
 
         return best_pred_obs, actions[ptu.get_numpy(best_action_idxs)], best_goal_idx
 
-    def sum_goal_min_latent(self, goal_latents, goal_image, pred_latents, pred_image, actions):
+    def sum_goal_min_latent(self,  mpc_step, goal_latents, goal_latents_recon, goal_image,
+                            pred_latents, pred_latents_recon, pred_image, actions):
         # obs_latents is (n_actions, K, rep_size)
         # pred_obs is (n_actions, 3, imsize, imsize)
         best_goal_idx = 0  # here this is meaningless
-
+        n_actions = actions.shape[0]
+        K = pred_latents_recon.shape[1]
         # Compare against each goal latent
         costs = []
+        costs_latent = []
+        latent_idxs = []
         for i in range(goal_latents.shape[0]):
             cost = self.mse(goal_latents[i].view(1, 1, -1), pred_latents)  # cost is (n_actions, K)
+            costs_latent.append(cost)
             cost, latent_idx = cost.min(-1)  # take min among K
             costs.append(cost)
+            latent_idxs.append(latent_idx)
 
-        _, best_action_idx = torch.stack(costs).sum(0).min(0)
-        best_pred_obs = ptu.get_numpy(pred_image[best_action_idx])
-        best_action_idxs = torch.stack(costs).sum(0).sort()[1]
+        costs = torch.stack(costs)
+        latent_idxs = torch.stack(latent_idxs)  # (n_goal_latents, n_actions )
+
+        best_action_idxs = costs.sum(0).sort()[1]
+        best_pred_obs = ptu.get_numpy(pred_image[best_action_idxs[0]])
+
+        matching_costs, matching_goal_idx = costs.min(0)
+
+        matching_latent_idx = latent_idxs[matching_goal_idx, np.arange(n_actions)]
+
+        matching_goal_rec = torch.stack([goal_latents_recon[j] for j in matching_goal_idx])
+        matching_latent_rec = torch.stack(
+            [pred_latents_recon[i][matching_latent_idx[i]] for i in range(n_actions)])
+
+        full_plot = torch.cat([pred_image.unsqueeze(0),
+                               pred_latents_recon.permute(1, 0, 2, 3, 4),
+                               matching_latent_rec.unsqueeze(0),
+                               matching_goal_rec.unsqueeze(0)], 0)
+
+        plot_size = 8
+        full_plot = full_plot[:, :plot_size]
+        caption = np.zeros(full_plot.shape[:2])
+        caption[1:1 + K, :] = ptu.get_numpy(torch.stack(costs_latent).min(0)[0].permute(1, 0))[:,
+                              :plot_size]
+        caption[-2, :] = matching_costs.cpu().numpy()[:plot_size]
+
+        plot_multi_image(ptu.get_numpy(full_plot),
+                         logger.get_snapshot_dir() + '%s/mpc_pred_%d.png' % (
+                             self.logger_prefix_dir, mpc_step),
+                         caption=caption)
 
         return best_pred_obs, actions[ptu.get_numpy(best_action_idxs)], best_goal_idx
 
@@ -131,6 +199,7 @@ class Cost:
 
         costs = torch.stack(costs)  # (n_goal_latents, n_actions )
         latent_idxs = torch.stack(latent_idxs)  # (n_goal_latents, n_actions )
+        best_action_idxs = costs.min(0)[0].sort()[1]
 
         matching_costs, matching_goal_idx = costs.min(0)
 
@@ -147,18 +216,18 @@ class Cost:
                                matching_goal_rec.unsqueeze(0)], 0)
 
         plot_size = 8
-        full_plot = full_plot[:, :plot_size]
+        full_plot = full_plot[:, ptu.get_numpy(best_action_idxs[:plot_size])]
         caption = np.zeros(full_plot.shape[:2])
         caption[1:1 + K, :] = ptu.get_numpy(torch.stack(costs_latent).min(0)[0].permute(1, 0))[:,
                               :plot_size]
-        caption[-2, :] = matching_costs.cpu().numpy()[:plot_size]
+        caption[-2, :] = matching_costs.cpu().numpy()[ptu.get_numpy(best_action_idxs[:plot_size])]
 
         plot_multi_image(ptu.get_numpy(full_plot),
                          logger.get_snapshot_dir() + '%s/mpc_pred_%d.png' % (
                          self.logger_prefix_dir, mpc_step),
                          caption=caption)
 
-        best_action_idxs = costs.min(0)[0].sort()[1]
+
 
         return best_pred_obs, actions[ptu.get_numpy(best_action_idxs)], best_goal_idx
 
@@ -252,7 +321,7 @@ class MPC:
 
         return mse, np.stack(actions)
 
-    def model_step_batched(self, obs, actions, bs=8):
+    def model_step_batched(self, obs, actions, bs=32):
         # Handle large obs in batches
         n_batches = int(np.ceil(obs.shape[0] / float(bs)))
         outputs = [[], [], []]
@@ -354,8 +423,10 @@ def main(variant):
             name = k[7:]  # remove 'module.' of dataparallel
         new_state_dict[name] = v
     m.load_state_dict(new_state_dict)
-
+    #m = nn.DataParallel(m)
     m.cuda()
+
+    m.set_eval_mode(True)
 
     actions_lst = []
     stats = {'mse': 0}
@@ -365,7 +436,7 @@ def main(variant):
         true_actions = None #np.load(module_path + '/examples/mpc/stage1/goals_3/actions.npy')[
             #goal_idx]
         env = BlockEnv(5)
-        mpc = MPC(m, env, n_actions=960, mpc_steps=5, true_actions=true_actions,
+        mpc = MPC(m, env, n_actions=32, mpc_steps=5, true_actions=true_actions,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=5,
                   logger_prefix_dir='/goal_%d' % goal_idx,
                   mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True)
@@ -389,7 +460,7 @@ if __name__ == "__main__":
         algorithm='MPC',
         modelfile=args.modelfile,
         goalfile=args.goalfile,
-        cost_type='sum_goal_min_latent',  # 'sum_goal_min_latent' 'latent_pixel
+        cost_type='min_min_latent',  # 'sum_goal_min_latent' 'latent_pixel
         mpc_style='cem', # random_shooting or cem
         model=iodine.imsize64_large_iodine_architecture
     )
