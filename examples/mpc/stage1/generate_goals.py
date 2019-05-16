@@ -33,8 +33,8 @@ if __name__ == "__main__":
         obs, actions = rollout(env)
         rollout_output[0].append(obs)
         rollout_output[1].append(actions)
-        misc.imsave(output_dir + '/rlkit/examples/mpc/stage1/goals_3/img_%d.png' %i, obs)
+        misc.imsave(output_dir + '/rlkit/examples/mpc/stage1/goals_4/img_%d.png' %i, obs)
     all_actions = np.stack(rollout_output[1])
 
-    np.save(output_dir + '/rlkit/examples/mpc/stage1/goals_3/actions.npy', all_actions)
+    np.save(output_dir + '/rlkit/examples/mpc/stage1/goals_4/actions.npy', all_actions)
 

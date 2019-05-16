@@ -236,7 +236,6 @@ class BlockEnv():
         self.logger = logger
         obs = self.get_observation()
         self.logger = original_logger
-        #Recreate original scene
         return obs
 
 

@@ -1,4 +1,5 @@
 import rlkit.torch.pytorch_util as ptu
+from rlkit.envs.blocks.mujoco.block_pick_and_place import BlockPickAndPlaceEnv
 from rlkit.launchers.launcher_util import run_experiment
 import numpy as np
 from torch.distributions import Normal
@@ -291,7 +292,9 @@ class MPC:
                                                                         goal_latents_mask,
                                                                         goal_latents_recon)
 
-        obs = self.env.reset()
+        for k in range(20): #The initial env has the full tower built, so we need to perturb it initially
+            self.env.step(self.env.sample_action("pick_block"))
+        obs = self.env.get_observation()
 
         obs_lst = [np.moveaxis(goal_image.astype(np.float32) / 255., 2, 0)[:3]]
         pred_obs_lst = [ptu.get_numpy(rec_goal_image)]
@@ -330,6 +333,7 @@ class MPC:
             start_idx = i * bs
             end_idx = min(start_idx + bs, obs.shape[0])
             actions_batch = actions[start_idx:end_idx] if not self.use_action_image else None
+
             pred_obs, obs_latents, obs_latents_recon = self.model.step(obs[start_idx:end_idx],
                                                                        actions_batch)
             outputs[0].append(pred_obs)
@@ -408,13 +412,13 @@ def main(variant):
     # model_file = 'saved_models/iodine_params_5_12.pkl'
 
     module_path = '/home/jcoreyes/objects/rlkit'
-    model_file = '/home/jcoreyes/objects/op3-s3-logs/iodine-blocks-stack50k/SequentialRayExperiment_0_2019-05-15_01-24-38zy_wn4_6/model_params.pkl'
+    model_file = '/home/jcoreyes/objects/op3-s3-logs/iodine-blocks-pickplace_v2_50k/SequentialRayExperiment_0_2019-05-15_02-21-53sfsqd7h3/model_params.pkl'
 
     # goal_idxs = [i for i in range(20, 50)]
-    goal_idxs = [26, 27, 28, 29, 30, 33, 51, 52, 55, 58, 59, 61, 62, 63, 65, 71, 81]
+    goal_idxs = [i for i in range(10)]
     #goal_idxs = [26]
 
-    m = iodine.create_model(variant['model'], 0)
+    m = iodine.create_model(variant['model'], 6)
     state_dict = torch.load(model_file)
 
     new_state_dict = OrderedDict()
@@ -433,15 +437,17 @@ def main(variant):
     stats = {'mse': 0}
 
     for i, goal_idx in enumerate(goal_idxs):
-        goal_file = module_path + '/examples/mpc/stage1/manual_constructions/bridge/%d_1.png' % i
-        #goal_file = module_path + '/examples/mpc/stage1/goals_3/img_%d.png' % goal_idx
-        true_actions = None #np.load(module_path + '/examples/mpc/stage1/goals_3/actions.npy')[
-            #goal_idx]
-        env = BlockEnv(5)
-        mpc = MPC(m, env, n_actions=32, mpc_steps=5, true_actions=true_actions,
-                  cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=5,
+        #goal_file = module_path + '/examples/mpc/stage1/manual_constructions/bridge/%d_1.png' % i
+        goal_file = module_path + '/examples/mpc/stage3/goals/img_%d.png' % goal_idx
+        true_actions = np.load(module_path + '/examples/mpc/stage3/goals/actions.npy')[goal_idx]
+        env = BlockPickAndPlaceEnv(num_objects=4, num_colors=5, img_dim=64, include_z=False,
+                               random_initialize=False, view=False)
+        env.set_env_info(true_actions)
+
+        mpc = MPC(m, env, n_actions=32, mpc_steps=5, true_actions=None,
+                  cost_type=variant['cost_type'], filter_goals=False, n_goal_objs=4,
                   logger_prefix_dir='/goal_%d' % goal_idx,
-                  mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True)
+                  mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=False)
         goal_image = imageio.imread(goal_file)
         mse, actions = mpc.run(goal_image)
         stats['mse'] += mse
@@ -462,15 +468,15 @@ if __name__ == "__main__":
         algorithm='MPC',
         modelfile=args.modelfile,
         goalfile=args.goalfile,
-        cost_type='min_min_latent',  # 'sum_goal_min_latent' 'latent_pixel
+        cost_type='latent_pixel',  # 'sum_goal_min_latent' 'latent_pixel
         mpc_style='cem', # random_shooting or cem
         model=iodine.imsize64_large_iodine_architecture
     )
 
     run_experiment(
         main,
-        exp_prefix='mpc',
+        exp_prefix='mpc_stage3',
         mode='here_no_doodad',
         variant=variant,
-        use_gpu=False,  # Turn on if you have a GPU
+        use_gpu=True,  # Turn on if you have a GPU
     )

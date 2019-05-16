@@ -367,6 +367,8 @@ class IodineVAE(GaussianLatentVAE):
         bs = input.shape[0]
         imsize = self.imsize
         input = input.unsqueeze(1).repeat(1, 9, 1, 1, 1)
+        if actions is not None:
+            actions = actions.unsqueeze(1).repeat(1, 9, 1)
 
         schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps)
 

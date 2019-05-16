@@ -6,6 +6,7 @@ import tqdm
 import pdb
 import sys
 import h5py
+import shutil
 
 import mujoco_py as mjc
 import matplotlib.pyplot as plt
@@ -74,6 +75,7 @@ def mkdirp(folder):
 
 def hdf5_to_image(filename):
     root = os.path.dirname(filename)
+    # shutil.rmtree(os.path.join(root, 'imgs'))
     img_root = mkdirp(os.path.join(root, 'imgs'))
     h5file = h5py.File(filename, 'r')
     for mode in h5file.keys():
