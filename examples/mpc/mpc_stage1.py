@@ -87,8 +87,9 @@ class Cost:
 
         _, best_action_idx = torch.stack(costs).sum(0).min(0)
         best_pred_obs = ptu.get_numpy(pred_image[best_action_idx])
+        best_action_idxs = torch.stack(costs).sum(0).sort()[1]
 
-        return best_pred_obs, actions[best_action_idx], best_goal_idx
+        return best_pred_obs, actions[ptu.get_numpy(best_action_idxs)], best_goal_idx
 
     def goal_pixel(self, goal_latents, goal_image, pred_latents, pred_image, actions):
         mse = torch.pow(pred_image - goal_image, 2).mean(3).mean(2).mean(1)
@@ -127,12 +128,12 @@ class Cost:
                 best_action_idx = action_idx
                 best_cost = min_cost
                 best_latent_idx = latent_idx[action_idx]
-        # import pdb; pdb.set_trace()
+
         costs = torch.stack(costs)  # (n_goal_latents, n_actions )
         latent_idxs = torch.stack(latent_idxs)  # (n_goal_latents, n_actions )
 
         matching_costs, matching_goal_idx = costs.min(0)
-        # import pdb; pdb.set_trace()
+
         matching_latent_idx = latent_idxs[matching_goal_idx, np.arange(n_actions)]
 
         matching_goal_rec = torch.stack([goal_latents_recon[j] for j in matching_goal_idx])
@@ -208,14 +209,14 @@ class MPC:
 
     def run(self, goal_image):
         goal_image_tensor = ptu.from_numpy(np.moveaxis(goal_image, 2, 0)).unsqueeze(
-            0).float() / 255.  # (1, 3, imsize, imsize)
+            0).float()[:, :3] / 255.  # (1, 3, imsize, imsize)
+
         rec_goal_image, goal_latents, goal_latents_recon, goal_latents_mask = self.model.refine(
             goal_image_tensor,
             hidden_state=None,
             plot_latents=False)  # (K, rep_size)
 
         # Keep top 4 goal latents with greatest mask area excluding 1st (background)
-        # import pdb; pdb.set_trace()
         if self.filter_goals:
             goal_latents, goal_latents_recon = self.filter_goal_latents(goal_latents,
                                                                         goal_latents_mask,
@@ -223,7 +224,7 @@ class MPC:
 
         obs = self.env.reset()
 
-        obs_lst = [np.moveaxis(goal_image.astype(np.float32) / 255., 2, 0)]
+        obs_lst = [np.moveaxis(goal_image.astype(np.float32) / 255., 2, 0)[:3]]
         pred_obs_lst = [ptu.get_numpy(rec_goal_image)]
 
         actions = []
@@ -247,7 +248,6 @@ class MPC:
                    nrow=len(obs_lst))
 
         # Compare final obs to goal obs
-        # import pdb; pdb.set_trace()
         mse = np.square(ptu.get_numpy(goal_image_tensor.squeeze().permute(1, 2, 0)) - obs).mean()
 
         return mse, np.stack(actions)
@@ -359,13 +359,14 @@ def main(variant):
 
     actions_lst = []
     stats = {'mse': 0}
-    for goal_idx in goal_idxs:
-        goal_file = module_path + '/examples/mpc/stage1/goals_3/img_%d.png' % goal_idx
-        true_actions = np.load(module_path + '/examples/mpc/stage1/goals_3/actions.npy')[
-            goal_idx]
+    for i, goal_idx in enumerate(goal_idxs):
+        goal_file = module_path + '/examples/mpc/stage1/manual_constructions/bridge/%d_1.png' % i
+        #goal_file = module_path + '/examples/mpc/stage1/goals_3/img_%d.png' % goal_idx
+        true_actions = None #np.load(module_path + '/examples/mpc/stage1/goals_3/actions.npy')[
+            #goal_idx]
         env = BlockEnv(5)
-        mpc = MPC(m, env, n_actions=7, mpc_steps=3, true_actions=true_actions,
-                  cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=3,
+        mpc = MPC(m, env, n_actions=960, mpc_steps=5, true_actions=true_actions,
+                  cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=5,
                   logger_prefix_dir='/goal_%d' % goal_idx,
                   mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True)
         goal_image = imageio.imread(goal_file)
@@ -388,8 +389,8 @@ if __name__ == "__main__":
         algorithm='MPC',
         modelfile=args.modelfile,
         goalfile=args.goalfile,
-        cost_type='min_min_latent',  # 'sum_goal_min_latent'
-        mpc_style='random_shooting', # random_shooting or cem
+        cost_type='sum_goal_min_latent',  # 'sum_goal_min_latent' 'latent_pixel
+        mpc_style='cem', # random_shooting or cem
         model=iodine.imsize64_large_iodine_architecture
     )
 

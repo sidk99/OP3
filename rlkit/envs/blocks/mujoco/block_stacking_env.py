@@ -102,7 +102,7 @@ class BlockEnv():
     def sample_action(self):
         ply = random.choice(self.polygons)
 
-        pos = utils.uniform(*self.settle_bounds['pos'])
+        pos = utils.uniform(*self.drop_bounds['pos'])
         # pos[-1] = obj_num
 
         if 'horizontal' in ply:
@@ -133,8 +133,8 @@ class BlockEnv():
 
         #ply = np.random.choice(self.polygons, p=mean[:3] / mean[:3].sum())
 
-        pos = np.clip(random_a[3:6], [x[0] for x in self.settle_bounds['pos']],
-                      [x[1] for x in self.settle_bounds['pos']])
+        pos = np.clip(random_a[3:6], [x[0] for x in self.drop_bounds['pos']],
+                      [x[1] for x in self.drop_bounds['pos']])
 
 
 
