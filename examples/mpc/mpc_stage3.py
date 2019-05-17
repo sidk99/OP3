@@ -295,7 +295,8 @@ class MPC:
         for k in range(20): #The initial env has the full tower built, so we need to perturb it initially
             self.env.step(self.env.sample_action("pick_block"))
         obs = self.env.get_observation()
-
+        imageio.imsave(logger.get_snapshot_dir() + '%s/initial_image.png' %
+                       self.logger_prefix_dir, obs)
         obs_lst = [np.moveaxis(goal_image.astype(np.float32) / 255., 2, 0)[:3]]
         pred_obs_lst = [ptu.get_numpy(rec_goal_image)]
 
