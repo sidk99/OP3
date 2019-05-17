@@ -462,7 +462,7 @@ if __name__ == "__main__":
         algorithm='MPC',
         modelfile=args.modelfile,
         goalfile=args.goalfile,
-        cost_type='min_min_latent',  # 'sum_goal_min_latent' 'latent_pixel
+        cost_type='latent_pixel',  # 'sum_goal_min_latent' 'latent_pixel
         mpc_style='cem', # random_shooting or cem
         model=iodine.imsize64_large_iodine_architecture
     )

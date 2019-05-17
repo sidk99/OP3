@@ -6,7 +6,6 @@ import tqdm
 import pdb
 import sys
 import h5py
-import shutil
 
 import mujoco_py as mjc
 import matplotlib.pyplot as plt
@@ -49,13 +48,13 @@ def createMultipleSims(args, obs_size, ac_size, createSingleSim, num_workers=1):
 
                 # RV: frames is numpy with shape (T, M, N, C)
                 # Bouncing balls dataset has shape (T, 1, M, N, C)
-                frames = np.expand_dims(frames, 1)
+                #frames = np.expand_dims(frames, 1)
                 # group_frames = np.expand_dims(group_frames, 1)
 
-                features_dataset[:, [i], :, :, :] = frames
+                features_dataset[:, i, :, :, :] = frames
                 # groups_dataset[:, [i], :, :, :] = group_frames
                 action_dataset[:, i, :] = action_vec
-
+            #import pdb; pdb.set_trace()
             print("Done with dataset: {}".format(folder))
 
 
@@ -75,7 +74,6 @@ def mkdirp(folder):
 
 def hdf5_to_image(filename):
     root = os.path.dirname(filename)
-    # shutil.rmtree(os.path.join(root, 'imgs'))
     img_root = mkdirp(os.path.join(root, 'imgs'))
     h5file = h5py.File(filename, 'r')
     for mode in h5file.keys():
@@ -110,5 +108,4 @@ def hdf5_to_image(filename):
 #     make_gif(tmp, "animation.gif")
 #     tmp = os.path.join(args.output_path, "imgs/training/{}/groups".format(str(i)))
 #     make_gif(tmp, "animation.gif")
-
 
