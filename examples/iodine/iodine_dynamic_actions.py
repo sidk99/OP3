@@ -87,7 +87,7 @@ def train_vae(variant):
 
     logger.get_snapshot_dir()
 
-    m = iodine.create_model(variant['model'], train_dataset.action_dim, dataparallel=False)
+    m = iodine.create_model(variant['model'], train_dataset.action_dim)
     if variant['dataparallel']:
         m = torch.nn.DataParallel(m)
 

@@ -20,7 +20,7 @@ from collections import OrderedDict
 class Cost:
     def __init__(self, type, logger_prefix_dir):
         self.type = type
-        self.remove_goal_latents = True
+        self.remove_goal_latents = False
         self.logger_prefix_dir = logger_prefix_dir
 
     def best_action(self, mpc_step, goal_latents, goal_latents_recon, goal_image, pred_latents,
@@ -264,7 +264,7 @@ class MPC:
         n_goals = self.n_goal_objs
         vals, keep = torch.sort(goal_latents_mask.mean(2).mean(1), descending=True)
         #goal_latents_recon[keep[n_goals]] += goal_latents_recon[keep[n_goals + 1]]
-        keep = keep[1:1 + n_goals]
+        keep = keep[2:1 + n_goals]
         goal_latents = torch.stack([goal_latents[i] for i in keep])
         goal_latents_recon = torch.stack([goal_latents_recon[i] for i in keep])
 
@@ -292,8 +292,8 @@ class MPC:
                                                                         goal_latents_mask,
                                                                         goal_latents_recon)
 
-        for k in range(20): #The initial env has the full tower built, so we need to perturb it initially
-            self.env.step(self.env.sample_action("pick_block"))
+        true_actions = self.env.move_blocks_side()
+
         obs = self.env.get_observation()
         imageio.imsave(logger.get_snapshot_dir() + '%s/initial_image.png' %
                        self.logger_prefix_dir, obs)
@@ -380,7 +380,7 @@ class MPC:
         # goal latents is (<K, rep_size)
         if actions is None:
             actions = np.stack([self.env.sample_action() for _ in range(self.n_actions)])
-
+        print(actions)
         # polygox_idx, pos, axangle, rgb
         if self.true_actions is not None:
             actions = np.concatenate([self.true_actions[mpc_step].reshape((1, -1)), actions])
@@ -416,8 +416,8 @@ def main(variant):
     model_file = '/home/jcoreyes/objects/op3-s3-logs/iodine-blocks-pickplace_v2_50k/SequentialRayExperiment_0_2019-05-15_02-21-53sfsqd7h3/model_params.pkl'
 
     # goal_idxs = [i for i in range(20, 50)]
-    goal_idxs = [i for i in range(10)]
-    #goal_idxs = [26]
+    #goal_idxs = [i for i in range(10)]
+    goal_idxs = [4]
 
     m = iodine.create_model(variant['model'], 6)
     state_dict = torch.load(model_file)
@@ -445,8 +445,8 @@ def main(variant):
                                random_initialize=False, view=False)
         env.set_env_info(true_actions)
 
-        mpc = MPC(m, env, n_actions=32, mpc_steps=5, true_actions=None,
-                  cost_type=variant['cost_type'], filter_goals=False, n_goal_objs=4,
+        mpc = MPC(m, env, n_actions=960, mpc_steps=1, true_actions=None,
+                  cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=4,
                   logger_prefix_dir='/goal_%d' % goal_idx,
                   mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=False)
         goal_image = imageio.imread(goal_file)

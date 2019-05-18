@@ -145,6 +145,58 @@ imsize64_large_iodine_architecture = dict(
     # )
 )
 
+imsize64_large_iodine_architecture_multistep_physics = dict(
+    vae_kwargs=dict(
+        imsize=64,
+        representation_size=REPSIZE_128,
+        input_channels=3,
+        # decoder_distribution='gaussian_identity_variance',
+        beta=1,
+        K=7,
+        sigma=0.1,
+    ),
+    deconv_args=dict(
+        hidden_sizes=[],
+        output_size=64 * 64 * 3,
+        input_width=80,
+        input_height=80,
+        input_channels=REPSIZE_128 + 2,
+
+        kernel_sizes=[5, 5, 5, 5],
+        n_channels=[64, 64, 64, 64],
+        strides=[1, 1, 1, 1],
+        paddings=[0, 0, 0, 0]
+    ),
+    deconv_kwargs=dict(
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    ),
+    refine_args=dict(
+        input_width=64,
+        input_height=64,
+        input_channels=17,
+        paddings=[0, 0, 0, 0],
+        kernel_sizes=[5, 5, 5, 5],
+        n_channels=[64, 64, 64, 64],
+        strides=[2, 2, 2, 2],
+        hidden_sizes=[128, 128],
+        output_size=REPSIZE_128,
+        lstm_size=256,
+        lstm_input_size=768,
+        added_fc_input_size=0
+
+    ),
+    physics_kwargs=dict(
+        action_enc_size=32,
+    ),
+    schedule_kwargs=dict(
+        train_T=10,
+        test_T=10,
+        seed_steps=5,
+        schedule_type='multi_step_physics'
+    )
+)
+
 
 def create_model(model, action_dim):
     K = model['vae_kwargs']['K']
@@ -176,6 +228,9 @@ def create_schedule(train, T, schedule_type, seed_steps):
             schedule = np.random.randint(0, 2, (T,))
         else:
             schedule = np.ones((T,))
+        schedule[:seed_steps] = 0
+    elif schedule_type == 'multi_step_physics':
+        schedule = np.ones((T, ))
         schedule[:seed_steps] = 0
     else:
         raise Exception
@@ -255,6 +310,12 @@ class IodineVAE(GaussianLatentVAE):
      
         elif self.schedule_type == 'random_alternating':
             return t * 2
+
+        elif self.schedule_type == 'multi_step_physics':
+            return t
+
+        else:
+            raise Exception
         
     def encode(self, input):
         pass

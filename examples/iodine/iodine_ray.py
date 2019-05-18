@@ -97,13 +97,13 @@ if __name__ == "__main__":
 
     mode = 'local'
     if args.debug == 1:
-        bs = 8
+        bs = 4
     else:
-        bs = 64
+        bs = 32
         mode = 'aws'
 
     variant = dict(
-        model=iodine.imsize64_large_iodine_architecture,
+        model=iodine.imsize64_large_iodine_architecture_multistep_physics,
         algo_kwargs = dict(
             gamma=0.5,
             batch_size=bs,
@@ -132,8 +132,8 @@ if __name__ == "__main__":
             checkpoint_freq=1,
             exp_prefix=exp_prefix,
             resources_per_trial={
-                'cpu': 2,
-                'gpu': 4,
+                'cpu': 4,
+                'gpu': 2,
             }
         ),
         remote_launch_variant=dict(
