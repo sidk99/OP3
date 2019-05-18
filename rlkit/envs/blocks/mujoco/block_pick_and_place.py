@@ -69,11 +69,7 @@ class BlockPickAndPlaceEnv():
         self.blocks = []
 
         if random_initialize:
-            quat = [1, 0, 0, 0]
-            for i in range(self.num_objects):
-                poly = np.random.choice(self.polygons)
-                self.add_mesh(poly, self.get_random_pos()+i*2, quat, self.get_random_rbga(num_colors))
-            self.initialize(False)
+            self.reset()
 
     ####Env initialization functions
     def get_unique_name(self, polygon):
@@ -282,7 +278,7 @@ class BlockPickAndPlaceEnv():
         quat = [1, 0, 0, 0]
         for i in range(self.num_objects):
             poly = np.random.choice(self.polygons)
-            self.add_mesh(poly, self.get_random_pos(), quat, self.get_random_rbga(self.num_colors))
+            self.add_mesh(poly, self.get_random_pos() + i * 2, quat, self.get_random_rbga(self.num_colors))
         self.initialize(False)
         return self.get_observation()
 
@@ -384,7 +380,7 @@ class BlockPickAndPlaceEnv():
         self.check_clear_width = {'cube' : 1, 'horizontal_rectangle' : 1, 'tetrahedron' : 1}
         self.add_height_width = {'cube' : 0, 'horizontal_rectangle' : 1, 'tetrahedron' : 0}
 
-        tmp_polygons = ['cube'] #, 'horizontal_rectangle', 'tetrahedron'][:2]
+        tmp_polygons = copy.deepcopy(self.polygons) #['cube', 'horizontal_rectangle', 'tetrahedron'][:2]
 
         quat = [1, 0, 0, 0]
         for i in range(self.num_objects):
@@ -463,41 +459,41 @@ python rlkit/envs/blocks/mujoco/block_pick_and_place.py -f data/pickplace50k.h5 
 """
 
 if __name__ == '__main__':
-    parser = ArgumentParser()
-    parser.add_argument('-f', '--filename', type=str, default=None)
-    parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
-    parser.add_argument('-nax', '--max_num_objects', type=int, default=3)
-    parser.add_argument('-i', '--img_dim', type=int, default=64)
-    parser.add_argument('-nf', '--num_frames', type=int, default=51)
-    parser.add_argument('-ns', '--num_sims', type=int, default=5)
-    parser.add_argument('-mi', '--make_images', type=bool, default=False)
-    parser.add_argument('-c', '--num_colors', type=int, default=None)
-    parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
-    parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
-    parser.add_argument('-r', '--remove_objects', type=bool, default=False)
-    parser.add_argument('-z', '--include_z', type=bool, default=False)
-    parser.add_argument('--output_path', default='', type=str,
-                        help='path to save images')
-    parser.add_argument('-p', '--num_workers', type=int, default=1)
-
-    args = parser.parse_args()
-    print(args)
-
-    info = {}
-    info["min_num_objects"] = args.min_num_objects
-    info["max_num_objects"] = args.max_num_objects
-    info["img_dim"] = args.img_dim
-
-    if args.remove_objects:
-        args.num_frames = 2
-
-    info["num_frames"] = args.num_frames
-    # single_sim_func = lambda : createSingleSim(args)
-    single_sim_func = createSingleSim
-    env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
-    ac_size = env.get_actions_size()
-    obs_size = env.get_obs_size()
-    dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
+    # parser = ArgumentParser()
+    # parser.add_argument('-f', '--filename', type=str, default=None)
+    # parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
+    # parser.add_argument('-nax', '--max_num_objects', type=int, default=3)
+    # parser.add_argument('-i', '--img_dim', type=int, default=64)
+    # parser.add_argument('-nf', '--num_frames', type=int, default=51)
+    # parser.add_argument('-ns', '--num_sims', type=int, default=5)
+    # parser.add_argument('-mi', '--make_images', type=bool, default=False)
+    # parser.add_argument('-c', '--num_colors', type=int, default=None)
+    # parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
+    # parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
+    # parser.add_argument('-r', '--remove_objects', type=bool, default=False)
+    # parser.add_argument('-z', '--include_z', type=bool, default=False)
+    # parser.add_argument('--output_path', default='', type=str,
+    #                     help='path to save images')
+    # parser.add_argument('-p', '--num_workers', type=int, default=1)
+    #
+    # args = parser.parse_args()
+    # print(args)
+    #
+    # info = {}
+    # info["min_num_objects"] = args.min_num_objects
+    # info["max_num_objects"] = args.max_num_objects
+    # info["img_dim"] = args.img_dim
+    #
+    # if args.remove_objects:
+    #     args.num_frames = 2
+    #
+    # info["num_frames"] = args.num_frames
+    # # single_sim_func = lambda : createSingleSim(args)
+    # single_sim_func = createSingleSim
+    # env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
+    # ac_size = env.get_actions_size()
+    # obs_size = env.get_obs_size()
+    # dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
     #
     # dgu.hdf5_to_image(args.filename)
     # for i in range(min(10, args.num_sims)):
@@ -547,8 +543,8 @@ if __name__ == '__main__':
 
 
 
-    # #Running and rendering example
-    # b = BlockPickAndPlaceEnv(4, None, 64, True, True)
+    #Running and rendering example
+    # b = BlockPickAndPlaceEnv(4, None, 64, True, True, view=True)
     # # b = BlockPickAndPlaceEnv(4, None, 64, include_z, random_initialize=False, view=False)
     # for i in range(10):
     #     # pdb.set_trace()
@@ -564,7 +560,7 @@ if __name__ == '__main__':
     #         # print(i)
     #         # for aname in b.names:
     #         #     print(b.get_block_info(aname))
-    #     # b.viewer.render()
+    #     b.viewer.render()
     #
     # #Plotting images
     # cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
