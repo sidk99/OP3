@@ -56,11 +56,11 @@ class BlockPickAndPlaceEnv():
         # self.asset_path = os.path.join(os.path.realpath(__file__), 'data/stl/')
         # self.asset_path = '../data/stl/'
         self.img_dim = img_dim
-        self.polygons = ['cube'] #, 'horizontal_rectangle', 'tetrahedron'][:1]
+        self.polygons = ['cube', 'horizontal_rectangle', 'tetrahedron'][:2]
         self.num_colors = num_colors
         self.num_objects = num_objects
         self.view = view
-        self.internal_steps_per_step = 2000
+        self.internal_steps_per_step = 1000
         self.drop_heights = 5
         self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min':-2, 'y_max':1, 'z_min':0.05, 'z_max': 2.2}
         self.include_z = include_z
@@ -72,7 +72,7 @@ class BlockPickAndPlaceEnv():
             quat = [1, 0, 0, 0]
             for i in range(self.num_objects):
                 poly = np.random.choice(self.polygons)
-                self.add_mesh(poly, self.get_random_pos(), quat, self.get_random_rbga(num_colors))
+                self.add_mesh(poly, self.get_random_pos()+i*2, quat, self.get_random_rbga(num_colors))
             self.initialize(False)
 
     ####Env initialization functions
@@ -86,7 +86,7 @@ class BlockPickAndPlaceEnv():
 
     def add_mesh(self, polygon, pos, quat, rgba):
         name = self.get_unique_name(polygon)
-        self.blocks.append({'name': name, 'polygon': polygon, 'pos': pos, 'quat': quat, 'rgba': rgba,
+        self.blocks.append({'name': name, 'polygon': polygon, 'pos': np.array(pos), 'quat': np.array(quat), 'rgba': rgba,
                             'material': name})
 
     def get_asset_material_str(self):
@@ -111,10 +111,9 @@ class BlockPickAndPlaceEnv():
           </body>
         '''
         # '''<geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim="6" friction="1 1 1"/>'''
-        body_list = [body_base.format(m['name'], self.convert_to_str(m['pos']+i*2),
+        body_list = [body_base.format(m['name'], self.convert_to_str(m['pos']),
                                       self.convert_to_str(m['quat']), m['name'],
-                                      m['name'], m['name'], m['material'])
-            for i, m in enumerate(self.blocks)]
+                                      m['name'], m['name'], m['material']) for i, m in enumerate(self.blocks)]
         body_str = '\n'.join(body_list)
         return body_str
 
@@ -142,9 +141,10 @@ class BlockPickAndPlaceEnv():
         tmp = MODEL_XML_BASE.format(self.get_asset_mesh_str(), self.get_asset_material_str(), self.get_body_str())
         model = load_model_from_xml(tmp)
         self.sim = MjSim(model)
-        # if self.view:
-        #self.viewer = MjViewer(self.sim)
-        self.viewer = mujoco_py.MjRenderContextOffscreen(self.sim, -1)
+        if self.view:
+            self.viewer = MjViewer(self.sim)
+        else:
+            self.viewer = mujoco_py.MjRenderContextOffscreen(self.sim, -1)
 
         self.sim_state = self.sim.get_state()
         self.get_starting_step(use_cur_pos)
@@ -228,11 +228,11 @@ class BlockPickAndPlaceEnv():
 
     def set_block_info(self, a_block, info):
         #import pdb; pdb.set_trace()
-        print(a_block, info)
+        # print(a_block, info)
         # print("Setting state: {}, {}".format(a_block, info))
         start_ind = self.sim.model.get_joint_qpos_addr(a_block)[0]
         if "pos" in info:
-            self.sim_state.qpos[start_ind:start_ind+3] = info["pos"]
+            self.sim_state.qpos[start_ind:start_ind+3] = np.array(info["pos"])
         # if "quat" in info:
         #     self.sim_state.qpos[start_ind+3:start_ind+7] = info["quat"]
         # else:
@@ -298,6 +298,8 @@ class BlockPickAndPlaceEnv():
         return [6]
 
     def get_rand_block_byz(self):
+        if len(self.names) == 0:
+            raise KeyError("No blocks in get_rand_block_byz()!")
         if self.include_z:
             aname = np.random.choice(self.names)
         else:
@@ -396,7 +398,7 @@ class BlockPickAndPlaceEnv():
                 else:
                     continue
 
-            tmp_polygons = ['cube'] #, 'horizontal_rectangle', 'tetrahedron'][:2]
+            tmp_polygons = copy.deepcopy(self.polygons)
             ind = np.random.choice(tmp)
             # print(poly, tmp, ind)
             self.update_tower_info(ind, poly)
@@ -417,7 +419,7 @@ class BlockPickAndPlaceEnv():
             if self.heights[i-1] == self.heights[i+1] and new_height == self.heights[i-1]:
                 self.heights[i] = self.heights[i-1]
 
-        # print(poly, ind, self.types, self.heights)
+        print(poly, ind, self.types, self.heights)
 
     def get_env_info(self):
         env_info = {}
@@ -496,18 +498,21 @@ if __name__ == '__main__':
     ac_size = env.get_actions_size()
     obs_size = env.get_obs_size()
     dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
-
-    dgu.hdf5_to_image(args.filename)
-    for i in range(min(10, args.num_sims)):
-        tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
-        dgu.make_gif(tmp, "animation.gif")
-        # tmp = os.path.join(args.output_path, "imgs/training/{}/groups".format(str(i)))
-        # dgu.make_gif(tmp, "animation.gif")
+    #
+    # dgu.hdf5_to_image(args.filename)
+    # for i in range(min(10, args.num_sims)):
+    #     tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
+    #     dgu.make_gif(tmp, "animation.gif")
+    #     # tmp = os.path.join(args.output_path, "imgs/training/{}/groups".format(str(i)))
+    #     # dgu.make_gif(tmp, "animation.gif")
 
     # cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
-    # b = BlockPickAndPlaceEnv(6, None, 64, False, random_initialize=False, view=False)
+    # b = BlockPickAndPlaceEnv(6, None, 64, include_z=False, random_initialize=False, view=False)
     # for i in range(5):
-    #     b.create_tower_shape()
+    #     if i == 0:
+    #         b.create_tower_shape()
+    #     else:
+    #         b.step(b.sample_action("pick_block"))
     #     ob = b.get_observation()
     #     axes[i].imshow(ob, interpolation='nearest')
     # cur_fig.savefig("HELLO")
@@ -542,8 +547,9 @@ if __name__ == '__main__':
 
 
 
-    ##Running and rendering example
-    # b = BlockPickAndPlaceEnv(4, None, 64, False)
+    # #Running and rendering example
+    # b = BlockPickAndPlaceEnv(4, None, 64, True, True)
+    # # b = BlockPickAndPlaceEnv(4, None, 64, include_z, random_initialize=False, view=False)
     # for i in range(10):
     #     # pdb.set_trace()
     #     # b.step()
@@ -555,16 +561,16 @@ if __name__ == '__main__':
     #         # cur_pos = b.get_block_info("cube_0")["pos"]
     #         # ac = list(cur_pos) + [-0.5, -0.5, 1]
     #         b.step(b.sample_action("pick_block"))
-    #         print(i)
-    #         for aname in b.names:
-    #             print(b.get_block_info(aname))
+    #         # print(i)
+    #         # for aname in b.names:
+    #         #     print(b.get_block_info(aname))
     #     # b.viewer.render()
-
-    ##Plotting images
+    #
+    # #Plotting images
     # cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
     #
     # myenv = BlockPickAndPlaceEnv(4, None, 64, include_z=False)
-    # myenv.get_tower_shape()
+    # myenv.create_tower_shape()
     # obs = []
     # obs.append(myenv.get_observation())
     # axes[0].imshow(obs[-1], interpolation='nearest')
