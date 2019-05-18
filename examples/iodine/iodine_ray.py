@@ -99,11 +99,11 @@ if __name__ == "__main__":
     if args.debug == 1:
         bs = 4
     else:
-        bs = 32
+        bs = 64
         mode = 'aws'
 
     variant = dict(
-        model=iodine.imsize64_large_iodine_architecture_multistep_physics,
+        model=iodine.imsize64_large_iodine_architecture,
         algo_kwargs = dict(
             gamma=0.5,
             batch_size=bs,

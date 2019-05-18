@@ -21,10 +21,11 @@ MODEL_XML_BASE = """
        {}
     </asset>
     <worldbody>
-        <camera name='fixed' pos='0 -8 6' euler='-300 0 0'/>
+        <camera name='fixed' pos='0 -8 6' euler='-300 0 0' fovy='55'/>
         <light diffuse='1.5 1.5 1.5' pos='0 -7 8' dir='0 -1 -1'/>  
         <light diffuse='1.5 1.5 1.5' pos='0 -7 6' dir='0 -1 -1'/>  
-        <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' condim='6' friction='1 1 1'/>
+        <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' 
+        condim='3' />
         {}
     </worldbody>
 </mujoco>
@@ -60,7 +61,7 @@ class BlockPickAndPlaceEnv():
         self.num_colors = num_colors
         self.num_objects = num_objects
         self.view = view
-        self.internal_steps_per_step = 2000
+        self.internal_steps_per_step = 1000
         self.drop_heights = 5
         self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min':-2, 'y_max':1, 'z_min':0.05, 'z_max': 2.2}
         self.include_z = include_z
@@ -102,7 +103,7 @@ class BlockPickAndPlaceEnv():
         body_base = '''
           <body name='{}' pos='{}' quat='{}'>
             <joint type='free' name='{}'/>
-            <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim='6' friction='1 1 1'/>
+            <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim='3'/>
           </body>
         '''
         # body_base = '''
@@ -303,7 +304,7 @@ class BlockPickAndPlaceEnv():
         for i in range(self.num_objects):
             poly = np.random.choice(self.polygons)
             pos = self.get_random_pos()
-            pos[-2] = 3 * (i + 1)
+            pos[-2] += 2 * (i + 1)
             self.add_mesh(poly, pos, quat, self.get_random_rbga(self.num_colors))
         self.initialize(False)
         return self.get_observation()
@@ -323,6 +324,7 @@ class BlockPickAndPlaceEnv():
         if len(self.names) == 0:
             raise KeyError("No blocks in get_rand_block_byz()!")
         if self.include_z:
+
             aname = np.random.choice(self.names)
         else:
 
@@ -532,7 +534,6 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     print(args)
-
     info = {}
     info["min_num_objects"] = args.min_num_objects
     info["max_num_objects"] = args.max_num_objects

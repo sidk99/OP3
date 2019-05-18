@@ -435,8 +435,7 @@ def main(variant):
     for i, goal_idx in enumerate(goal_idxs):
         goal_file = module_path + '/examples/mpc/stage1/manual_constructions/bridge/%d_1.png' % i
         #goal_file = module_path + '/examples/mpc/stage1/goals_3/img_%d.png' % goal_idx
-        true_actions = None #np.load(module_path + '/examples/mpc/stage1/goals_3/actions.npy')[
-            #goal_idx]
+        true_actions = np.load(module_path + '/examples/mpc/mpc/stage1/manual_constructions/bridge/%d.p' % goal_idx)
         env = BlockEnv(5)
         mpc = MPC(m, env, n_actions=32, mpc_steps=5, true_actions=true_actions,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=5,
