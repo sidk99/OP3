@@ -10,6 +10,7 @@ from argparse import ArgumentParser
 import rlkit.envs.blocks.mujoco.utils.data_generation_utils as dgu
 import mujoco_py
 from mujoco_py import load_model_from_xml, MjSim, MjViewer
+import rlkit.envs.blocks.mujoco.contacts as contacts
 
 MODEL_XML_BASE = """
 <mujoco>
@@ -23,10 +24,9 @@ MODEL_XML_BASE = """
         <camera name='fixed' pos='0 -8 6' euler='-300 0 0'/>
         <light diffuse='1.5 1.5 1.5' pos='0 -7 8' dir='0 -1 -1'/>  
         <light diffuse='1.5 1.5 1.5' pos='0 -7 6' dir='0 -1 -1'/>  
-        <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' condim="6" friction="1 1 1"/>
+        <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' condim='6' friction='1 1 1'/>
         {}
     </worldbody>
-    <option gravity="0 0 -10"/>
 </mujoco>
 """
 #60 = -300
@@ -60,7 +60,7 @@ class BlockPickAndPlaceEnv():
         self.num_colors = num_colors
         self.num_objects = num_objects
         self.view = view
-        self.internal_steps_per_step = 1000
+        self.internal_steps_per_step = 2000
         self.drop_heights = 5
         self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min':-2, 'y_max':1, 'z_min':0.05, 'z_max': 2.2}
         self.include_z = include_z
@@ -101,11 +101,16 @@ class BlockPickAndPlaceEnv():
     def get_body_str(self):
         body_base = '''
           <body name='{}' pos='{}' quat='{}'>
-            <joint type='free' name='{}' damping="0"/>
-            <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' 
-            condim="6" friction="1 1 1"/>
+            <joint type='free' name='{}'/>
+            <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim='6' friction='1 1 1'/>
           </body>
         '''
+        # body_base = '''
+        #   <body name='{}' pos='{}' quat='{}'
+        #     <joint type='free' name='{}' damping='0'/>
+        #     <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim='1' friction='1 1 1'/>
+        #   </body>
+        # '''
         # '''<geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim="6" friction="1 1 1"/>'''
         body_list = [body_base.format(m['name'], self.convert_to_str(m['pos']),
                                       self.convert_to_str(m['quat']), m['name'],
@@ -201,9 +206,9 @@ class BlockPickAndPlaceEnv():
         if block_name is None:
             return False
 
-        PICK_LOC = np.array([0, 0, 5])
-        info = {"pos":PICK_LOC}
-        self.set_block_info(block_name, info)
+        #PICK_LOC = np.array([0, 0, 5])
+        #info = {"pos":PICK_LOC}
+        #self.set_block_info(block_name, info)
         # self.sim.set_state(self.sim_state)
         return block_name
 
@@ -229,16 +234,16 @@ class BlockPickAndPlaceEnv():
         start_ind = self.sim.model.get_joint_qpos_addr(a_block)[0]
         if "pos" in info:
             self.sim_state.qpos[start_ind:start_ind+3] = np.array(info["pos"])
-        # if "quat" in info:
-        #     self.sim_state.qpos[start_ind+3:start_ind+7] = info["quat"]
-        # else:
+        #if "quat" in info:
+        #    self.sim_state.qpos[start_ind+3:start_ind+7] = info["quat"]
+        #else:
         self.sim_state.qpos[start_ind + 3:start_ind + 7] = np.array([1, 0, 0, 0])
 
         start_ind = self.sim.model.get_joint_qvel_addr(a_block)[0]
-        # if "vel" in info:
-        #     self.sim_state.qvel[start_ind:start_ind + 3] = info["vel"]
-        # else:
-        self.sim_state.qvel[start_ind:start_ind + 3] = np.zeros(3)
+        if "vel" in info:
+            self.sim_state.qvel[start_ind:start_ind + 3] = info["vel"]
+        else:
+            self.sim_state.qvel[start_ind:start_ind + 3] = np.zeros(3)
         # if "rot_vel" in info:
         #     self.sim_state.qvel[start_ind + 3:start_ind + 6] = info["rot_vel"]
         # else:
@@ -248,6 +253,7 @@ class BlockPickAndPlaceEnv():
     def internal_step(self, action=None):
         ablock = False
         if action is None:
+            self.sim.forward()
             self.sim.step()
         else:
             pick_place = action[:3]
@@ -266,11 +272,29 @@ class BlockPickAndPlaceEnv():
         ablock = self.internal_step(action)
         #if ablock:
         for i in range(self.internal_steps_per_step):
+            self.sim.forward()
             self.sim.step()
             if self.view:
                 self.viewer.render()
+
+        # self.give_down_vel()
+        # for i in range(200):
+        #     self.sim.forward()
+        #     self.sim.step()
         self.sim_state = self.sim.get_state()
         return self.get_observation()
+
+    def give_down_vel(self):
+        for block in self.names:
+            self.set_block_info(block, {'vel': [0, 0, 0.5]})
+
+    def check_contact(self, drop_name):
+        while contacts.is_overlapping(self.sim, drop_name):
+            joint_ind = self.sim.model._joint_name2id[drop_name]
+            qpos_start_ind = joint_ind * 7
+
+            self.sim.data.qpos[qpos_start_ind + 2] += 0.05
+            self.sim.forward()
 
     def reset(self):
         self.names = []
@@ -278,7 +302,9 @@ class BlockPickAndPlaceEnv():
         quat = [1, 0, 0, 0]
         for i in range(self.num_objects):
             poly = np.random.choice(self.polygons)
-            self.add_mesh(poly, self.get_random_pos() + i * 2, quat, self.get_random_rbga(self.num_colors))
+            pos = self.get_random_pos()
+            pos[-2] = 3 * (i + 1)
+            self.add_mesh(poly, pos, quat, self.get_random_rbga(self.num_colors))
         self.initialize(False)
         return self.get_observation()
 
@@ -299,12 +325,40 @@ class BlockPickAndPlaceEnv():
         if self.include_z:
             aname = np.random.choice(self.names)
         else:
+
+            def x_y_thresh(pos1, pos2):
+                if np.linalg.norm(pos1[:2] - pos2[:2]) < 0.2:
+                    return True
+                else:
+                    return False
+            def taller(pos1, pos2):
+                if pos1[-1] > pos2[-1]:
+                    return True
+                else:
+                    return False
+
             z_lim = 0.5
-            tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
-            while (len(tmp) == 0):
-                z_lim += 0.5
-                tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
-            aname = np.random.choice(tmp)
+            poss = {aname: self.get_block_info(aname)['pos'] for aname in self.names}
+            clusters = [[self.names[0]]]
+            for aname in self.names[1:]:
+                for i, c in enumerate(clusters):
+                    if x_y_thresh(poss[aname], poss[c[-1]]):
+                        if taller(poss[aname], poss[c[-1]]):
+                            clusters[i].append(aname)
+                        break
+                    else:
+                        clusters.append([aname])
+
+            cluster_idx = np.random.choice(range(len(clusters)))
+            aname = clusters[cluster_idx][-1]
+
+
+
+            # tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
+            # while (len(tmp) == 0):
+            #     z_lim += 0.5
+            #     tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
+            # aname = np.random.choice(tmp)
         return aname
 
     def sample_action(self, action_type=None):
@@ -459,48 +513,48 @@ python rlkit/envs/blocks/mujoco/block_pick_and_place.py -f data/pickplace50k.h5 
 """
 
 if __name__ == '__main__':
-    # parser = ArgumentParser()
-    # parser.add_argument('-f', '--filename', type=str, default=None)
-    # parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
-    # parser.add_argument('-nax', '--max_num_objects', type=int, default=3)
-    # parser.add_argument('-i', '--img_dim', type=int, default=64)
-    # parser.add_argument('-nf', '--num_frames', type=int, default=51)
-    # parser.add_argument('-ns', '--num_sims', type=int, default=5)
-    # parser.add_argument('-mi', '--make_images', type=bool, default=False)
-    # parser.add_argument('-c', '--num_colors', type=int, default=None)
-    # parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
-    # parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
-    # parser.add_argument('-r', '--remove_objects', type=bool, default=False)
-    # parser.add_argument('-z', '--include_z', type=bool, default=False)
-    # parser.add_argument('--output_path', default='', type=str,
-    #                     help='path to save images')
-    # parser.add_argument('-p', '--num_workers', type=int, default=1)
-    #
-    # args = parser.parse_args()
-    # print(args)
-    #
-    # info = {}
-    # info["min_num_objects"] = args.min_num_objects
-    # info["max_num_objects"] = args.max_num_objects
-    # info["img_dim"] = args.img_dim
-    #
-    # if args.remove_objects:
-    #     args.num_frames = 2
-    #
-    # info["num_frames"] = args.num_frames
-    # # single_sim_func = lambda : createSingleSim(args)
-    # single_sim_func = createSingleSim
-    # env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
-    # ac_size = env.get_actions_size()
-    # obs_size = env.get_obs_size()
-    # dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
-    #
-    # dgu.hdf5_to_image(args.filename)
-    # for i in range(min(10, args.num_sims)):
-    #     tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
-    #     dgu.make_gif(tmp, "animation.gif")
-    #     # tmp = os.path.join(args.output_path, "imgs/training/{}/groups".format(str(i)))
-    #     # dgu.make_gif(tmp, "animation.gif")
+    parser = ArgumentParser()
+    parser.add_argument('-f', '--filename', type=str, default=None)
+    parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
+    parser.add_argument('-nax', '--max_num_objects', type=int, default=3)
+    parser.add_argument('-i', '--img_dim', type=int, default=64)
+    parser.add_argument('-nf', '--num_frames', type=int, default=51)
+    parser.add_argument('-ns', '--num_sims', type=int, default=5)
+    parser.add_argument('-mi', '--make_images', type=bool, default=False)
+    parser.add_argument('-c', '--num_colors', type=int, default=None)
+    parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
+    parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
+    parser.add_argument('-r', '--remove_objects', type=bool, default=False)
+    parser.add_argument('-z', '--include_z', type=bool, default=False)
+    parser.add_argument('--output_path', default='', type=str,
+                        help='path to save images')
+    parser.add_argument('-p', '--num_workers', type=int, default=1)
+
+    args = parser.parse_args()
+    print(args)
+
+    info = {}
+    info["min_num_objects"] = args.min_num_objects
+    info["max_num_objects"] = args.max_num_objects
+    info["img_dim"] = args.img_dim
+
+    if args.remove_objects:
+        args.num_frames = 2
+
+    info["num_frames"] = args.num_frames
+    # single_sim_func = lambda : createSingleSim(args)
+    single_sim_func = createSingleSim
+    env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
+    ac_size = env.get_actions_size()
+    obs_size = env.get_obs_size()
+    dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
+
+    dgu.hdf5_to_image(args.filename)
+    for i in range(min(10, args.num_sims)):
+        tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
+        dgu.make_gif(tmp, "animation.gif")
+        # tmp = os.path.join(args.output_path, "imgs/training/{}/groups".format(str(i)))
+        # dgu.make_gif(tmp, "animation.gif")
 
     # cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
     # b = BlockPickAndPlaceEnv(6, None, 64, include_z=False, random_initialize=False, view=False)
