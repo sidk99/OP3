@@ -21,11 +21,11 @@ MODEL_XML_BASE = """
        {}
     </asset>
     <worldbody>
-        <camera name='fixed' pos='0 -8 6' euler='-300 0 0'/>
+        <camera name='fixed' pos='0 -5 5' euler='-300 0 0' fovy='55'/>
         <light diffuse='1.5 1.5 1.5' pos='0 -7 8' dir='0 -1 -1'/>  
         <light diffuse='1.5 1.5 1.5' pos='0 -7 6' dir='0 -1 -1'/>  
         <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' 
-        condim='3' />
+        condim='3' friction='1 1 1'/>
         {}
     </worldbody>
 </mujoco>
@@ -63,7 +63,8 @@ class BlockPickAndPlaceEnv():
         self.view = view
         self.internal_steps_per_step = 2000
         self.drop_heights = 5
-        self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min':-2, 'y_max':1, 'z_min':0.05, 'z_max': 2.2}
+        self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min':1.0, 'y_max':4.0, 'z_min':0.05, 'z_max':
+            2.2}
         self.include_z = include_z
 
         self.names = []
@@ -103,7 +104,8 @@ class BlockPickAndPlaceEnv():
         body_base = '''
           <body name='{}' pos='{}' quat='{}'>
             <joint type='free' name='{}'/>
-            <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim='3'/>
+            <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' 
+            condim='3' friction='1 1 1' solimp="0.998 0.998 0.001" solref="0.02 1"/>
           </body>
         '''
         # body_base = '''
@@ -479,7 +481,7 @@ def createSingleSim(args):
     np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
     num_blocks = np.random.randint(args.min_num_objects, args.max_num_objects+1)
     myenv = BlockPickAndPlaceEnv(num_blocks, args.num_colors, args.img_dim, args.include_z,
-                                 random_initialize=True)
+                                 random_initialize=True, view=False)
     myenv.img_dim = args.img_dim
     imgs = []
     acs = []
@@ -535,9 +537,12 @@ if __name__ == '__main__':
     info["num_frames"] = args.num_frames
     # single_sim_func = lambda : createSingleSim(args)
     single_sim_func = createSingleSim
+    #createSingleSim(args)
     env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
     ac_size = env.get_actions_size()
     obs_size = env.get_obs_size()
+
+
     dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
 
     dgu.hdf5_to_image(args.filename)
