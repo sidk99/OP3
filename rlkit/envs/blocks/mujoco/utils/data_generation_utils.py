@@ -19,13 +19,20 @@ import pathos.pools as pp
 def createMultipleSims(args, obs_size, ac_size, createSingleSim, num_workers=1):
     datasets = {'training':args.num_sims,'validation':min(args.num_sims, 100)}
     n_frames = args.num_frames
-    pool = pp.ProcessPool(num_workers)
+
+    if num_workers != 0:
+        pool = pp.ProcessPool(num_workers)
 
 
     with h5py.File(args.filename, 'w') as f:
         for folder in datasets:
             num_sims = datasets[folder]
-            results = pool.map(createSingleSim, [args for _ in range(num_sims)])
+            if num_workers == 0:
+                results = []
+                for i in range(num_sims):
+                    results.append(createSingleSim(args))
+            else:
+                results = pool.map(createSingleSim, [args for _ in range(num_sims)])
 
             cur_folder = f.create_group(folder)
             # create datasets, write to disk

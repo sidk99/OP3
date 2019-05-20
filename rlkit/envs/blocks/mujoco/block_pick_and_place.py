@@ -20,10 +20,10 @@ MODEL_XML_BASE = """
        {}
     </asset>
     <worldbody>
-        <camera name='fixed' pos='0 -8 6' euler='-300 0 0'/>
+        <camera name='fixed' pos='0 -8 6' euler='-300 0 0' fovy="55"/>
         <light diffuse='1.5 1.5 1.5' pos='0 -7 8' dir='0 -1 -1'/>  
         <light diffuse='1.5 1.5 1.5' pos='0 -7 6' dir='0 -1 -1'/>  
-        <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' condim="6" friction="1 1 1"/>
+        <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' condim="3" friction="1 1 0.01"/>
         {}
     </worldbody>
     <option gravity="0 0 -10"/>
@@ -56,11 +56,11 @@ class BlockPickAndPlaceEnv():
         # self.asset_path = os.path.join(os.path.realpath(__file__), 'data/stl/')
         # self.asset_path = '../data/stl/'
         self.img_dim = img_dim
-        self.polygons = ['cube', 'horizontal_rectangle', 'tetrahedron'][:2]
+        self.polygons = ['cube', 'horizontal_rectangle', 'tetrahedron'][:1]
         self.num_colors = num_colors
         self.num_objects = num_objects
         self.view = view
-        self.internal_steps_per_step = 1000
+        self.internal_steps_per_step = 2000
         self.drop_heights = 5
         self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min':-2, 'y_max':1, 'z_min':0.05, 'z_max': 2.2}
         self.include_z = include_z
@@ -103,7 +103,7 @@ class BlockPickAndPlaceEnv():
           <body name='{}' pos='{}' quat='{}'>
             <joint type='free' name='{}' damping="0"/>
             <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' 
-            condim="6" friction="1 1 1"/>
+            condim="3" friction="1 1 0.001" solimp="0.998 0.998 0.001" solref="0.02 1"/>
           </body>
         '''
         # '''<geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim="6" friction="1 1 1"/>'''
@@ -270,6 +270,9 @@ class BlockPickAndPlaceEnv():
             if self.view:
                 self.viewer.render()
         self.sim_state = self.sim.get_state()
+
+        for aname in self.names:
+            self.add_block(aname, self.get_block_info(aname)["pos"])
         return self.get_observation()
 
     def reset(self):
@@ -502,16 +505,17 @@ if __name__ == '__main__':
     #     # tmp = os.path.join(args.output_path, "imgs/training/{}/groups".format(str(i)))
     #     # dgu.make_gif(tmp, "animation.gif")
 
-    # cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
-    # b = BlockPickAndPlaceEnv(6, None, 64, include_z=False, random_initialize=False, view=False)
-    # for i in range(5):
-    #     if i == 0:
-    #         b.create_tower_shape()
-    #     else:
-    #         b.step(b.sample_action("pick_block"))
-    #     ob = b.get_observation()
-    #     axes[i].imshow(ob, interpolation='nearest')
-    # cur_fig.savefig("HELLO")
+    cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
+    b = BlockPickAndPlaceEnv(8, None, 64, include_z=False, random_initialize=False, view=False)
+    for i in range(5):
+        if i == 0:
+            b.create_tower_shape()
+        else:
+            b.create_tower_shape()
+            # b.step(b.sample_action("pick_block"))
+        ob = b.get_observation()
+        axes[i].imshow(ob, interpolation='nearest')
+    cur_fig.savefig("HELLO")
 
 
 

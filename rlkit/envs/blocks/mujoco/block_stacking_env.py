@@ -95,7 +95,7 @@ class BlockEnv():
     def get_observation(self):
         data, images, masks = self.logger.get_logs()
         # print(images.shape, masks.keys())
-        image = images[0]/255
+        image = images[0] #/255
         # print(image.shape)
         return image
 
