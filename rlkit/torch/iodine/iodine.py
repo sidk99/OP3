@@ -138,12 +138,6 @@ imsize64_large_iodine_architecture = dict(
         seed_steps=4,
         schedule_type='single_step_physics'
     )
-    # schedule_kwargs=dict(
-    #     train_T=15,
-    #     test_T=9,
-    #     seed_steps=4,
-    #     schedule_type='random_alternating'
-    # )
 )
 
 imsize64_large_iodine_architecture_multistep_physics = dict(
@@ -223,7 +217,7 @@ def create_model(model, action_dim):
 def create_schedule(train, T, schedule_type, seed_steps):
     if schedule_type == 'single_step_physics':
         schedule = np.ones((T,))
-        schedule[:-1] = 0
+        schedule[:seed_steps] = 0
     elif schedule_type == 'random_alternating':
         if train:
             schedule = np.random.randint(0, 2, (T,))
@@ -302,12 +296,12 @@ class IodineVAE(GaussianLatentVAE):
 
         self.sigma = from_numpy(np.array([sigma]))
 
-        self.eval = False
+        self.eval_mode = False
 
     # loss weight just for physics
     def get_loss_weight(self, t, T):
         if self.schedule_type == 'single_step_physics':
-            return T
+            return T * 2
      
         elif self.schedule_type == 'random_alternating':
             return t * 2
@@ -322,7 +316,7 @@ class IodineVAE(GaussianLatentVAE):
         pass
 
     def set_eval_mode(self, eval):
-        self.eval = eval
+        self.eval_mode = eval
 
     def decode(self, lambdas1, lambdas2, inputK, bs):
 
@@ -473,7 +467,8 @@ class IodineVAE(GaussianLatentVAE):
         leave_out_ll = pixel_likelihood.unsqueeze(1) - mask * pixel_x_prob
         x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = torch.autograd.grad(loss, [x_hat, mask] + [lambdas1,
                                                                                                            lambdas2],
-                                                                                    retain_graph=not self.eval)
+                                                                                    create_graph=not self.eval_mode,
+                                                                                    retain_graph=not self.eval_mode)
 
         a = torch.cat([
             torch.cat([inputK, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),
@@ -538,6 +533,7 @@ class IodineVAE(GaussianLatentVAE):
                 loss_w = t
             # Physics
             else:
+
                 current_step += 1
                 # if current_step == input.shape[1]:
                 #     current_step = input.shape[1] - 1

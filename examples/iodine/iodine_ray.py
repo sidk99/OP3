@@ -99,7 +99,7 @@ if __name__ == "__main__":
     if args.debug == 1:
         bs = 4
     else:
-        bs = 32
+        bs = 64
         mode = 'aws'
 
     variant = dict(
@@ -113,7 +113,7 @@ if __name__ == "__main__":
         num_epochs=1000,
         algorithm='Iodine',
         save_period=1,
-        dataparallel=True,
+        dataparallel=False,
         dataset=args.dataset,
         debug=args.debug
     )
