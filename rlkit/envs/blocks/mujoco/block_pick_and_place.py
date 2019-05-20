@@ -329,27 +329,28 @@ class BlockPickAndPlaceEnv():
                     return False
 
             z_lim = 0.5
-            poss = {aname: self.get_block_info(aname)['pos'] for aname in self.names}
-            clusters = [[self.names[0]]]
-            for aname in self.names[1:]:
-                for i, c in enumerate(clusters):
-                    if x_y_thresh(poss[aname], poss[c[-1]]):
-                        if taller(poss[aname], poss[c[-1]]):
-                            clusters[i].append(aname)
-                        break
-                    else:
-                        clusters.append([aname])
+            # poss = {aname: self.get_block_info(aname)['pos'] for aname in self.names}
+            # clusters = [[self.names[0]]]
+            # for aname in self.names[1:]:
+            #     for i, c in enumerate(clusters):
+            #         if x_y_thresh(poss[aname], poss[c[-1]]):
+            #             if taller(poss[aname], poss[c[-1]]):
+            #                 clusters[i].append(aname)
+            #             break
+            #         else:
+            #             clusters.append([aname])
+            #
+            # cluster_idx = np.random.choice(range(len(clusters)))
+            # aname = clusters[cluster_idx][-1]
 
-            cluster_idx = np.random.choice(range(len(clusters)))
-            aname = clusters[cluster_idx][-1]
 
 
 
-            # tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
-            # while (len(tmp) == 0):
-            #     z_lim += 0.5
-            #     tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
-            # aname = np.random.choice(tmp)
+            tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
+            while (len(tmp) == 0):
+                z_lim += 0.5
+                tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
+            aname = np.random.choice(tmp)
         return aname
 
     def sample_action(self, action_type=None):
