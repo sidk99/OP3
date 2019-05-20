@@ -99,7 +99,7 @@ if __name__ == "__main__":
     if args.debug == 1:
         bs = 4
     else:
-        bs = 64
+        bs = 32
         mode = 'aws'
 
     variant = dict(
@@ -133,7 +133,7 @@ if __name__ == "__main__":
             exp_prefix=exp_prefix,
             resources_per_trial={
                 'cpu': 4,
-                'gpu': 2,
+                'gpu': 4,
             }
         ),
         remote_launch_variant=dict(

@@ -21,7 +21,7 @@ MODEL_XML_BASE = """
        {}
     </asset>
     <worldbody>
-        <camera name='fixed' pos='0 -8 6' euler='-300 0 0' fovy='55'/>
+        <camera name='fixed' pos='0 -8 6' euler='-300 0 0'/>
         <light diffuse='1.5 1.5 1.5' pos='0 -7 8' dir='0 -1 -1'/>  
         <light diffuse='1.5 1.5 1.5' pos='0 -7 6' dir='0 -1 -1'/>  
         <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' 
@@ -57,11 +57,11 @@ class BlockPickAndPlaceEnv():
         # self.asset_path = os.path.join(os.path.realpath(__file__), 'data/stl/')
         # self.asset_path = '../data/stl/'
         self.img_dim = img_dim
-        self.polygons = ['cube', 'horizontal_rectangle', 'tetrahedron'][:2]
+        self.polygons = ['cube'] #'['cube', 'horizontal_rectangle', 'tetrahedron'][:2]
         self.num_colors = num_colors
         self.num_objects = num_objects
         self.view = view
-        self.internal_steps_per_step = 1000
+        self.internal_steps_per_step = 2000
         self.drop_heights = 5
         self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min':-2, 'y_max':1, 'z_min':0.05, 'z_max': 2.2}
         self.include_z = include_z
@@ -285,17 +285,6 @@ class BlockPickAndPlaceEnv():
         self.sim_state = self.sim.get_state()
         return self.get_observation()
 
-    def give_down_vel(self):
-        for block in self.names:
-            self.set_block_info(block, {'vel': [0, 0, 0.5]})
-
-    def check_contact(self, drop_name):
-        while contacts.is_overlapping(self.sim, drop_name):
-            joint_ind = self.sim.model._joint_name2id[drop_name]
-            qpos_start_ind = joint_ind * 7
-
-            self.sim.data.qpos[qpos_start_ind + 2] += 0.05
-            self.sim.forward()
 
     def reset(self):
         self.names = []

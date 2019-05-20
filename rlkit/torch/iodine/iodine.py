@@ -16,6 +16,7 @@ from rlkit.torch.conv_networks import CNN, DCNN, BroadcastCNN
 from rlkit.torch.vae.vae_base import GaussianLatentVAE
 from rlkit.torch.modules import LayerNorm2D
 from rlkit.core import logger
+import os
 
 imsize84_iodine_architecture = dict(
     deconv_args=dict(
@@ -371,16 +372,14 @@ class IodineVAE(GaussianLatentVAE):
 
         K = self.K
         imsize = self.imsize
-        T = len(masks)
-        m = torch.stack([m[idx] for m in masks]).permute(1, 0, 2, 3).unsqueeze(2).repeat(1, 1, 3, 1,
-                                                                                         1)  # K, T, 3, imsize, imsize
-        x = torch.stack(x_hats)[:, K * idx:K * idx + K].permute(1, 0, 2, 3, 4)
+        T = masks.shape[1]
+        m = masks[idx].permute(1, 0, 2, 3, 4).repeat(1, 1, 3, 1, 1)  # (K, T, ch, imsize, imsize)
+        x = x_hats[idx].permute(1, 0, 2, 3, 4)
         rec = (m * x)
         full_rec = rec.sum(0, keepdim=True)
 
         comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize)
-
-        save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' % mse, nrow=T)
+        save_image(comparison.data.cpu(), os.getcwd() + '/goal_latents_%0.5f.png' % mse, nrow=T)
 
     def plot_latents_trunc(self, ground_truth, masks, x_hats, mse, idx):
 
@@ -402,23 +401,42 @@ class IodineVAE(GaussianLatentVAE):
 
         save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' % mse, nrow=n_col)
 
+
     def refine(self, input, hidden_state, plot_latents=False):
         K = self.K
         bs = 8
         input = input.repeat(bs, 1, 1, 1).unsqueeze(1)
-        imsize = self.imsize
 
-        x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(
-            input, None,
-            schedule=np.zeros((5)))
+        T = 7
+
+        outputs = [[], [], [], [], []]
+        # Run multiple times to get best one
+        for i in range(5):
+            x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(
+                input, None,
+                schedule=np.zeros((T)))
+            outputs[0].append(x_hats.data)
+            outputs[1].append(masks.data)
+            outputs[2].append(final_recon)
+            outputs[3].append(lambdas[0].view(-1, K, self.representation_size))
+
+        x_hats = torch.cat(outputs[0], 0)
+        masks = torch.cat(outputs[1], 0)
+        final_recon = torch.cat(outputs[2])
+        lambdas = torch.cat(outputs[3], 0)
+        
+
         lambda_recon = (x_hats * masks)
         recon = torch.clamp(final_recon, 0, 1)
-        mse = torch.pow(final_recon - input.squeeze(), 2).mean(3).mean(2).mean(1)
+        mse = torch.pow(final_recon - input[0], 2).mean(3).mean(2).mean(1)
+
         best_idx = torch.argmin(mse)
         if plot_latents:
             for i in range(8):
-                self.plot_latents(input[0].unsqueeze(0).repeat(1, len(masks), 1, 1, 1), masks, x_hats, mse[i], i)
-        best_lambda = lambdas[0].view(-1, K, self.representation_size)[best_idx]
+                self.plot_latents(input[0].unsqueeze(0).repeat(1, T, 1, 1, 1), masks,
+                                  x_hats, mse[i], i)
+
+        best_lambda = lambdas[best_idx]
 
         return recon[best_idx].data, best_lambda.data, lambda_recon[best_idx, -1].data, masks[best_idx,
                                                                                               -1].data.squeeze()

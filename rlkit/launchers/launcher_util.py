@@ -356,8 +356,8 @@ def run_experiment(
             )
     elif mode == 'ec2':
         # Do this separately in case someone does not have EC2 configured
-        dmode = doodad.mode.EC2AutoconfigDocker(
-            image=docker_image,
+        dmode = doodad.mode.EC2Autoconfig(
+            #image=docker_image,
             image_id=image_id,
             region=region,
             instance_type=instance_type,
@@ -366,10 +366,10 @@ def run_experiment(
             # Ask Vitchyr or Steven from an explanation, but basically we
             # will start just making the sub-directories within railrl rather
             # than relying on doodad to do that.
-            s3_log_name="",
+            s3_log_path=s3_log_name,
             gpu=use_gpu,
             aws_s3_path=aws_s3_path,
-            num_exps=num_exps_per_instance,
+            #num_exps=num_exps_per_instance,
             **mode_kwargs
         )
     elif mode == 'gcp':
