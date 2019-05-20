@@ -55,7 +55,7 @@ AWS_CONFIG_NO_GPU=dict(
 AWS_CONFIG_GPU = dict(
     REGION='us-west-2',
     INSTANCE_TYPE = 'p3.8xlarge',
-    SPOT_PRICE = 4.00,
+    SPOT_PRICE = 4.50,
     REGION_TO_AWS_IMAGE_ID = {
         'us-west-2': 'ami-076347b8649dddb00'
     },

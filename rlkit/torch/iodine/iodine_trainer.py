@@ -124,7 +124,6 @@ class IodineTrainer(Serializable):
         for batch_idx, tensors in enumerate(dataloader):
             obs, actions = self.prepare_tensors(tensors)
             self.optimizer.zero_grad()
-
             x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(obs, actions=actions, schedule=schedule)
 
             losses.append(loss.mean().item())

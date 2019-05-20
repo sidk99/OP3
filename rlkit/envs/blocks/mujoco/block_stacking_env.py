@@ -110,7 +110,7 @@ class BlockEnv():
         else:
             axis = [0, 0, 1]
         axangle = utils.random_axangle(axis=axis)
-        axangle[-1] = 0
+
         scale = utils.uniform(*self.settle_bounds['scale'])
         rgba = self.sample_rgba_from_hsv(*self.settle_bounds['hsv'])
         xml_action = {
@@ -147,7 +147,9 @@ class BlockEnv():
         else:
             axis = [0, 0, 1]
         axangle = utils.random_axangle(axis=axis)
-        axangle[-1] = 0
+
+        axangle[-1] = random_a[9]
+
         scale = utils.uniform(*self.settle_bounds['scale'])
         #rgba = self.sample_rgba_from_hsv(*self.settle_bounds['hsv'])
 
@@ -294,6 +296,58 @@ class BlockEnv():
         hsv = utils.uniform(*hsv_bounds)
         rgba = list(colorsys.hsv_to_rgb(*hsv)) + [1]
         return rgba
+
+    def compute_accuracy(self, true_data):
+        state = self.logger.get_state()
+        return self.compare_matching(state, true_data['data']), state
+
+    def compare_matching(self, data, mjc_data, threshold=0.2):
+        # data is env, mjc_data is target
+        # data = data.val[0].val
+        import copy
+        mjc_data = copy.deepcopy(mjc_data)
+
+        max_err = -float('inf')
+        for pred_name, pred_datum in data.items():
+            err, mjc_match, err_pos, err_rgb = self._best_obj_match(pred_datum, mjc_data)
+            del mjc_data[mjc_match]
+
+            # print(err)
+            if err > max_err:
+                max_err = err
+                max_pos = err_pos
+                max_rgb = err_rgb
+
+            if len(mjc_data) == 0:
+                break
+
+        correct = max_err < threshold
+        return correct, max_pos, max_rgb
+
+    def _best_obj_match(self, pred, targs):
+        def np_mse(x1, x2):
+            return np.square(x1 - x2).mean()
+
+        pos = pred['qpos'][:3]
+        rgb = pred['rgba']
+
+        best_err = float('inf')
+        for obj_name, obj_data in targs.items():
+            obj_pos = obj_data['xpos'][-1]
+            obj_rgb = obj_data['xrgba'][-1]
+
+            pos_err = np_mse(pos, obj_pos)
+            rgb_err = np_mse(rgb, obj_rgb)
+            err = pos_err + rgb_err
+
+            if err < best_err:
+                best_err = err
+                best_obj = obj_name
+                best_pos = pos_err
+                best_rgb = rgb_err
+
+        return best_err, best_obj, best_pos, best_rgb
+
 
 
 if __name__ == '__main__':

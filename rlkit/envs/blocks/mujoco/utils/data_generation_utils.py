@@ -104,6 +104,8 @@ def hdf5_to_image(filename):
                             cv2.imwrite(imfile, dataset[j, ex]*255)
                         else:
                             assert False
+            if ex > 20:
+                break
 
 
 

@@ -1,5 +1,5 @@
 import rlkit.torch.pytorch_util as ptu
-from rlkit.envs.blocks.mujoco.block_pick_and_place import BlockPickAndPlaceEnv
+from rlkit.envs.blocks.mujoco.block_pick_and_place_v2 import BlockPickAndPlaceEnv
 from rlkit.launchers.launcher_util import run_experiment
 import numpy as np
 from torch.distributions import Normal
@@ -264,7 +264,7 @@ class MPC:
         n_goals = self.n_goal_objs
         vals, keep = torch.sort(goal_latents_mask.mean(2).mean(1), descending=True)
         #goal_latents_recon[keep[n_goals]] += goal_latents_recon[keep[n_goals + 1]]
-        keep = keep[2:1 + n_goals]
+        keep = keep[1:1 + n_goals]
         goal_latents = torch.stack([goal_latents[i] for i in keep])
         goal_latents_recon = torch.stack([goal_latents_recon[i] for i in keep])
 
@@ -293,8 +293,20 @@ class MPC:
                                                                         goal_latents_recon)
 
         true_actions = self.env.move_blocks_side()
-
+        self.true_actions = true_actions
         obs = self.env.get_observation()
+        import matplotlib.pyplot as plt
+        # for i in range(4):
+        #     action = true_actions[i]
+        #
+        #     print(action)
+        #     obs = self.env.step(action)
+        #     imageio.imsave(logger.get_snapshot_dir() + '%s/action_%d.png' %
+        #                    (self.logger_prefix_dir, i), obs)
+            #import pdb; pdb.set_trace()
+        true_actions[:, 2] = 0.2
+        true_actions[:, -1] = 3.5
+
         imageio.imsave(logger.get_snapshot_dir() + '%s/initial_image.png' %
                        self.logger_prefix_dir, obs)
         obs_lst = [np.moveaxis(goal_image.astype(np.float32) / 255., 2, 0)[:3]]
@@ -391,6 +403,7 @@ class MPC:
         else:
             obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0], 1, 1,
                                                                              1)
+
         pred_obs, obs_latents, obs_latents_recon = self.model_step_batched(obs_rep,
                                                                            ptu.from_numpy(actions))
 
@@ -441,11 +454,10 @@ def main(variant):
         #goal_file = module_path + '/examples/mpc/stage1/manual_constructions/bridge/%d_1.png' % i
         goal_file = module_path + '/examples/mpc/stage3/goals/img_%d.png' % goal_idx
         true_actions = np.load(module_path + '/examples/mpc/stage3/goals/actions.npy')[goal_idx]
-        env = BlockPickAndPlaceEnv(num_objects=4, num_colors=5, img_dim=64, include_z=False,
-                               random_initialize=False, view=False)
+        env = BlockPickAndPlaceEnv(num_objects=4, num_colors=5, img_dim=64)
         env.set_env_info(true_actions)
 
-        mpc = MPC(m, env, n_actions=960, mpc_steps=1, true_actions=None,
+        mpc = MPC(m, env, n_actions=7, mpc_steps=1, true_actions=None,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=4,
                   logger_prefix_dir='/goal_%d' % goal_idx,
                   mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=False)

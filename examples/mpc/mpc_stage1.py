@@ -241,6 +241,7 @@ class MPC:
                  mpc_style="random_shooting",  # options are random_shooting, cem
                  cem_steps=2,
                  use_action_image=True, # True for stage 1, False for stage 3
+                 true_data=None,
                  ):
         self.model = model
         self.env = env
@@ -257,6 +258,7 @@ class MPC:
             os.mkdir(logger.get_snapshot_dir() + logger_prefix_dir)
         self.logger_prefix_dir = logger_prefix_dir
         self.use_action_image = use_action_image
+        self.true_data = true_data # ground truth target
 
     def filter_goal_latents(self, goal_latents, goal_latents_mask, goal_latents_recon):
         # Keep top goal latents with highest mask area except first
@@ -316,10 +318,13 @@ class MPC:
                    logger.get_snapshot_dir() + '%s/mpc.png' % self.logger_prefix_dir,
                    nrow=len(obs_lst))
 
+
         # Compare final obs to goal obs
         mse = np.square(ptu.get_numpy(goal_image_tensor.squeeze().permute(1, 2, 0)) - obs).mean()
-
-        return mse, np.stack(actions)
+        (correct, max_pos, max_rgb), state = self.env.compute_accuracy(self.true_data)
+        np.save(logger.get_snapshot_dir() + '%s/block_pos.p' % self.logger_prefix_dir, state)
+        stats = {'mse': mse, 'correct': int(correct), 'max_pos': max_pos, 'max_rgb': max_rgb}
+        return stats, np.stack(actions)
 
     def model_step_batched(self, obs, actions, bs=32):
         # Handle large obs in batches
@@ -408,10 +413,11 @@ def main(variant):
     # model_file = 'saved_models/iodine_params_5_12.pkl'
 
     module_path = '/home/jcoreyes/objects/rlkit'
-    model_file = '/home/jcoreyes/objects/op3-s3-logs/iodine-blocks-stack50k/SequentialRayExperiment_0_2019-05-15_01-24-38zy_wn4_6/model_params.pkl'
+    model_file = '/home/jcoreyes/objects/op3-s3-logs/iodine-blocks-stack50k/SequentialRayExperiment_0_2019-05-15_01' \
+                 '-24-38zy_wn4_6/model_params.pkl'
 
-    # goal_idxs = [i for i in range(20, 50)]
-    goal_idxs = [26, 27, 28, 29, 30, 33, 51, 52, 55, 58, 59, 61, 62, 63, 65, 71, 81]
+    goal_idxs = [i for i in range(10)]
+    #goal_idxs = [26, 27, 28, 29, 30, 33, 51, 52, 55, 58, 59, 61, 62, 63, 65, 71, 81]
     #goal_idxs = [26]
 
     m = iodine.create_model(variant['model'], 0)
@@ -430,24 +436,31 @@ def main(variant):
     m.set_eval_mode(True)
 
     actions_lst = []
-    stats = {'mse': 0}
+    stats = {'mse': 0, 'correct': 0, 'max_pos':0, 'max_rgb': 0}
+    structures = [('bridge', 5), ('pyramid', 6), ('spike', 6)]
+    goal_counter = 0
+    for structure, n_goal_obs in structures:
+        for i, goal_idx in enumerate(goal_idxs):
+            goal_file = module_path + '/examples/mpc/stage1/manual_constructions/%s/%d_1.png' % (structure, i)
+            #goal_file = module_path + '/examples/mpc/stage1/goals_3/img_%d.png' % goal_idx
+            true_data = np.load(module_path + '/examples/mpc/stage1/manual_constructions/%s/%d.p' % (structure,
+                                                                                                     goal_idx) )
+            env = BlockEnv(n_goal_obs)
+            mpc = MPC(m, env, n_actions=960, mpc_steps=n_goal_obs, true_actions=None,
+                      cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=n_goal_obs,
+                      logger_prefix_dir='/%s_goal_%d' % (structure, goal_idx),
+                      mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True,
+                      true_data=true_data)
+            goal_image = imageio.imread(goal_file)
+            single_stats, actions = mpc.run(goal_image)
+            for k, v in single_stats.items():
+                stats[k] += v
+            actions_lst.append(actions)
+            goal_counter += 1
 
-    for i, goal_idx in enumerate(goal_idxs):
-        goal_file = module_path + '/examples/mpc/stage1/manual_constructions/bridge/%d_1.png' % i
-        #goal_file = module_path + '/examples/mpc/stage1/goals_3/img_%d.png' % goal_idx
-        true_actions = None #np.load(module_path + '/examples/mpc/stage1/goals_3/actions.npy')[
-            #goal_idx]
-        env = BlockEnv(5)
-        mpc = MPC(m, env, n_actions=32, mpc_steps=5, true_actions=true_actions,
-                  cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=5,
-                  logger_prefix_dir='/goal_%d' % goal_idx,
-                  mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True)
-        goal_image = imageio.imread(goal_file)
-        mse, actions = mpc.run(goal_image)
-        stats['mse'] += mse
-        actions_lst.append(actions)
-
-    stats['mse'] /= len(goal_idxs)
+    for k, v in stats.items():
+        stats[k] /= float(goal_counter)
+    print(stats)
     json.dump(stats, open(logger.get_snapshot_dir() + '/stats.json', 'w'))
     np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
@@ -472,5 +485,5 @@ if __name__ == "__main__":
         exp_prefix='mpc',
         mode='here_no_doodad',
         variant=variant,
-        use_gpu=False,  # Turn on if you have a GPU
+        use_gpu=True,  # Turn on if you have a GPU
     )

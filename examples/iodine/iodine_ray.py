@@ -99,11 +99,11 @@ if __name__ == "__main__":
     if args.debug == 1:
         bs = 4
     else:
-        bs = 32
+        bs = 64
         mode = 'aws'
 
     variant = dict(
-        model=iodine.imsize64_large_iodine_architecture_multistep_physics,
+        model=iodine.imsize64_large_iodine_architecture,
         algo_kwargs = dict(
             gamma=0.5,
             batch_size=bs,
@@ -113,7 +113,7 @@ if __name__ == "__main__":
         num_epochs=1000,
         algorithm='Iodine',
         save_period=1,
-        dataparallel=True,
+        dataparallel=False,
         dataset=args.dataset,
         debug=args.debug
     )
@@ -133,7 +133,7 @@ if __name__ == "__main__":
             exp_prefix=exp_prefix,
             resources_per_trial={
                 'cpu': 4,
-                'gpu': 2,
+                'gpu': 4,
             }
         ),
         remote_launch_variant=dict(
