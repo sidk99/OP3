@@ -490,7 +490,7 @@ def createSingleSim(args):
     imgs = []
     acs = []
     imgs.append(myenv.get_observation())
-    for t in range(args.num_frames-2):
+    for t in range(args.num_frames-1):
         rand_float = np.random.uniform()
 
         if args.remove_objects == 'True':
@@ -505,9 +505,6 @@ def createSingleSim(args):
         imgs.append(myenv.step(ac))
         acs.append(ac)
 
-    acs.append(myenv.sample_action(None))
-    myenv.move_blocks_side()
-    imgs.append(myenv.get_observation())
     acs.append(myenv.sample_action(None))
 
     return np.array(imgs), np.array(acs)
