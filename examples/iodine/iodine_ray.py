@@ -58,7 +58,7 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
         feats = np.moveaxis(feats, -1, 2) # (T, bs, ch, imsize, imsize)
         feats = np.moveaxis(feats, 0, 1) # (bs, T, ch, imsize, imsize)
         actions = np.moveaxis(actions, 0, 1) # (bs, T, action_dim)
-
+        import pdb; pdb.set_trace()
         torch_dataset = TensorDataset(torch.Tensor(feats)[:size],
                                       torch.Tensor(actions)[:size])
         dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
@@ -113,7 +113,7 @@ if __name__ == "__main__":
         num_epochs=1000,
         algorithm='Iodine',
         save_period=1,
-        dataparallel=False,
+        dataparallel=True,
         dataset=args.dataset,
         debug=args.debug
     )

@@ -21,9 +21,9 @@ MODEL_XML_BASE = """
        {}
     </asset>
     <worldbody>
-        <camera name='fixed' pos='0 -5 5' euler='-300 0 0' fovy='55'/>
-        <light diffuse='1.5 1.5 1.5' pos='0 -7 8' dir='0 -1 -1'/>  
-        <light diffuse='1.5 1.5 1.5' pos='0 -7 6' dir='0 -1 -1'/>  
+        <camera name='fixed' pos='0 -3 4.5' euler='-300 0 0' fovy='55'/>
+        <light diffuse='1.5 1.5 1.5' pos='0 -7 8' dir='0 1 1'/>  
+        <light diffuse='1.5 1.5 1.5' pos='0 -7 6' dir='0 1 1'/>  
         <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' 
         condim='3' friction='1 1 1'/>
         {}
@@ -63,7 +63,7 @@ class BlockPickAndPlaceEnv():
         self.view = view
         self.internal_steps_per_step = 2000
         self.drop_heights = 5
-        self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min':1.0, 'y_max':4.0, 'z_min':0.05, 'z_max':
+        self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min': 1.0, 'y_max' :4.0, 'z_min':0.05, 'z_max':
             2.2}
         self.include_z = include_z
 
@@ -177,20 +177,21 @@ class BlockPickAndPlaceEnv():
         # Move blocks to either side
         z = 1
         side_pos = [
-            [-2.4, -2, z],
-            [-2.4, 0, z],
-            [2.4, -2, z],
-            [2.4, 0, z],
-                            ]
+            [-2.4, 2.5, z],
+            [-2.4, 3.5, z],
+            [2.4, 2.5, z],
+            [2.4, 3.5, z]]
 
         true_actions = []
         for i, block in enumerate(self.names):
-            pos = self.get_block_info(block)
+            pos = self.get_block_info(block)["pos"]
             self.add_block(block, side_pos[i])
-            true_actions.append([side_pos[i] + pos])
+            true_actions.append(side_pos[i] + list(pos)) #Note pick & places z's might be slightly off
 
-        for i in range(100):
-            self.sim.step()
+        for i in range(self.internal_steps_per_step):
+            self.internal_step()
+            if self.view:
+                self.viewer.render()
 
         return true_actions
 
@@ -383,12 +384,15 @@ class BlockPickAndPlaceEnv():
                 place = self.get_random_pos(3.5)
         else:
             raise KeyError("Wrong input action_type!")
-        return np.array(list(pick) + list(place))
+        ac = np.array(list(pick) + list(place))
+        ac[2] = 0.6
+        ac[5] = self.drop_heights
+        return ac
 
     def sample_action_gaussian(self, mean, std):
         random_a = np.random.normal(mean, std)
         # set pick height
-        random_a[2] = 0.2
+        random_a[2] = 0.6
         # set place height
         random_a[5] = self.drop_heights
 
@@ -486,8 +490,9 @@ def createSingleSim(args):
     imgs = []
     acs = []
     imgs.append(myenv.get_observation())
-    rand_float = np.random.uniform()
-    for t in range(args.num_frames-1):
+    for t in range(args.num_frames-2):
+        rand_float = np.random.uniform()
+
         if args.remove_objects == 'True':
             ac = myenv.sample_action('remove_block')
         else:
@@ -498,7 +503,13 @@ def createSingleSim(args):
             else:
                 ac = myenv.sample_action()
         imgs.append(myenv.step(ac))
+        acs.append(ac)
+
     acs.append(myenv.sample_action(None))
+    myenv.move_blocks_side()
+    imgs.append(myenv.get_observation())
+    acs.append(myenv.sample_action(None))
+
     return np.array(imgs), np.array(acs)
 
 

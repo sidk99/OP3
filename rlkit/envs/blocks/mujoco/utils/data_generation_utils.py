@@ -19,14 +19,18 @@ import pathos.pools as pp
 def createMultipleSims(args, obs_size, ac_size, createSingleSim, num_workers=1):
     datasets = {'training':args.num_sims,'validation':min(args.num_sims, 100)}
     n_frames = args.num_frames
-    pool = pp.ProcessPool(num_workers)
-
+    all_results = []
+    for folder in datasets:
+        num_sims = datasets[folder]
+        if num_workers == 1:
+            results = [createSingleSim(args) for _ in range(num_sims)]
+        else:
+            pool = pp.ProcessPool(num_workers)
+            results = pool.map(createSingleSim, [args for _ in range(num_sims)])
+        all_results.append(results)
 
     with h5py.File(args.filename, 'w') as f:
-        for folder in datasets:
-            num_sims = datasets[folder]
-            results = pool.map(createSingleSim, [args for _ in range(num_sims)])
-
+        for f_idx, folder in enumerate(datasets):
             cur_folder = f.create_group(folder)
             # create datasets, write to disk
             # image_data_shape = (n_frames, num_sims, image_res, image_res, 3)
@@ -42,7 +46,8 @@ def createMultipleSims(args, obs_size, ac_size, createSingleSim, num_workers=1):
 
             # for i in range(num_sims):
             for i in range(num_sims):
-                frames, action_vec = results[i] #createSingleSim()  # (T, M, N, C), (T, A)
+                frames, action_vec = all_results[f_idx][i] #createSingleSim()  # (T, M, N, C),
+                # (T, A)
                 # frames, group_frames, action_vec = createSingleSim() #(T, M, N, C), (T, M, N, 1)
                 # pdb.set_trace()
 
