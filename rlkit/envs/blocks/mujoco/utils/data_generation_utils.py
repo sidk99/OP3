@@ -31,6 +31,7 @@ def createMultipleSims(args, obs_size, ac_size, createSingleSim, num_workers=1):
 
     with h5py.File(args.filename, 'w') as f:
         for f_idx, folder in enumerate(datasets):
+            num_sims = datasets[folder]
             cur_folder = f.create_group(folder)
             # create datasets, write to disk
             # image_data_shape = (n_frames, num_sims, image_res, image_res, 3)

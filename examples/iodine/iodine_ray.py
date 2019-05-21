@@ -58,7 +58,6 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
         feats = np.moveaxis(feats, -1, 2) # (T, bs, ch, imsize, imsize)
         feats = np.moveaxis(feats, 0, 1) # (bs, T, ch, imsize, imsize)
         actions = np.moveaxis(actions, 0, 1) # (bs, T, action_dim)
-        import pdb; pdb.set_trace()
         torch_dataset = TensorDataset(torch.Tensor(feats)[:size],
                                       torch.Tensor(actions)[:size])
         dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
@@ -81,7 +80,7 @@ def run_experiment_func(variant):
         m = nn.DataParallel(m)
     t = IodineTrainer(train_dataset, test_dataset, m,
                       **variant['model']['schedule_kwargs'],
-                       **variant['algo_kwargs'])
+                        **variant['algo_kwargs'])
 
     algo = RayVAETrainer(t, train_dataset, test_dataset, variant, variant['num_epochs'])
 

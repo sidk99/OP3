@@ -54,7 +54,7 @@ class PhysicsNetwork(nn.Module):
         lambda1_enc_flat = self.lambda_encoder(lambda1)
 
         if actions is not None:
-            action_enc = self.action_encoder(actions)
+            action_enc = self.action_encoder(actions[:, torch.LongTensor([0, 1, 3, 4])])
             lambda1_enc_actions = torch.cat([lambda1_enc_flat, action_enc], -1)
             lambda1_enc = lambda1_enc_actions.view(-1, K, self.enc_rep_size + self.action_enc_size)
         else:
