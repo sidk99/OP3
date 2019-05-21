@@ -373,7 +373,7 @@ class IodineVAE(GaussianLatentVAE):
         full_rec = rec.sum(0, keepdim=True)
 
         comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize)
-        save_image(comparison.data.cpu(), os.getcwd() + '/goal_latents_%0.5f.png' % mse, nrow=T)
+        save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' % mse, nrow=T)
 
     def plot_latents_trunc(self, ground_truth, masks, x_hats, mse, idx):
 
@@ -405,7 +405,7 @@ class IodineVAE(GaussianLatentVAE):
 
         outputs = [[], [], [], [], []]
         # Run multiple times to get best one
-        for i in range(5):
+        for i in range(6):
             x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(
                 input, None,
                 schedule=np.zeros((T)))
@@ -423,12 +423,12 @@ class IodineVAE(GaussianLatentVAE):
         lambda_recon = (x_hats * masks)
         recon = torch.clamp(final_recon, 0, 1)
         mse = torch.pow(final_recon - input[0], 2).mean(3).mean(2).mean(1)
-
         best_idx = torch.argmin(mse)
         if plot_latents:
+            mses, best_idxs = mse.sort()
             for i in range(8):
                 self.plot_latents(input[0].unsqueeze(0).repeat(1, T, 1, 1, 1), masks,
-                                  x_hats, mse[i], i)
+                                  x_hats, mse[best_idxs[i]], best_idxs[i])
 
         best_lambda = lambdas[best_idx]
 
@@ -452,8 +452,24 @@ class IodineVAE(GaussianLatentVAE):
         lambda_recon = (x_hats * masks)
         recon = torch.clamp(final_recon, 0, 1)
         if plot_latents:
-            i = 0
-            self.plot_latents_trunc(input[0].unsqueeze(0).repeat(1, len(masks), 1, 1, 1), masks, x_hats, 0, i)
+            # i = 0
+            # self.plot_latents_trunc(input[0].unsqueeze(0).repeat(1, len(masks), 1, 1, 1), masks,
+            #                         x_hats, 0)
+
+            imsize = 64
+            m = masks[0].permute(1, 0, 2, 3, 4).repeat(1, 1, 3, 1, 1)  # (K, T, ch, imsize, imsize)
+            x = x_hats[0].permute(1, 0, 2, 3, 4)
+            rec = (m * x)
+            full_rec = rec.sum(0, keepdim=True)
+
+            comparison = torch.cat([input[0, :self.test_T].unsqueeze(0), full_rec, m, rec],
+                                   0).view(-1, 3,
+                                                                                      imsize, imsize)
+            # import pdb; pdb.set_trace()
+
+            save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/test.png',
+                       nrow=self.test_T)
+        #  x_hats, 0, i)
         # pred_obs, obs_latents, obs_latents_recon
 
         return recon.data, lambdas[0].view(bs, K, -1).data, lambda_recon[:, -1].data

@@ -173,28 +173,6 @@ class BlockPickAndPlaceEnv():
                     self.viewer.render()
             self.sim_state = self.sim.get_state()
 
-    def move_blocks_side(self):
-        # Move blocks to either side
-        z = 1
-        side_pos = [
-            [-2.4, 2.5, z],
-            [-2.4, 3.5, z],
-            [2.4, 2.5, z],
-            [2.4, 3.5, z]]
-
-        true_actions = []
-        for i, block in enumerate(self.names):
-            pos = self.get_block_info(block)["pos"]
-            self.add_block(block, side_pos[i])
-            true_actions.append(side_pos[i] + list(pos)) #Note pick & places z's might be slightly off
-
-        for i in range(self.internal_steps_per_step):
-            self.internal_step()
-            if self.view:
-                self.viewer.render()
-
-        return true_actions
-
     ####Env internal step functions
     def add_block(self, ablock, pos):
         #pos (x,y,z)
@@ -398,32 +376,73 @@ class BlockPickAndPlaceEnv():
 
         return random_a
 
-    def get_drop_pos(self, index):
-        delta_x = 1
-        y_val = 0
-        left_most_x = -2.5
-        return [left_most_x+index*delta_x, y_val, 4]
+    def move_blocks_side(self):
+        # Move blocks to either side
+        z = self.drop_heights
+        side_pos = [
+            [-2.2, 3.0, z],
+            [2.2, 3.0, z],
+            [-2.2, 3.0, z],
+            [2.3, 3.5, z]]
+        # self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min': 1.0, 'y_max' :4.0, 'z_min':0.05, 'z_max'2.2}
+        place_lst = []
+        for i, block in enumerate(self.names):
+            place = copy.deepcopy(self.get_block_info(block)["pos"])
+            place[-1] = self.drop_heights
+            self.add_block(block, side_pos[i])
+            place_lst.append(place)
+            #true_actions.append(side_pos[i] + list(place)) #Note pick & places z's might be
+            # slightly
+            #  off
+        # sort by place height so place lowest block first
 
-    def get_valid_width_pos(self, width):
-        num_pos = len(self.heights)
-        possible = []
-        for i in range(num_pos):
-            valid = True
-            for k in range(max(i-width, 0), min(i+width+1, num_pos)):
-                if self.types[k] == "tetrahedron":
-                    valid = False
-                    break
-                if self.heights[i] < self.heights[k]:
-                    valid = False
-                    break
-                if self.heights[i] >= 3:
-                    valid = False
-                    break
-            if valid:
-                possible.append(i)
-        return possible
+
+
+        for i in range(self.internal_steps_per_step):
+            self.internal_step()
+            if self.view:
+                self.viewer.render()
+        true_actions = []
+        for i, block in enumerate(self.names):
+            pick = self.get_block_info(block)["pos"]
+            pick[-1] = 0.6
+            place = place_lst[i]
+            true_actions.append(np.concatenate([pick, place]))
+
+
+        sorted(true_actions, key=lambda x : x[5])
+        print(true_actions)
+
+        return true_actions
+
 
     def create_tower_shape(self):
+
+        def get_valid_width_pos(width):
+            num_pos = len(self.heights)
+            possible = []
+            for i in range(num_pos):
+                valid = True
+                for k in range(max(i - width, 0), min(i + width + 1, num_pos)):
+                    if self.types[k] == "tetrahedron":
+                        valid = False
+                        break
+                    if self.heights[i] < self.heights[k]:
+                        valid = False
+                        break
+                    if self.heights[i] >= 3:
+                        valid = False
+                        break
+                if valid:
+                    possible.append(i)
+            return possible
+
+        def get_drop_pos(index):
+            delta_x = 1
+            y_val = 3
+            left_most_x = -2.5
+            return [left_most_x + index * delta_x, y_val, 4]
+
         self.names = []
         self.blocks = []
 
@@ -437,7 +456,7 @@ class BlockPickAndPlaceEnv():
         quat = [1, 0, 0, 0]
         for i in range(self.num_objects):
             poly = np.random.choice(tmp_polygons)
-            tmp = self.get_valid_width_pos(self.check_clear_width[poly])
+            tmp = get_valid_width_pos(self.check_clear_width[poly])
             if len(tmp) == 0:
                 tmp_polygons.remove(poly)
                 if len(tmp_polygons) == 0:
@@ -450,7 +469,7 @@ class BlockPickAndPlaceEnv():
             ind = np.random.choice(tmp)
             # print(poly, tmp, ind)
             self.update_tower_info(ind, poly)
-            tmp_pos = self.get_drop_pos(ind)
+            tmp_pos = get_drop_pos(ind)
             self.add_mesh(poly, tmp_pos, quat, self.get_random_rbga(self.num_colors))
         self.num_objects = len(self.names)
         self.initialize(True)
