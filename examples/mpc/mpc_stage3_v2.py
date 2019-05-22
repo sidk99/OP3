@@ -1,5 +1,5 @@
 import rlkit.torch.pytorch_util as ptu
-from rlkit.envs.blocks.mujoco.block_pick_and_place import BlockPickAndPlaceEnv
+from rlkit.envs.blocks.mujoco.block_pick_and_place_v2_retry import BlockPickAndPlaceEnv
 from rlkit.launchers.launcher_util import run_experiment
 import numpy as np
 from torch.distributions import Normal
@@ -299,6 +299,7 @@ class MPC:
 
         #true_actions = self.env.move_blocks_side()
         #self.true_actions = true_actions
+        #self.env.reset()
         obs = self.env.get_observation()
         import matplotlib.pyplot as plt
         # for i in range(4):
@@ -412,7 +413,7 @@ class MPC:
         # obs is (imsize, imsize, 3)
         # goal latents is (<K, rep_size)
         if actions is None:
-            actions = np.stack([self.env.sample_action(action_type='pick_block') for _ in range(
+            actions = np.stack([self.env.sample_action(action_type='place_block') for _ in range(
                 self.n_actions)])
         print(actions)
         # polygox_idx, pos, axangle, rgb
@@ -448,14 +449,13 @@ def main(variant):
     # model_file = 'saved_models/iodine_params_5_12.pkl'
 
     module_path = '/home/jcoreyes/objects/rlkit'
-    #model_file = '/home/jcoreyes/objects/op3-s3-logs/iodine-blocks-pickplace_v2_50k
-    # /SequentialRayExperiment_0_2019-05-15_02-21-53sfsqd7h3/model_params.pkl'
-    model_file = '/home/jcoreyes/objects/op3-s3-logs/iodine-blocks-pickplace_v3_60k/SequentialRayExperiment_0_2019-05-21_01-25-36heka_77v/model_params.pkl'
+    model_file = '/home/jcoreyes/objects/op3-s3-logs/iodine-blocks-pickplace_v2_50k/SequentialRayExperiment_0_2019-05-15_02-21-53sfsqd7h3/model_params_132.pkl'
+    # model_file = '/home/jcoreyes/objects/op3-s3-logs/iodine-blocks-pickplace_v3_60k/SequentialRayExperiment_0_2019-05-21_01-25-36heka_77v/model_params.pkl'
     # goal_idxs = [i for i in range(20, 50)]
     #goal_idxs = [i for i in range(10)]
     goal_idxs = [1]
 
-    m = iodine.create_model(variant['model'], 4)
+    m = iodine.create_model(variant['model'], 6)
     state_dict = torch.load(model_file)
 
     new_state_dict = OrderedDict()
@@ -476,9 +476,10 @@ def main(variant):
     for i, goal_idx in enumerate(goal_idxs):
         #goal_file = module_path + '/examples/mpc/stage1/manual_constructions/bridge/%d_1.png' % i
         goal_file = module_path + '/examples/mpc/stage3/goals/img_%d.png' % goal_idx
-        true_actions = np.load(module_path + '/examples/mpc/stage3/goals/actions.npy')[goal_idx]
-        env = BlockPickAndPlaceEnv(num_objects=3, num_colors=None, img_dim=64, include_z=False)
-        env.set_env_info(true_actions)
+        #true_actions = np.load(module_path + '/examples/mpc/stage3/goals/actions.npy')[goal_idx]
+        env = BlockPickAndPlaceEnv(num_objects=3, num_colors=None, img_dim=64, include_z=False,
+                                   random_initialize=True)
+        #env.set_env_info(true_actions)
 
         mpc = MPC(m, env, n_actions=7, mpc_steps=1, true_actions=None,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=3,

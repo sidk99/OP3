@@ -15,7 +15,7 @@ def launch_local_experiment(init_algo_functions_and_log_fnames,
                             exp_prefix='test', seeds=1, checkpoint_freq=50,
                             max_failures=10, resume=False, local_ray=True,
                             from_remote=False, resources_per_trial=None,
-                            logging_level=logging.DEBUG, custom_loggers=[]):
+                            logging_level=logging.DEBUG, custom_loggers=[], gpu_id=0):
     """Launches a ray experiment locally
 
     Args:
@@ -64,17 +64,22 @@ def launch_local_experiment(init_algo_functions_and_log_fnames,
             'init_algo_functions_and_log_fnames': init_algo_functions_and_log_fnames,
             'use_gpu': use_gpu,
             'resources_per_trial': resources_per_trial,
+            'gpu_id': gpu_id,
         },
         resources_per_trial=resources_per_trial,
         checkpoint_freq=checkpoint_freq,
         loggers=[JsonLogger, SequentialCSVLogger] + custom_loggers,
     )
 
+
     tune.run(
         exp,
         resume=resume,
         max_failures=max_failures,
         queue_trials=True,
+        resources_per_trial=resources_per_trial,
+
+
     )
 
 

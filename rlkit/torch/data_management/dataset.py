@@ -27,7 +27,7 @@ class BlocksDataset(Dataset):
     def __init__(self, torch_dataset, batchsize=8):
         super().__init__(torch_dataset, batchsize)
         if len(self.dataset.tensors) == 2:
-            self.action_dim = self.dataset.tensors[1].shape[-1]
+            self.action_dim = 4 #self.dataset.tensors[1].shape[-1]
         else:
             self.action_dim = 0
 
