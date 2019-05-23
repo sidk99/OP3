@@ -490,8 +490,12 @@ class BlockPickAndPlaceEnv():
 
     def get_env_info(self):
         env_info = {}
-        env_info["names"] = self.names
-        env_info["blocks"] = self.blocks
+        env_info["names"] = copy.deepcopy(self.names)
+        env_info["blocks"] = copy.deepcopy(self.blocks)
+        for i, aname in enumerate(self.names):
+            info = self.get_block_info(aname)
+            env_info["blocks"][i]["pos"] = copy.deepcopy(info["pos"])
+            env_info["blocks"][i]["quat"] = copy.deepcopy(info["quat"])
         return env_info
 
     def set_env_info(self, env_info):
