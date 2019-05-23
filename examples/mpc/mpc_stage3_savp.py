@@ -248,6 +248,7 @@ class MPC:
                  mpc_style="random_shooting",  # options are random_shooting, cem
                  cem_steps=2,
                  use_action_image=True, # True for stage 1, False for stage 3
+                 is_savp=False
                  ):
         self.model = model
         self.env = env
@@ -264,6 +265,7 @@ class MPC:
             os.mkdir(logger.get_snapshot_dir() + logger_prefix_dir)
         self.logger_prefix_dir = logger_prefix_dir
         self.use_action_image = use_action_image
+        self.is_savp=is_savp
 
     def filter_goal_latents(self, goal_latents, goal_latents_mask, goal_latents_recon):
         # Keep top goal latents with highest mask area except first
@@ -298,7 +300,7 @@ class MPC:
             plot_latents=True)  # (K, rep_size)
 
         # Keep top 4 goal latents with greatest mask area excluding 1st (background)
-        if self.filter_goals:
+        if self.filter_goals and not self.is_savp:
             goal_latents, goal_latents_recon = self.filter_goal_latents(goal_latents,
                                                                         goal_latents_mask,
                                                                         goal_latents_recon)
