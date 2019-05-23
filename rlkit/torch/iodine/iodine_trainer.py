@@ -53,11 +53,11 @@ class IodineTrainer(Serializable):
         self._extra_stats_to_log = None
 
     def prepare_tensors(self, tensors):
-        imgs = tensors[0].to(ptu.device) / 255.
+        imgs = tensors[0].to(ptu.device) / 255. #Normalize image to 0-1
         if len(tensors) == 2:
             return imgs, tensors[1].to(ptu.device)
         else:
-            return imgs, None
+            return imgs, None #Action is none
 
 
     # def prepare_inputs(self, obs):
@@ -90,12 +90,6 @@ class IodineTrainer(Serializable):
             if self.log_interval and batch_idx % self.log_interval == 0:
                 print(x_prob_loss.item(), kle_loss.item())
 
-        # logger.record_tabular("train/epoch", epoch)
-        # logger.record_tabular("train/Log Prob", np.mean(log_probs))
-        # logger.record_tabular("train/KL", np.mean(kles))
-        # logger.record_tabular("train/loss", np.mean(losses))
-        # logger.record_tabular("train/mse", np.mean(mses))
-
         stats = OrderedDict([
             ("train/epoch", epoch),
             ("train/Log Prob", np.mean(log_probs)),
@@ -103,6 +97,7 @@ class IodineTrainer(Serializable):
             ("train/loss", np.mean(losses)),
             ("train/mse", np.mean(mses))
         ])
+
         return stats
 
 
@@ -110,8 +105,6 @@ class IodineTrainer(Serializable):
             self,
             epoch,
             save_reconstruction=True,
-            save_vae=True,
-            record_stats=True,
             train=True,
             batches=1,
     ):
@@ -123,7 +116,7 @@ class IodineTrainer(Serializable):
         dataloader = self.train_dataset.dataloader if train else self.test_dataset.dataloader
         for batch_idx, tensors in enumerate(dataloader):
             obs, actions = self.prepare_tensors(tensors)
-            self.optimizer.zero_grad()
+            self.optimizer.zero_grad() #RV: This is not needed
             x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(obs, actions=actions, schedule=schedule)
 
             losses.append(loss.mean().item())
@@ -152,14 +145,6 @@ class IodineTrainer(Serializable):
             if batch_idx >= batches - 1:
                 break
 
-        # if record_stats:
-        #     logger.record_tabular("test/Log Prob", np.mean(log_probs))
-        #     logger.record_tabular("test/KL", np.mean(kles))
-        #     logger.record_tabular("test/loss", np.mean(losses))
-        #     logger.record_tabular("test/mse", np.mean(mses))
-        #     logger.dump_tabular()
-        # if save_vae:
-        #     logger.save_itr_params(epoch, self.model)  # slow...
 
         stats = OrderedDict([
             ("test/Log Prob", np.mean(log_probs)),

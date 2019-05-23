@@ -140,7 +140,7 @@ class BlockEnv():
         pos = np.clip(random_a[3:6], [x[0] for x in self.drop_bounds['pos']],
                       [x[1] for x in self.drop_bounds['pos']])
 
-
+        pos[-1] = np.clip(pos[-1], -.4, 0)
 
         if 'horizontal' in ply:
             axis = [1, 0, 0]
@@ -149,6 +149,9 @@ class BlockEnv():
         axangle = utils.random_axangle(axis=axis)
 
         axangle[-1] = random_a[9]
+
+        if 'horizontal' in ply:
+            axangle[-1] = 0
 
         scale = utils.uniform(*self.settle_bounds['scale'])
         #rgba = self.sample_rgba_from_hsv(*self.settle_bounds['hsv'])
