@@ -58,8 +58,9 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
         feats = np.moveaxis(feats, -1, 2) # (T, bs, ch, imsize, imsize)
         feats = np.moveaxis(feats, 0, 1) # (bs, T, ch, imsize, imsize)
         actions = np.moveaxis(actions, 0, 1) # (bs, T, action_dim)
-        torch_dataset = TensorDataset(torch.Tensor(feats)[:size],
-                                      torch.Tensor(actions)[:size])
+
+        torch_dataset = TensorDataset(torch.Tensor(feats[:size]),
+                                      torch.Tensor(actions[:size]))
         dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
         return dataset
 

@@ -36,7 +36,8 @@ class Cost:
         elif self.type == 'goal_pixel':
             return self.goal_pixel(goal_latents, goal_image, pred_latents, pred_image, actions)
         elif self.type == 'latent_pixel':
-            return self.latent_pixel(mpc_step, goal_latents_recon, goal_image, pred_latents_recon,
+            return self.latent_full_pixel(mpc_step, goal_latents_recon, goal_image,
+                                        pred_latents_recon,
                                      pred_image, actions)
         else:
             raise Exception
@@ -232,6 +233,78 @@ class Cost:
 
         return best_pred_obs, actions[ptu.get_numpy(best_action_idxs)], best_goal_idx
 
+    def latent_full_pixel(self, mpc_step, goal_latents_recon, goal_image, pred_latents_recon,
+                      pred_image,
+                     actions):
+        # obs_latents is (n_actions, K, rep_size)
+        # pred_obs is (n_actions, 3, imsize, imsize)
+        best_goal_idx = 0
+        best_action_idx = 0
+        best_cost = np.inf
+        best_latent_idx = 0
+        n_actions = actions.shape[0]
+        K = pred_latents_recon.shape[1]
+
+        imshape = (3, 64, 64)
+        # Compare against each goal latent
+        costs = []
+        costs_latent = []
+        latent_idxs = []
+        for i in range(goal_latents_recon.shape[0]):
+            cost = torch.pow(goal_latents_recon[i].view(1, 1, *imshape) - pred_latents_recon,
+                             2).mean(4).mean(3).mean(2)
+            costs_latent.append(cost)
+            cost, latent_idx = cost.min(-1)  # take min among K
+            costs.append(cost)
+            latent_idxs.append(latent_idx)
+            min_cost, action_idx = cost.min(0)  # take min among n_actions
+
+            if min_cost <= best_cost:
+                best_goal_idx = i
+                best_action_idx = action_idx
+                best_cost = min_cost
+                best_latent_idx = latent_idx[action_idx]
+
+        costs = torch.stack(costs)  # (n_goal_latents, n_actions )
+        latent_idxs = torch.stack(latent_idxs)  # (n_goal_latents, n_actions )
+        best_action_idxs = costs.min(0)[0].sort()[1]
+
+        matching_costs, matching_goal_idx = costs.min(0)
+
+        matching_latent_idx = latent_idxs[matching_goal_idx, np.arange(n_actions)]
+
+        matching_goal_rec = torch.stack([goal_latents_recon[j] for j in matching_goal_idx])
+        matching_latent_rec = torch.stack(
+            [pred_latents_recon[i][matching_latent_idx[i]] for i in range(n_actions)])
+        best_pred_obs = ptu.get_numpy(pred_image[best_action_idx])
+
+        full_plot = torch.cat([pred_image.unsqueeze(0),
+                               pred_latents_recon.permute(1, 0, 2, 3, 4),
+                               matching_latent_rec.unsqueeze(0),
+                               matching_goal_rec.unsqueeze(0)], 0)
+
+        plot_size = 8
+
+        mse = torch.pow(pred_image - goal_image, 2).mean(3).mean(2).mean(1)
+
+        best_action_idxs = mse.sort()[1]
+
+        
+        full_plot = full_plot[:, ptu.get_numpy(best_action_idxs[:plot_size])]
+        caption = np.zeros(full_plot.shape[:2])
+        caption[1:1 + K, :] = ptu.get_numpy(torch.stack(costs_latent).min(0)[0].permute(1, 0))[:,
+                              :plot_size]
+        caption[-2, :] = matching_costs.cpu().numpy()[ptu.get_numpy(best_action_idxs[:plot_size])]
+
+        plot_multi_image(ptu.get_numpy(full_plot),
+                         logger.get_snapshot_dir() + '%s/mpc_pred_%d.png' % (
+                         self.logger_prefix_dir, mpc_step),
+                         caption=caption)
+
+
+
+        return best_pred_obs, actions[ptu.get_numpy(best_action_idxs)], best_goal_idx
+
 class MPC:
     def __init__(self, model, env, n_actions, mpc_steps,
                  n_goal_objs=3,
@@ -254,6 +327,7 @@ class MPC:
         self.n_goal_objs = n_goal_objs
         self.mpc_style = mpc_style
         self.cem_steps = cem_steps
+        self.multi_steps = 2
         if logger_prefix_dir is not None:
             os.mkdir(logger.get_snapshot_dir() + logger_prefix_dir)
         self.logger_prefix_dir = logger_prefix_dir
@@ -297,9 +371,12 @@ class MPC:
                                                                         goal_latents_mask,
                                                                         goal_latents_recon)
 
-        #true_actions = self.env.move_blocks_side()
+        true_actions = self.env.move_blocks_side()
         #self.true_actions = true_actions
+        #self.env.initialize(True)
         #self.env.reset()
+        #for i in range(20):
+        #    self.env.step(self.env.sample_action())
         obs = self.env.get_observation()
         import matplotlib.pyplot as plt
         # for i in range(4):
@@ -350,11 +427,16 @@ class MPC:
 
         old_env_info = self.env.get_env_info()
         real_obs = []
-        for action in ptu.get_numpy(actions):
-            self.env.set_env_info(old_env_info)
-            actual_obs = self.env.step(action)
-            real_obs.append(actual_obs)
-        self.env.set_env_info(old_env_info)
+
+        # for action in ptu.get_numpy(actions):
+        #     self.env.set_env_info(old_env_info)
+        #     self.env.sim.forward()
+        #     self.env.sim.step()
+        #     print(old_env_info)
+        #
+        #     actual_obs = self.env.step(action)
+        #     real_obs.append(actual_obs)
+        # self.env.set_env_info(old_env_info)
 
 
         for i in range(n_batches):
@@ -370,16 +452,16 @@ class MPC:
             outputs[1].append(obs_latents)
             outputs[2].append(obs_latents_recon)
 
-        save_image(ptu.from_numpy(np.concatenate([np.moveaxis(np.stack(real_obs)/255., 3, 1),
-                                                  ptu.get_numpy(pred_obs)])),
-                   logger.get_snapshot_dir() + '%s/pred_vs_real.png' % self.logger_prefix_dir,
-                   nrow=7)
+        # save_image(ptu.from_numpy(np.concatenate([np.moveaxis(np.stack(real_obs)/255., 3, 1),
+        #                                           ptu.get_numpy(pred_obs)])),
+        #            logger.get_snapshot_dir() + '%s/pred_vs_real.png' % self.logger_prefix_dir,
+        #            nrow=7)
 
         return torch.cat(outputs[0]), torch.cat(outputs[1]), torch.cat(outputs[2])
 
     def step_mpc(self, obs, goal_latents, goal_image, mpc_step, goal_latents_recon):
         if self.mpc_style == 'random_shooting':
-            best_pred_obs, best_actions, best_goal_idx = self._random_shooting_step(obs,
+            best_pred_obs, best_actions, best_goal_idx = self._random_shooting_multistep(obs,
                                                                                     goal_latents,
                                                                                     goal_image,
                                                                                     mpc_step,
@@ -393,7 +475,7 @@ class MPC:
         actions = None
         filter_idx = int(self.n_actions * 0.1)
         for i in range(self.cem_steps):
-            best_pred_obs, best_actions, best_goal_idx = self._random_shooting_step(obs,
+            best_pred_obs, best_actions, best_goal_idx = self._random_shooting_multistep(obs,
                                                                                     goal_latents,
                                                                                     goal_image,
                                                                                     mpc_step,
@@ -419,6 +501,42 @@ class MPC:
         # polygox_idx, pos, axangle, rgb
         if self.true_actions is not None:
             actions = np.concatenate([self.true_actions[mpc_step].reshape((1, -1)), actions])
+
+        if self.use_action_image:
+            obs_rep = ptu.from_numpy(np.moveaxis(np.stack([self.env.try_action(action) for action in
+                                               actions]), 3, 1))
+        else:
+            obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0], 1, 1,
+                                                                             1)
+
+        pred_obs, obs_latents, obs_latents_recon = self.model_step_batched(obs_rep,
+                                                                           ptu.from_numpy(actions))
+
+        best_pred_obs, best_actions, best_goal_idx = self.cost.best_action(mpc_step, goal_latents,
+                                                                           goal_latents_recon,
+                                                                           goal_image,
+                                                                           obs_latents,
+                                                                           obs_latents_recon,
+                                                                           pred_obs,
+                                                                           actions)
+
+        return best_pred_obs, best_actions, best_goal_idx
+
+    def _random_shooting_multistep(self, obs, goal_latents, goal_image, mpc_step,
+                                   goal_latents_recon,
+                              actions=None):
+
+        # obs is (imsize, imsize, 3)
+        # goal latents is (<K, rep_size)
+        if actions is None:
+            actions = np.stack([self.env.sample_action(action_type='place_block') for _ in range(
+                self.n_actions * self.multi_steps)]).reshape((self.n_actions, self.multi_steps,
+                                                              -1))
+        import pdb; pdb.set_trace()
+        print(actions)
+        # polygox_idx, pos, axangle, rgb
+        #if self.true_actions is not None:
+        #    actions = np.concatenate([self.true_actions[mpc_step].reshape((1, -1)), actions])
 
         if self.use_action_image:
             obs_rep = ptu.from_numpy(np.moveaxis(np.stack([self.env.try_action(action) for action in
@@ -476,10 +594,10 @@ def main(variant):
     for i, goal_idx in enumerate(goal_idxs):
         #goal_file = module_path + '/examples/mpc/stage1/manual_constructions/bridge/%d_1.png' % i
         goal_file = module_path + '/examples/mpc/stage3/goals/img_%d.png' % goal_idx
-        #true_actions = np.load(module_path + '/examples/mpc/stage3/goals/actions.npy')[goal_idx]
+        true_actions = np.load(module_path + '/examples/mpc/stage3/goals/actions.npy')[goal_idx]
         env = BlockPickAndPlaceEnv(num_objects=3, num_colors=None, img_dim=64, include_z=False,
                                    random_initialize=True)
-        #env.set_env_info(true_actions)
+        env.set_env_info(true_actions)
 
         mpc = MPC(m, env, n_actions=7, mpc_steps=1, true_actions=None,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=3,

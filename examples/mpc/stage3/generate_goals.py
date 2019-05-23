@@ -10,7 +10,7 @@ from rlkit.core import logger
 from torchvision.utils import save_image
 from rlkit.util.plot import plot_multi_image
 import scipy.misc as misc
-
+from rlkit.util.misc import get_module_path
 
 def get_goal_info(env):
     env.create_tower_shape()
@@ -21,8 +21,7 @@ def get_goal_info(env):
 
 if __name__ == "__main__":
 
-    output_dir = '/home/jcoreyes/objects/rlkit'
-    #output_dir = '/Users/aiflab/Desktop/Berkeley/Research/Rlkit'
+    output_dir = get_module_path()
 
     env = BlockPickAndPlaceEnv(num_objects=3, num_colors=None, img_dim=64, include_z=False,
                                random_initialize=False, view=False)

@@ -231,6 +231,20 @@ def create_schedule(train, T, schedule_type, seed_steps):
         raise Exception
     return schedule
 
+# loss weight just for physics
+def get_loss_weight(t, T, schedule_type):
+    if schedule_type == 'single_step_physics':
+        return t
+
+    elif schedule_type == 'random_alternating':
+        return t
+
+    elif schedule_type == 'multi_step_physics':
+        return t
+
+    else:
+        raise Exception
+
 class IodineVAE(GaussianLatentVAE):
     def __init__(
             self,
@@ -298,19 +312,7 @@ class IodineVAE(GaussianLatentVAE):
 
         self.eval_mode = False
 
-    # loss weight just for physics
-    def get_loss_weight(self, t, T):
-        if self.schedule_type == 'single_step_physics':
-            return T * 2
-     
-        elif self.schedule_type == 'random_alternating':
-            return t * 2
 
-        elif self.schedule_type == 'multi_step_physics':
-            return t
-
-        else:
-            raise Exception
         
     def encode(self, input):
         pass
@@ -375,26 +377,6 @@ class IodineVAE(GaussianLatentVAE):
         comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize)
         save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' % mse, nrow=T)
 
-    def plot_latents_trunc(self, ground_truth, masks, x_hats, mse, idx):
-
-        K = self.K
-        imsize = self.imsize
-        T = len(masks)
-        m = masks[idx].permute(1, 0, 2, 3, 4).repeat(1, 1, 3, 1, 1)  # (K, T, ch, imsize, imsize)
-        x = x_hats[idx].permute(1, 0, 2, 3, 4)
-        rec = (m * x)
-        full_rec = rec.sum(0, keepdim=True)
-
-        comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize).data
-
-        # import pdb; pdb.set_trace()
-        n_col = 5
-        comparison = comparison.view(-1, T, 3, imsize, imsize)[:, -n_col:]
-        comparison = comparison[1,]
-        comparison = comparison.contiguous().view(-1, 3, imsize, imsize)
-
-        save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' % mse, nrow=n_col)
-
 
     def refine(self, input, hidden_state, plot_latents=False):
         K = self.K
@@ -440,10 +422,17 @@ class IodineVAE(GaussianLatentVAE):
         bs = input.shape[0]
         imsize = self.imsize
         input = input.unsqueeze(1).repeat(1, 9, 1, 1, 1)
-        if actions is not None:
-            actions = actions.unsqueeze(1).repeat(1, 9, 1)
+
 
         schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps)
+
+        if actions is not None:
+            #actions = actions.unsqueeze(1).repeat(1, 9, 1)
+            self.test_T = self.seed_steps + actions.shape[1]
+            schedule = np.ones((self.test_T,))
+            schedule[:self.seed_steps] = 0
+
+
 
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(
             input, actions,
@@ -567,7 +556,7 @@ class IodineVAE(GaussianLatentVAE):
                     tiled_k_shape)
 
                 lambdas1, _ = self.physics_net(lambdas1, lambdas2, actionsK)
-                loss_w = self.get_loss_weight(t, T)
+                loss_w = get_loss_weight(t, T, self.schedule_type)
 
             # Decode and get loss
             x_hat, mask, m_hat_logit, latents, pixel_x_prob, pixel_likelihood, kle_loss, loss, log_likelihood = \

@@ -90,12 +90,6 @@ class IodineTrainer(Serializable):
             if self.log_interval and batch_idx % self.log_interval == 0:
                 print(x_prob_loss.item(), kle_loss.item())
 
-        # logger.record_tabular("train/epoch", epoch)
-        # logger.record_tabular("train/Log Prob", np.mean(log_probs))
-        # logger.record_tabular("train/KL", np.mean(kles))
-        # logger.record_tabular("train/loss", np.mean(losses))
-        # logger.record_tabular("train/mse", np.mean(mses))
-
         stats = OrderedDict([
             ("train/epoch", epoch),
             ("train/Log Prob", np.mean(log_probs)),
@@ -103,6 +97,7 @@ class IodineTrainer(Serializable):
             ("train/loss", np.mean(losses)),
             ("train/mse", np.mean(mses))
         ])
+
         return stats
 
 
@@ -110,8 +105,6 @@ class IodineTrainer(Serializable):
             self,
             epoch,
             save_reconstruction=True,
-            save_vae=True,
-            record_stats=True,
             train=True,
             batches=1,
     ):
@@ -152,14 +145,6 @@ class IodineTrainer(Serializable):
             if batch_idx >= batches - 1:
                 break
 
-        # if record_stats:
-        #     logger.record_tabular("test/Log Prob", np.mean(log_probs))
-        #     logger.record_tabular("test/KL", np.mean(kles))
-        #     logger.record_tabular("test/loss", np.mean(losses))
-        #     logger.record_tabular("test/mse", np.mean(mses))
-        #     logger.dump_tabular()
-        # if save_vae:
-        #     logger.save_itr_params(epoch, self.model)  # slow...
 
         stats = OrderedDict([
             ("test/Log Prob", np.mean(log_probs)),

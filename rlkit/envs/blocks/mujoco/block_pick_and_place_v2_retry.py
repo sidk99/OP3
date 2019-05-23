@@ -382,11 +382,13 @@ class BlockPickAndPlaceEnv():
         # Move blocks to either side
         z = self.drop_heights
         side_pos = [
-            [-2.2, 3.0, z],
-            [2.2, 3.0, z],
-            [-2.2, 3.0, z],
-            [2.3, 3.5, z]]
+            [-2.2, -1.0, z],
+            [2.2, -1.0, z],
+            [-2.2, 0.0, z],
+            [2.3, 0.0, z]]
         # self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min': 1.0, 'y_max' :4.0, 'z_min':0.05, 'z_max'2.2}
+        #         self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min': -2, 'y_max' :1.0, 'z_min':0.05, 'z_max':
+         #   2.2}
         place_lst = []
         for i, block in enumerate(self.names):
             place = copy.deepcopy(self.get_block_info(block)["pos"])
@@ -441,7 +443,7 @@ class BlockPickAndPlaceEnv():
 
         def get_drop_pos(index):
             delta_x = 1
-            y_val = 3
+            y_val = 0.5
             left_most_x = -2.5
             return [left_most_x + index * delta_x, y_val, 4]
 
@@ -499,7 +501,7 @@ class BlockPickAndPlaceEnv():
     def set_env_info(self, env_info):
         self.names = env_info["names"]
         self.blocks = env_info["blocks"]
-        #self.initialize(True)
+        self.initialize(True)
 
 
 def createSingleSim(args):
