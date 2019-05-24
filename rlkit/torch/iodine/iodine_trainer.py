@@ -138,7 +138,7 @@ class IodineTrainer(Serializable):
 
                 comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize)
                 #import pdb; pdb.set_trace()
-                save_dir = osp.join(os.getcwd(),
+                save_dir = osp.join(logger.get_snapshot_dir(),
                                     '%s_r%d.png' % ('train' if train else 'val', epoch))
 
                 save_image(comparison.data.cpu(), save_dir, nrow=self.test_T)
