@@ -51,17 +51,17 @@ class PhysicsNetwork(nn.Module):
         # input is (bs*K, representation_size)
         K = self.K
 
-        lambda1_enc_flat = self.lambda_encoder(lambda1)
+        lambda1_enc_flat = self.lambda_encoder(lambda1) #Encode initial lambdas
 
         if actions is not None:
             if self.action_size == 4:
-                action_enc = self.action_encoder(actions[:, torch.LongTensor([0, 1, 3, 4])])
+                action_enc = self.action_encoder(actions[:, torch.LongTensor([0, 1, 3, 4])]) #RV: Encode actions, why torch.longTensor?
             else:
-                action_enc = self.action_encoder(actions)
-            lambda1_enc_actions = torch.cat([lambda1_enc_flat, action_enc], -1)
-            lambda1_enc = lambda1_enc_actions.view(-1, K, self.enc_rep_size + self.action_enc_size)
+                action_enc = self.action_encoder(actions) #Encode actions
+            lambda1_enc_actions = torch.cat([lambda1_enc_flat, action_enc], -1) #Concatonate lambdas with actions, does this automatically broadcast?
+            lambda1_enc = lambda1_enc_actions.view(-1, K, self.enc_rep_size + self.action_enc_size) #bs, k, h
         else:
-            lambda1_enc = lambda1_enc_flat.view(-1, K, self.enc_rep_size)
+            lambda1_enc = lambda1_enc_flat.view(-1, K, self.enc_rep_size)  #bs, k, h
 
         bs = lambda1_enc.shape[0]
 
@@ -70,15 +70,13 @@ class PhysicsNetwork(nn.Module):
             for j in range(K):
                 if i == j:
                     continue
-                pairs.append(torch.cat([lambda1_enc[:, i], lambda1_enc[:, j]], -1))
+                pairs.append(torch.cat([lambda1_enc[:, i], lambda1_enc[:, j]], -1))  #Create array of all pairs
 
-        all_pairs = torch.stack(pairs, 1).view(bs*K,  K-1, -1)
+        all_pairs = torch.stack(pairs, 1).view(bs*K,  K-1, -1) #Create torch of all pairs
 
-        interaction = self.embedding_network(all_pairs)
-        effect = self.effect_network(interaction)
-
-        attention = self.attention_network(interaction)
-
+        interaction = self.embedding_network(all_pairs)  #(bs*k,k-1,h), input size is (h)?
+        effect = self.effect_network(interaction) #(bs*k,k-1,h)
+        attention = self.attention_network(interaction) #(bs*k,k-1,1)
         total_effect = (attention * effect).view(bs*K, (K-1), -1).sum(1) # TODO check this is right
 
         lambda_physics = self.encoder_network(total_effect)

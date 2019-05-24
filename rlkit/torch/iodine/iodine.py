@@ -321,8 +321,10 @@ class IodineVAE(GaussianLatentVAE):
         self.eval_mode = eval
 
     def decode(self, lambdas1, lambdas2, inputK, bs):
+        #RV: inputK: (bs*K, ch, imsize, imsize)
+        #RV: lambdas1, lambdas2: (bs*K, lstm_size)
 
-        latents = self.rsample_softplus([lambdas1, lambdas2])
+        latents = self.rsample_softplus([lambdas1, lambdas2]) #lambdas1, lambdas2 are mu, softplus
 
         broadcast_ones = ptu.ones((latents.shape[0], latents.shape[1], self.decoder_imsize, self.decoder_imsize)).to(
             latents.device) #RV: (bs, lstm_size, decoder_imsize. decoder_imsize)
@@ -331,7 +333,7 @@ class IodineVAE(GaussianLatentVAE):
         m_hat_logits = decoded[:, 3] #RV: (bs*K, 1, D, D), raw depth values
 
         m_hat_logit = m_hat_logits.view(bs, self.K, self.imsize, self.imsize) #RV: (bs, K, D, D)
-        mask = F.softmax(m_hat_logit, dim=1)  # (bs, K, imsize, simze)
+        mask = F.softmax(m_hat_logit, dim=1)  # (bs, K, D, D)
 
         pixel_x_prob = self.gaussian_prob(x_hat, inputK, self.sigma).view(bs, self.K, self.imsize, self.imsize) #RV: Component p(x|h), (bs,K,D,D)
         pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K  #RV:sum over k of m_k*p_k, complete log likelihood
@@ -425,7 +427,6 @@ class IodineVAE(GaussianLatentVAE):
 
 
         schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps) #RV: Returns schedule of 1's and 0's
-
         if actions is not None: #RV: Overwrites schedule to be refinement for seed steps and physics afterwards
             #actions = actions.unsqueeze(1).repeat(1, 9, 1)
             self.test_T = self.seed_steps + actions.shape[1]
@@ -452,8 +453,7 @@ class IodineVAE(GaussianLatentVAE):
             full_rec = rec.sum(0, keepdim=True)
 
             comparison = torch.cat([input[0, :self.test_T].unsqueeze(0), full_rec, m, rec],
-                                   0).view(-1, 3,
-                                                                                      imsize, imsize)
+                                   0).view(-1, 3, imsize, imsize)
             # import pdb; pdb.set_trace()
 
             save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/test.png',
@@ -471,10 +471,8 @@ class IodineVAE(GaussianLatentVAE):
         lns = self.layer_norms
         posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-8)  # avoid divide by zero
         leave_out_ll = pixel_likelihood.unsqueeze(1) - mask * pixel_x_prob
-        x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = torch.autograd.grad(loss, [x_hat, mask] + [lambdas1,
-                                                                                                           lambdas2],
-                                                                                    create_graph=not self.eval_mode,
-                                                                                    retain_graph=not self.eval_mode)
+        x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = \
+            torch.autograd.grad(loss, [x_hat, mask] + [lambdas1, lambdas2],create_graph=not self.eval_mode, retain_graph=not self.eval_mode)
 
         a = torch.cat([
             torch.cat([inputK, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),
@@ -510,7 +508,7 @@ class IodineVAE(GaussianLatentVAE):
         lambdas1 = self.lambdas1.unsqueeze(0).repeat(bs * K, 1)
         lambdas2 = self.lambdas2.unsqueeze(0).repeat(bs * K, 1)
         # initialize hidden state
-        h1, h2 = self.initialize_hidden(bs * K)
+        h1, h2 = self.initialize_hidden(bs * K) #RV: Each one is (bs, self.lstm_size)
 
         h1 = h1.to(input.device)
         h2 = h2.to(input.device)
@@ -521,9 +519,9 @@ class IodineVAE(GaussianLatentVAE):
 
         current_step = 0
 
-        inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
+        inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape) #RV: (bs*K, ch, imsize, imsize)
         x_hat, mask, m_hat_logit, latents, pixel_x_prob, pixel_likelihood, kle_loss, loss, log_likelihood = self.decode(
-            lambdas1, lambdas2, inputK, bs)
+            lambdas1, lambdas2, inputK, bs) #RV: Returns sampled latents, decoded outputs, and computes the likelihood/loss
         losses.append(loss)
 
         actions_done = False
@@ -532,11 +530,10 @@ class IodineVAE(GaussianLatentVAE):
         for t in range(1, T + 1):
             # Refine
             if schedule[t - 1] == 0:
-                inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
+                inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape) #RV: (bs*K, ch, imsize, imsize)
                 lambdas1, lambdas2, h1, h2 = self.refine_lambdas(pixel_x_prob, pixel_likelihood, mask, m_hat_logit,
-                                                                 loss, x_hat,
-                                                                 lambdas1, lambdas2, inputK, latents, h1, h2,
-                                                                 tiled_k_shape, bs)
+                                                                 loss, x_hat, lambdas1, lambdas2, inputK, latents, h1, h2,
+                                                                 tiled_k_shape, bs) #RV: Update lambdas and h's using info
                 # if not applied_action: # Do physics on static scene if haven't applied action yet
                 #     lambdas1, _ = self.physics_net(lambdas1, lambdas2, None)
                 loss_w = t

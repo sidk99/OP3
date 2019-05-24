@@ -108,12 +108,14 @@ class GaussianLatentVAE(VAEBase):
         latents = epsilon * stds + mu
         return latents
 
+    #RV: Inputs: latent_distribution_params: [mu, softplus], each of arbitrary but same size
+    #    Outputs: A random sample of the same size based off mu and softplus
     def rsample_softplus(self, latent_distribution_params):
         mu, softplus = latent_distribution_params
         stds = torch.sqrt(torch.log(1 + softplus.exp()))
 
         #stds = (0.5 * logvar).exp()
-        epsilon = ptu.randn(*mu.size()).to(stds.device)
+        epsilon = ptu.randn(*mu.size()).to(stds.device) #RV: Is the star necessary?
         latents = epsilon * stds + mu
         return latents
 

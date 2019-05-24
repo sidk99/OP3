@@ -35,7 +35,7 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
         return data
     elif 'stack' in data_path:
         if train:
-            feats = np.array(hdf5_file['training']['features'])
+            feats = np.array(hdf5_file['training']['features']) # (T, bs, imsize, imsize, ch)
             actions = np.array(hdf5_file['training']['actions'])
         else:
             feats = np.array(hdf5_file['validation']['features'])
@@ -49,8 +49,8 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
         return dataset
     elif 'pickplace' in data_path:
         if train:
-            feats = np.array(hdf5_file['training']['features'])
-            actions = np.array(hdf5_file['training']['actions'])
+            feats = np.array(hdf5_file['training']['features']) # (T, bs, imsize, imsize, ch)
+            actions = np.array(hdf5_file['training']['actions']) # (T, bs, action_dim)
         else:
             feats = np.array(hdf5_file['validation']['features'])
             actions = np.array(hdf5_file['validation']['actions'])
@@ -74,7 +74,7 @@ def run_experiment_func(variant):
     train_dataset = load_dataset(train_path, train=True, batchsize=bs, size=train_size)
     test_dataset = load_dataset(test_path, train=False, batchsize=bs, size=100)
 
-    logger.get_snapshot_dir()
+    logger.get_snapshot_dir() #RV: ?
 
     m = iodine.create_model(variant['model'], train_dataset.action_dim)
     if variant['dataparallel']:
