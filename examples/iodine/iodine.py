@@ -36,10 +36,9 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
         else:
             feats = np.array(hdf5_file['validation']['features'])
             actions = np.array(hdf5_file['validation']['actions'])
-        t_sample = [0, 2, 4, 6, 9]
-        feats = np.moveaxis(feats, -1, 2)[t_sample] # (T, bs, ch, imsize, imsize)
+        #t_sample = [0, 2, 4, 6, 9]
+        feats = np.moveaxis(feats, -1, 2) #[t_sample] # (T, bs, ch, imsize, imsize)
         feats = np.moveaxis(feats, 0, 1) # (bs, T, ch, imsize, imsize)
-        #feats = (feats * 255).astype(np.uint8)
         #actions = np.moveaxis(actions, 0, 1) # (bs, T, action_dim)
         torch_dataset = TensorDataset(torch.Tensor(feats)[:size])
         dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
