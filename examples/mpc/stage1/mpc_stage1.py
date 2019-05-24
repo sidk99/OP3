@@ -12,12 +12,13 @@ from rlkit.envs.blocks.mujoco.block_stacking_env import BlockEnv
 from rlkit.core import logger
 from rlkit.core.timer import timer
 from torchvision.utils import save_image
-#from rlkit.util.plot import plot_multi_image
+from rlkit.util.plot import plot_multi_image
 import json
 import os
 import rlkit.torch.iodine.iodine as iodine
 from collections import OrderedDict
 from ray import tune
+import time
 
 class Cost:
     def __init__(self, type, logger_prefix_dir):
@@ -26,7 +27,7 @@ class Cost:
         self.logger_prefix_dir = logger_prefix_dir
 
     def best_action(self, mpc_step, goal_latents, goal_latents_recon, goal_image, pred_latents,
-                    pred_latents_recon, pred_image, actions):
+                    pred_latents_recon, pred_image, actions, cem_step):
         if self.type == 'min_min_latent':
             return self.min_min_latent(mpc_step, goal_latents, goal_latents_recon, goal_image,
                                        pred_latents, pred_latents_recon, pred_image, actions)
@@ -39,7 +40,7 @@ class Cost:
             return self.goal_pixel(goal_latents, goal_image, pred_latents, pred_image, actions)
         elif self.type == 'latent_pixel':
             return self.latent_pixel(mpc_step, goal_latents_recon, goal_image, pred_latents_recon,
-                                     pred_image, actions)
+                                     pred_image, actions, cem_step)
         else:
             raise Exception
 
@@ -168,7 +169,7 @@ class Cost:
         return ptu.get_numpy(pred_image[action_idx]), actions[action_idx], 0
 
     def latent_pixel(self, mpc_step, goal_latents_recon, goal_image, pred_latents_recon, pred_image,
-                     actions):
+                     actions, cem_step):
         # obs_latents is (n_actions, K, rep_size)
         # pred_obs is (n_actions, 3, imsize, imsize)
         best_goal_idx = 0
@@ -223,10 +224,10 @@ class Cost:
                               :plot_size]
         caption[-2, :] = matching_costs.cpu().numpy()[ptu.get_numpy(best_action_idxs[:plot_size])]
 
-        # plot_multi_image(ptu.get_numpy(full_plot),
-        #                  logger.get_snapshot_dir() + '%s/mpc_pred_%d.png' % (
-        #                      self.logger_prefix_dir, mpc_step),
-        #                  caption=caption)
+        plot_multi_image(ptu.get_numpy(full_plot),
+                         logger.get_snapshot_dir() + '%s/mpc_pred_%d_%d.png' % (
+                             self.logger_prefix_dir, mpc_step, cem_step),
+                         caption=caption)
 
         return best_pred_obs, actions[ptu.get_numpy(best_action_idxs)], best_goal_idx
 
@@ -302,11 +303,14 @@ class MPC:
 
         actions = []
         for mpc_step in range(self.mpc_steps):
+            t0 = time.time()
             pred_obs, action, goal_idx = self.step_mpc(obs, goal_latents, goal_image_tensor,
                                                        mpc_step,
                                                        goal_latents_recon)
+            mpc_time = time.time()
             actions.append(action)
             obs = self.env.step(action)
+            step_time = time.time()
             pred_obs_lst.append(pred_obs)
             obs_lst.append(np.moveaxis(obs, 2, 0))
             if goal_latents.shape[0] == 1:
@@ -315,7 +319,7 @@ class MPC:
             if self.cost.remove_goal_latents:
                 goal_latents = self.remove_idx(goal_latents, goal_idx)
                 goal_latents_recon = self.remove_idx(goal_latents_recon, goal_idx)
-
+            #print(mpc_time - t0, step_time - mpc_time)
         save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst)),
                    logger.get_snapshot_dir() + '%s/mpc.png' % self.logger_prefix_dir,
                    nrow=len(obs_lst))
@@ -336,8 +340,10 @@ class MPC:
         for i in range(n_batches):
             start_idx = i * bs
             end_idx = min(start_idx + bs, obs.shape[0])
-            actions_batch = actions[start_idx:end_idx] if not self.use_action_image else None
-            pred_obs, obs_latents, obs_latents_recon = self.model.step(obs[start_idx:end_idx],
+            actions_batch = actions[start_idx:end_idx].contiguous() if not self.use_action_image \
+                else None
+            pred_obs, obs_latents, obs_latents_recon = self.model.step(obs[
+                                                                       start_idx:end_idx].contiguous(),
                                                                        actions_batch)
             outputs[0].append(pred_obs)
             outputs[1].append(obs_latents)
@@ -365,6 +371,7 @@ class MPC:
                                                                                     goal_latents,
                                                                                     goal_image,
                                                                                     mpc_step,
+                                                                                    i,
                                                                                     goal_latents_recon,
                                                                                     actions=actions)
             best_actions = best_actions[:filter_idx]
@@ -375,11 +382,13 @@ class MPC:
 
         return best_pred_obs, best_actions[0], best_goal_idx
 
-    def _random_shooting_step(self, obs, goal_latents, goal_image, mpc_step, goal_latents_recon,
+    def _random_shooting_step(self, obs, goal_latents, goal_image, mpc_step,
+                              cem_step, goal_latents_recon,
                               actions=None):
 
         # obs is (imsize, imsize, 3)
         # goal latents is (<K, rep_size)
+
         if actions is None:
             actions = np.stack([self.env.sample_action() for _ in range(self.n_actions)])
 
@@ -387,13 +396,16 @@ class MPC:
         if self.true_actions is not None:
             actions = np.concatenate([self.true_actions[mpc_step].reshape((1, -1)), actions])
 
+
+
         if self.use_action_image:
-            obs_rep = ptu.from_numpy(np.moveaxis(np.stack([self.env.try_action(action) for action in
-                                                           actions]), 3, 1))
+            obs_rep = ptu.from_numpy(np.moveaxis(np.stack(self.env.try_actions(actions)), 3, 1))
         else:
             obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0],
                                                                                  1, 1,
                                                                                  1)
+
+
         pred_obs, obs_latents, obs_latents_recon = self.model_step_batched(obs_rep,
                                                                            ptu.from_numpy(actions))
 
@@ -403,7 +415,8 @@ class MPC:
                                                                            obs_latents,
                                                                            obs_latents_recon,
                                                                            pred_obs,
-                                                                           actions)
+                                                                           actions,
+                                                                           cem_step)
 
         return best_pred_obs, best_actions, best_goal_idx
 

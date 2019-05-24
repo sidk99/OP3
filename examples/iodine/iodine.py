@@ -97,7 +97,8 @@ def train_vae(variant):
             logger.record_tabular(k, v)
         logger.dump_tabular()
 
-        torch.save(m.state_dict(), open(logger._snapshot_dir + '/params.pkl', "wb"))
+        torch.save(m.state_dict(), open(logger.get_snapshot_dir() + '/params.pkl', \
+                                                                 "wb"))
     logger.save_extra_data(m, 'vae.pkl', mode='pickle')
 
 

@@ -110,6 +110,7 @@ class BlockEnv():
         else:
             axis = [0, 0, 1]
         axangle = utils.random_axangle(axis=axis)
+        axangle[-1] = 0
 
         scale = utils.uniform(*self.settle_bounds['scale'])
         rgba = self.sample_rgba_from_hsv(*self.settle_bounds['hsv'])
@@ -148,7 +149,8 @@ class BlockEnv():
             axis = [0, 0, 1]
         axangle = utils.random_axangle(axis=axis)
 
-        axangle[-1] = random_a[9]
+        #axangle[-1] = random_a[9]
+        axangle[-1] = 0
 
         if 'horizontal' in ply:
             axangle[-1] = 0
@@ -243,7 +245,75 @@ class BlockEnv():
         self.logger = original_logger
         return obs
 
+    def try_actions(self, actions):
+        import copy
+        xml = XML(self.asset_path)
+        # Note: We need to recreate the entire scene
+        for ind, prev_action in enumerate(self.xml_actions_taken):  # Adding previous actions
+            prev_action['pos'][-1] = ind * 2
+            xml.add_mesh(**prev_action)
 
+        #xml_action = self.model_action_to_xml_action(an_action)
+
+        xml_str = xml.instantiate()
+        model = mjc.load_model_from_xml(xml_str)
+        sim = mjc.MjSim(model)
+
+        logger = Logger(xml, sim, steps=self.max_num_objects_dropped + 1, img_dim=self.img_dim)
+        for act_ind, act in enumerate(self.names):
+            logger.hold_drop_execute(self.names[act_ind+1:], self.names[act_ind], self.settle_steps)
+
+        sim_data = sim.get_state()
+
+        #import pdb; pdb.set_trace()
+
+        xml = XML(self.asset_path)
+        # Note: We need to recreate the entire scene
+        for ind, prev_action in enumerate(self.xml_actions_taken):  # Adding previous actions
+            prev_action['pos'][-1] = ind * 2
+            xml.add_mesh(**prev_action)
+
+
+        # Add all new blocks but outside of scene at different heights so they don't collide
+        old_pos = []
+        for i, action in enumerate(actions):
+            xml_action = self.model_action_to_xml_action(action)
+            old_pos.append(copy.deepcopy(xml_action['pos']))
+            xml_action['pos'][-1] = (6 + i)
+
+            new_name = xml.add_mesh(**xml_action)
+
+        xml_str = xml.instantiate()
+        model = mjc.load_model_from_xml(xml_str)
+        sim = mjc.MjSim(model)
+        obs_lst = []
+        old_sim = self.logger.sim
+        self.logger.sim = sim
+
+        for i, action in enumerate(actions):
+            # set old data
+            if len(self.xml_actions_taken) > 0:
+                sim.data.qpos[:sim_data.qpos.shape[0]] = sim_data.qpos
+                sim.data.qvel[:sim_data.qvel.shape[0]] = sim_data.qvel
+                #sim.forward()
+                # set new data
+            # set new block data
+            block_idx = (len(self.xml_actions_taken) + i)  * 7
+
+            air_pos = copy.deepcopy(sim.data.qpos[block_idx:block_idx+3])
+            #import pdb; pdb.set_trace()
+            sim.data.qpos[block_idx:block_idx+3] = old_pos[i]
+
+            sim.step()
+            obs = self.logger.log_image(0)
+            obs_lst.append(obs)
+
+            # set it back
+            sim.data.qpos[block_idx:block_idx + 3] = air_pos
+        #self.logger = original_logger
+        self.logger.sim = old_sim
+
+        return obs_lst
 
 
     #############Internal functions#########
@@ -357,25 +427,18 @@ if __name__ == '__main__':
     cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
 
     myenv = BlockEnv(5)
-    obs = []
-    obs.append(myenv.get_observation())
-    axes[0].imshow(obs[-1], interpolation='nearest')
+    axes[0].imshow(myenv.get_observation(), interpolation='nearest')
     # cur_fig.savefig("HELLO")
     # plt.show()
 
     # the_input = input("Suffix: ")
+    tmp = myenv.step(myenv.sample_action())
+    axes[1].imshow(tmp)
+    obs = myenv.try_actions([myenv.sample_action() for i in range(4)])
 
     for i in range(4):
-        an_action = myenv.sample_action()
-        if i>=1:
-            tmp = myenv.try_action(an_action)
-        else:
-            myenv.step(an_action)
-            tmp = myenv.get_observation()
-        # print(np.max(tmp), np.min(tmp), np.mean(tmp))
-        axes[i+1].imshow(tmp, interpolation='nearest')
-        # for k in range(5):
-        #     axes[i+1, k].imshow(tmp[k], interpolation='nearest')
+        axes[i+2].imshow(obs[i])
+
 
     cur_fig.savefig("HELLO")
 

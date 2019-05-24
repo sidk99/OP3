@@ -391,8 +391,8 @@ class IodineVAE(GaussianLatentVAE):
             x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(
                 input, None,
                 schedule=np.zeros((T)))
-            outputs[0].append(x_hats.data)
-            outputs[1].append(masks.data)
+            outputs[0].append(x_hats)
+            outputs[1].append(masks)
             outputs[2].append(final_recon)
             outputs[3].append(lambdas[0].view(-1, K, self.representation_size))
 
@@ -418,12 +418,13 @@ class IodineVAE(GaussianLatentVAE):
                                                                                               -1].data.squeeze()
 
     def step(self, input, actions, plot_latents=False):
+
+        from linetimer import CodeTimer
+
         K = self.K
         bs = input.shape[0]
         imsize = self.imsize
         input = input.unsqueeze(1).repeat(1, 9, 1, 1, 1)
-
-
         schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps)
 
         if actions is not None:
@@ -472,7 +473,7 @@ class IodineVAE(GaussianLatentVAE):
         leave_out_ll = pixel_likelihood.unsqueeze(1) - mask * pixel_x_prob
         x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = torch.autograd.grad(loss, [x_hat, mask] + [lambdas1,
                                                                                                            lambdas2],
-                                                                                    create_graph=not self.eval_mode,
+                                                                                    create_graph=False,
                                                                                     retain_graph=not self.eval_mode)
 
         a = torch.cat([
@@ -574,5 +575,5 @@ class IodineVAE(GaussianLatentVAE):
 
         all_x_hats = torch.stack([x.view(untiled_k_shape) for x in x_hats], 1)  # (bs, T, K, 3, imsize, imsize)
         all_masks = torch.stack([x.view(untiled_k_shape) for x in masks], 1)  # # (bs, T, K, 1, imsize, imsize)
-        return all_x_hats, all_masks, total_loss, kle_loss.data / self.beta, \
+        return all_x_hats.data, all_masks.data, total_loss, kle_loss.data / self.beta, \
                log_likelihood.data, mse, final_recon.data, [lambdas1.data, lambdas2.data]
