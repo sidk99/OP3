@@ -325,21 +325,21 @@ class IodineVAE(GaussianLatentVAE):
         latents = self.rsample_softplus([lambdas1, lambdas2])
 
         broadcast_ones = ptu.ones((latents.shape[0], latents.shape[1], self.decoder_imsize, self.decoder_imsize)).to(
-            latents.device)
-        decoded = self.decoder(latents, broadcast_ones)
-        x_hat = decoded[:, :3]
-        m_hat_logits = decoded[:, 3]
+            latents.device) #RV: (bs, lstm_size, decoder_imsize. decoder_imsize)
+        decoded = self.decoder(latents, broadcast_ones) #RV: Uses broadcast decoding network, output (bs*K, 4, D, D)?
+        x_hat = decoded[:, :3] #RV: (bs*K, 3, D, D)
+        m_hat_logits = decoded[:, 3] #RV: (bs*K, 1, D, D), raw depth values
 
-        m_hat_logit = m_hat_logits.view(bs, self.K, self.imsize, self.imsize)
+        m_hat_logit = m_hat_logits.view(bs, self.K, self.imsize, self.imsize) #RV: (bs, K, D, D)
         mask = F.softmax(m_hat_logit, dim=1)  # (bs, K, imsize, simze)
 
-        pixel_x_prob = self.gaussian_prob(x_hat, inputK, self.sigma).view(bs, self.K, self.imsize, self.imsize)
-        pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K
-        log_likelihood = -torch.log(pixel_likelihood + 1e-12).sum() / bs
+        pixel_x_prob = self.gaussian_prob(x_hat, inputK, self.sigma).view(bs, self.K, self.imsize, self.imsize) #RV: Component p(x|h), (bs,K,D,D)
+        pixel_likelihood = (mask * pixel_x_prob).sum(1)  # sum along K  #RV:sum over k of m_k*p_k, complete log likelihood
+        log_likelihood = -torch.log(pixel_likelihood + 1e-12).sum() / bs #RV: This should be complete log likihood?
 
         kle = self.kl_divergence_softplus([lambdas1, lambdas2])
-        kle_loss = self.beta * kle.sum() / bs
-        loss = log_likelihood + kle_loss
+        kle_loss = self.beta * kle.sum() / bs #RV: KL loss
+        loss = log_likelihood + kle_loss #RV: Total loss
 
         return x_hat, mask, m_hat_logits, latents, pixel_x_prob, pixel_likelihood, kle_loss, loss, log_likelihood
 
@@ -421,12 +421,12 @@ class IodineVAE(GaussianLatentVAE):
         K = self.K
         bs = input.shape[0]
         imsize = self.imsize
-        input = input.unsqueeze(1).repeat(1, 9, 1, 1, 1)
+        input = input.unsqueeze(1).repeat(1, 9, 1, 1, 1) #RV: Why 9? Shouldn't it be just 1 or K?
 
 
-        schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps)
+        schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps) #RV: Returns schedule of 1's and 0's
 
-        if actions is not None:
+        if actions is not None: #RV: Overwrites schedule to be refinement for seed steps and physics afterwards
             #actions = actions.unsqueeze(1).repeat(1, 9, 1)
             self.test_T = self.seed_steps + actions.shape[1]
             schedule = np.ones((self.test_T,))
@@ -463,7 +463,8 @@ class IodineVAE(GaussianLatentVAE):
 
         return recon.data, lambdas[0].view(bs, K, -1).data, lambda_recon[:, -1].data
 
-
+    #RV: Inputs: Information needed for IODINE refinement network (note much more information needed than RNEM)
+    #RV: Outputs: Updates lambdas and hs
     def refine_lambdas(self, pixel_x_prob, pixel_likelihood, mask, m_hat_logit, loss, x_hat,
                        lambdas1, lambdas2, inputK, latents, h1, h2, tiled_k_shape, bs):
         K = self.K
@@ -495,6 +496,9 @@ class IodineVAE(GaussianLatentVAE):
                                                              [extra_input, lambdas1, lambdas2, latents], -1))
         return lambdas1, lambdas2, h1, h2
 
+
+    #RV: Input is (bs, T, ch, imsize, imsize), schedule is (T,): 0 for refinement and 1 for physics
+    #    Runs refinement/dynamics on input accordingly into
     def _forward_dynamic_actions(self, input, actions, schedule):
         # input is (bs, T, ch, imsize, imsize)
         # schedule is (T,): 0 for refinement and 1 for physics

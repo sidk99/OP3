@@ -31,13 +31,14 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
         return data
     elif 'stack' in data_path:
         if train:
-            feats = np.array(hdf5_file['training']['features'])
+            feats = np.array(hdf5_file['training']['features']) # (T, bs, ch, imsize, imsize)
             actions = np.array(hdf5_file['training']['actions'])
         else:
             feats = np.array(hdf5_file['validation']['features'])
             actions = np.array(hdf5_file['validation']['actions'])
-        t_sample = [0, 2, 4, 6, 9]
-        feats = np.moveaxis(feats, -1, 2)[t_sample] # (T, bs, ch, imsize, imsize)
+        print("feats.shape: {}".format(feats.shape))
+        # t_sample = [0, 2, 4, 6, 9]
+        # feats = np.moveaxis(feats, -1, 2)[t_sample] # (T, bs, ch, imsize, imsize)
         feats = np.moveaxis(feats, 0, 1) # (bs, T, ch, imsize, imsize)
         #feats = (feats * 255).astype(np.uint8)
         #actions = np.moveaxis(actions, 0, 1) # (bs, T, action_dim)
@@ -103,7 +104,7 @@ def train_vae(variant):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument('-da', '--dataset', type=str, default=None) # stack50k
+    parser.add_argument('-da', '--dataset', type=str, default=None, required=True) # stack50k
     parser.add_argument('-de', '--debug', type=int, default=1)
     parser.add_argument('-m', '--mode', type=str,default='here_no_doodad')
 
@@ -117,7 +118,7 @@ if __name__ == "__main__":
             lr=1e-4,
             log_interval=0,
         ),
-        num_epochs=10000,
+        num_epochs=100,
         algorithm='Iodine',
         save_period=1,
         dataparallel=False,
