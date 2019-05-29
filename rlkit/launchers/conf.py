@@ -1,20 +1,21 @@
 """
 Copy this file to config.py and modify as needed.
 """
+
 # Change these things
 CODE_DIRS_TO_MOUNT = [
     #'/home/user/python/module/one',
-    '/home/rishiv/Research/fun_rlkit/'
+    # '/home/rishiv/Research/fun_rlkit/'
+    '/nfs/kun1/users/rishiv/Research/fun_rlkit/'
     #TODO: Add baseline SAVP package as well
 ]
 DIR_AND_MOUNT_POINT_MAPPINGS = [
     dict(
-        local_dir='/home/jcoreyes/.mujoco/',
+        local_dir='/home/rishiv/.mujoco/',
         mount_point='/root/.mujoco',
     ),
 ]
-LOCAL_LOG_DIR = '/home/rishiv/Research/op3_exps'
-
+LOCAL_LOG_DIR = '/nfs/kun1/users/rishiv/Research/op3_exps'
 
 """
 ********************************************************************************
@@ -30,14 +31,14 @@ ignoring most of these things and only using them on an as-needed basis.
 ********************************************************************************
 """
 RUN_DOODAD_EXPERIMENT_SCRIPT_PATH = (
-    '/home/rishiv/Research/fun_rlkit/scripts/run_experiment_from_doodad.py'
+    '/nfs/kun1/rishiv/Research/fun_rlkit/scripts/run_experiment_from_doodad.py'
 )
 
 """
 AWS Settings
 """
 # If not set, default will be chosen by doodad
-AWS_S3_PATH = 's3://rlkit.data/'
+AWS_S3_PATH = 's3://op3.rlkit.data/'
 
 # You probably don't need to change things below
 # Specifically, the docker image is looked up on dockerhub.com.
@@ -46,11 +47,11 @@ INSTANCE_TYPE = 'c4.large'
 SPOT_PRICE = 0.03
 
 GPU_DOODAD_DOCKER_IMAGE = 'jcoreyes/op3-ray'
-GPU_INSTANCE_TYPE = 'g2.2xlarge'
-GPU_SPOT_PRICE = 0.5
+GPU_INSTANCE_TYPE = 'p3.8xlarge' #g2.2xlarge, p3.8xlarge
+GPU_SPOT_PRICE = 0.75
 # These AMI images have the docker images already installed.
 REGION_TO_GPU_AWS_IMAGE_ID = {
-    'us-west-1': 'ami-076347b8649dddb00',
+    'us-west-2': 'ami-076347b8649dddb00',
     'us-east-1': 'ami-076347b8649dddb00'
 }
 

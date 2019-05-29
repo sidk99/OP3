@@ -1,7 +1,7 @@
 import rlkit.torch.pytorch_util as ptu
 from rlkit.launchers.launcher_util import run_experiment
 import numpy as np
-from rlkit.launchers.ray.launcher import launch_experiment
+# from rlkit.launchers.ray.launcher import launch_experiment
 from torch.distributions import Normal
 import pickle
 import torch
@@ -17,8 +17,9 @@ import json
 import os
 import rlkit.torch.iodine.iodine as iodine
 from collections import OrderedDict
-from ray import tune
+# from ray import tune
 import time
+import pdb
 
 class Cost:
     def __init__(self, type, logger_prefix_dir):
@@ -150,8 +151,7 @@ class Cost:
         plot_size = 8
         full_plot = full_plot[:, :plot_size]
         caption = np.zeros(full_plot.shape[:2])
-        caption[1:1 + K, :] = ptu.get_numpy(torch.stack(costs_latent).min(0)[0].permute(1, 0))[:,
-                              :plot_size]
+        caption[1:1 + K, :] = ptu.get_numpy(torch.stack(costs_latent).min(0)[0].permute(1, 0))[:,:plot_size]
         caption[-2, :] = matching_costs.cpu().numpy()[:plot_size]
 
         # plot_multi_image(ptu.get_numpy(full_plot),
@@ -170,8 +170,12 @@ class Cost:
 
     def latent_pixel(self, mpc_step, goal_latents_recon, goal_image, pred_latents_recon, pred_image,
                      actions, cem_step):
-        # obs_latents is (n_actions, K, rep_size)
-        # pred_obs is (n_actions, 3, imsize, imsize)
+        # goal_latents_recon (5, 3, 64, 64)
+        # goal_image (1, 3, 64, 64)
+        # pred_latents_recon (960, K, 3, 64, 64)
+        # pred_image (960, 3, 64, 64)
+        # actions (960, 13)
+
         best_goal_idx = 0
         best_action_idx = 0
         best_cost = np.inf
@@ -185,8 +189,8 @@ class Cost:
         costs_latent = []
         latent_idxs = []
         for i in range(goal_latents_recon.shape[0]):
-            cost = torch.pow(goal_latents_recon[i].view(1, 1, *imshape) - pred_latents_recon,
-                             2).mean(4).mean(3).mean(2)
+            cost = torch.pow(goal_latents_recon[i].view(1, 1, *imshape) - pred_latents_recon, 2).mean(4).mean(3).mean(2)
+            #cost: (960, K)
             costs_latent.append(cost)
             cost, latent_idx = cost.min(-1)  # take min among K
             costs.append(cost)
@@ -199,37 +203,67 @@ class Cost:
                 best_cost = min_cost
                 best_latent_idx = latent_idx[action_idx]
 
-        costs = torch.stack(costs)  # (n_goal_latents, n_actions )
-        latent_idxs = torch.stack(latent_idxs)  # (n_goal_latents, n_actions )
-        best_action_idxs = costs.min(0)[0].sort()[1]
+        costs = torch.stack(costs)  # (n_goal_latents, n_actions)
+        latent_idxs = torch.stack(latent_idxs)  # (n_goal_latents, n_actions)
+        best_action_idxs = costs.min(0)[0].sort()[1] #Sorted indices of best actions (n_actions)
+        best_pred_obs = ptu.get_numpy(pred_image[best_action_idx])  # Gets single predicted image corresponding with best action
 
-        matching_costs, matching_goal_idx = costs.min(0)
+        matching_costs, matching_goal_idx = costs.min(0) #Each is (n_actions)
 
-        matching_latent_idx = latent_idxs[matching_goal_idx, np.arange(n_actions)]
+        matching_latent_idx = latent_idxs[matching_goal_idx, np.arange(n_actions)] #Grabs the predicted latent index that matches the closest goal image
 
-        matching_goal_rec = torch.stack([goal_latents_recon[j] for j in matching_goal_idx])
-        matching_latent_rec = torch.stack(
-            [pred_latents_recon[i][matching_latent_idx[i]] for i in range(n_actions)])
-        best_pred_obs = ptu.get_numpy(pred_image[best_action_idx])
+        matching_goal_rec = torch.stack([goal_latents_recon[j] for j in matching_goal_idx]) #(960, 3, 64, 64)
+        matching_latent_rec = torch.stack([pred_latents_recon[i][matching_latent_idx[i]] for i in range(n_actions)])  #(960, 3, 64, 64)
+        best_pred_obs = ptu.get_numpy(pred_image[best_action_idx]) #Gets single predicted image corresponding with best action
 
-        full_plot = torch.cat([pred_image.unsqueeze(0),
-                               pred_latents_recon.permute(1, 0, 2, 3, 4),
-                               matching_latent_rec.unsqueeze(0),
-                               matching_goal_rec.unsqueeze(0)], 0)
+        full_plot = torch.cat([pred_image.unsqueeze(0), #(1, 960, 3, 64, 64)
+                               pred_latents_recon.permute(1, 0, 2, 3, 4), #(K, 960, 3, 64, 64)
+                               matching_latent_rec.unsqueeze(0), #(1, 960, 3, 64, 64)
+                               matching_goal_rec.unsqueeze(0)], 0) #(1, 960, 3, 64, 64)
+        #full_plot of shape (K+3, 960, 3, 64, 64)
+        # pdb.set_trace()
 
         plot_size = 8
-        full_plot = full_plot[:, ptu.get_numpy(best_action_idxs[:plot_size])]
-        caption = np.zeros(full_plot.shape[:2])
-        caption[1:1 + K, :] = ptu.get_numpy(torch.stack(costs_latent).min(0)[0].permute(1, 0))[:,
-                              :plot_size]
+        full_plot = full_plot[:, ptu.get_numpy(best_action_idxs[:plot_size])] #Selects 8 best actions (K+3, 960, 3, 64, 64)
+        caption = np.zeros(full_plot.shape[:2]) #(K+3, 960)
+        caption[1:1 + K, :] = ptu.get_numpy(torch.stack(costs_latent).min(0)[0].permute(1, 0))[:,:plot_size]
         caption[-2, :] = matching_costs.cpu().numpy()[ptu.get_numpy(best_action_idxs[:plot_size])]
 
         plot_multi_image(ptu.get_numpy(full_plot),
                          logger.get_snapshot_dir() + '%s/mpc_pred_%d_%d.png' % (
                              self.logger_prefix_dir, mpc_step, cem_step),
                          caption=caption)
+        # self.plot_image(costs, costs_latent, mpc_step, pred_image, pred_latents_recon, matching_latent_rec, matching_goal_rec)
+
 
         return best_pred_obs, actions[ptu.get_numpy(best_action_idxs)], best_goal_idx
+
+
+    # def plot_image(self, costs, costs_latent, mpc_step, pred_image, pred_latents_recon, matching_latent_rec, matching_goal_rec):
+    #     #costs: (n_goal_latents, n_actions)
+    #     K = pred_latents_recon.shape[1]
+    #
+    #     matching_costs, matching_goal_idx = costs.min(0)  # Each is (n_actions)
+    #     best_action_idxs = costs.min(0)[0].sort()[1]
+    #
+    #     full_plot = torch.cat([pred_image.unsqueeze(0),  # (1, 960, 3, 64, 64)
+    #                            pred_latents_recon.permute(1, 0, 2, 3, 4),  # (K, 960, 3, 64, 64)
+    #                            matching_latent_rec.unsqueeze(0),  # (1, 960, 3, 64, 64)
+    #                            matching_goal_rec.unsqueeze(0)], 0)  # (1, 960, 3, 64, 64)
+    #     # full_plot of shape (K+3, 960, 3, 64, 64)
+    #
+    #     plot_size = 8
+    #     full_plot = full_plot[:, ptu.get_numpy(best_action_idxs[:plot_size])]
+    #     caption = np.zeros(full_plot.shape[:2])
+    #     caption[1:1 + K, :] = ptu.get_numpy(torch.stack(costs_latent).min(0)[0].permute(1, 0))[:,:plot_size]
+    #     caption[-2, :] = matching_costs.cpu().numpy()[ptu.get_numpy(best_action_idxs[:plot_size])]
+    #
+    #     plot_multi_image(ptu.get_numpy(full_plot),
+    #                      logger.get_snapshot_dir() + '%s/mpc_pred_%d.png' % (self.logger_prefix_dir, mpc_step),
+    #                      caption=caption)
+
+
+
 
 
 class MPC:
@@ -296,7 +330,8 @@ class MPC:
                                                                         goal_latents_mask,
                                                                         goal_latents_recon)
 
-        obs = self.env.reset()
+        obs = self.env.reset()/255
+        print(np.max(obs), np.mean(obs))
 
         obs_lst = [np.moveaxis(goal_image.astype(np.float32) / 255., 2, 0)[:3]]
         pred_obs_lst = [ptu.get_numpy(rec_goal_image)]
@@ -309,7 +344,7 @@ class MPC:
                                                        goal_latents_recon)
             mpc_time = time.time()
             actions.append(action)
-            obs = self.env.step(action)
+            obs = self.env.step(action)/255
             step_time = time.time()
             pred_obs_lst.append(pred_obs)
             obs_lst.append(np.moveaxis(obs, 2, 0))
@@ -326,6 +361,7 @@ class MPC:
 
         # Compare final obs to goal obs
         mse = np.square(ptu.get_numpy(goal_image_tensor.squeeze().permute(1, 2, 0)) - obs).mean()
+        pdb.set_trace()
         (correct, max_pos, max_rgb), state = self.env.compute_accuracy(self.true_data)
         np.save(logger.get_snapshot_dir() + '%s/block_pos.p' % self.logger_prefix_dir, state)
         stats = {'mse': mse, 'correct': int(correct), 'max_pos': max_pos, 'max_rgb': max_rgb}
@@ -366,6 +402,7 @@ class MPC:
 
         actions = None
         filter_idx = int(self.n_actions * 0.1)
+        print("NEW ACTION")
         for i in range(self.cem_steps):
             best_pred_obs, best_actions, best_goal_idx = self._random_shooting_step(obs,
                                                                                     goal_latents,
@@ -377,8 +414,10 @@ class MPC:
             best_actions = best_actions[:filter_idx]
             mean = best_actions.mean(0)
             std = best_actions.std(0)
-            actions = np.stack(
-                [self.env.sample_action_gaussian(mean, std) for _ in range(self.n_actions)])
+            actions = np.stack([self.env.sample_action_gaussian(mean, std) for _ in range(self.n_actions)])
+
+            mse = np.square(ptu.get_numpy(goal_image.squeeze()) - best_pred_obs).mean()
+            print(mse)
 
         return best_pred_obs, best_actions[0], best_goal_idx
 
@@ -399,15 +438,23 @@ class MPC:
 
 
         if self.use_action_image:
-            obs_rep = ptu.from_numpy(np.moveaxis(np.stack(self.env.try_actions(actions)), 3, 1))
+            obs_rep = ptu.from_numpy(np.moveaxis(np.stack(self.env.try_actions(actions)), 3, 1))/255
         else:
             obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0],
                                                                                  1, 1,
                                                                                  1)
 
 
-        pred_obs, obs_latents, obs_latents_recon = self.model_step_batched(obs_rep,
-                                                                           ptu.from_numpy(actions))
+        pred_obs, obs_latents, obs_latents_recon = self.model_step_batched(obs_rep, ptu.from_numpy(actions))
+        # pdb.set_trace()
+        #goal_latents (5,128)
+        #goal_latents_recon (5, 3, 64, 64)
+        #goal_image (1, 3, 64, 64)
+        #obs_latents (960, K, 128)
+        #obs_latents_recon (960, K, 3, 64, 64)
+        #pred_obs (960, 3, 64, 64)
+        #actions (960, 13)
+
 
         best_pred_obs, best_actions, best_goal_idx = self.cost.best_action(mpc_step, goal_latents,
                                                                            goal_latents_recon,
@@ -423,10 +470,13 @@ class MPC:
 
 def main(variant):
 
-    module_path = os.path.expanduser('~') + '/objects/rlkit'
-    model_file = module_path + '/saved_models/iodine-blocks-stack50k' \
-                 '/SequentialRayExperiment_0_2019-05-15_01' \
-                 '-24-38zy_wn4_6/model_params.pkl'
+    # module_path = os.path.expanduser('~') + '/objects/rlkit'
+    # model_file = module_path + '/saved_models/iodine-blocks-stack50k/SequentialRayExperiment_0_2019-05-15_01-24-38zy_wn4_6/model_params.pkl'
+    # module_path = os.path.expanduser('~') + '/Research/fun_rlkit'
+    module_path = '/nfs/kun1/users/rishiv/Research/fun_rlkit'
+    # model_file = module_path + '/examples/mpc/saved_models/iodine_params_5_15.pkl'
+    model_file = '/nfs/kun1/users/rishiv/Research/op3_exps/05-29-iodine-blocks-stack-o2p2-60k/05-29-iodine-blocks-stack_o2p2_60k_2019_05_29_00_55_37_0000--s-81417/params.pkl'
+
 
     # model_file = module_path + \
     #              '/saved_models/iodine-blocks-stack_o2p2_60k/SequentialRayExperiment_0_2019' \
@@ -448,11 +498,12 @@ def main(variant):
     # m = nn.DataParallel(m)
 
     m.set_eval_mode(True)
+    # pdb.set_trace()
 
     n_goals = 1 if variant['debug'] == 1 else 10
     goal_idxs = range(n_goals)
 
-    module_path = os.path.expanduser('~') + '/objects/rlkit'
+    # module_path = os.path.expanduser('~') + '/objects/rlkit'
 
     actions_lst = []
     stats = {'mse': 0, 'correct': 0, 'max_pos': 0, 'max_rgb': 0}
@@ -461,15 +512,12 @@ def main(variant):
     #n_goal_obs = self.variant['n_goal_obs']
 
     for i, goal_idx in enumerate(goal_idxs):
-        goal_file = module_path + '/examples/mpc/stage1/manual_constructions/%s/%d_1.png' % (
-        structure, goal_idx)
+        goal_file = module_path + '/examples/mpc/stage1/manual_constructions/%s/%d_1.png' % (structure, goal_idx)
         # goal_file = module_path + '/examples/mpc/stage1/goals_3/img_%d.png' % goal_idx
         true_data = np.load(
-            module_path + '/examples/mpc/stage1/manual_constructions/%s/%d.p' % (structure,
-                                                                                 goal_idx),
-                        allow_pickle=True)
+            module_path + '/examples/mpc/stage1/manual_constructions/%s/%d.p' % (structure, goal_idx), allow_pickle=True)
         env = BlockEnv(n_goal_obs)
-        mpc = MPC(m, env, n_actions=960, mpc_steps=n_goal_obs, true_actions=None,
+        mpc = MPC(m, env, n_actions=10, mpc_steps=n_goal_obs, true_actions=None,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=n_goal_obs,
                   logger_prefix_dir='/%s_goal_%d' % (structure, goal_idx),
                   mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True,
@@ -487,7 +535,7 @@ def main(variant):
     json.dump(stats, open(logger.get_snapshot_dir() + '/stats.json', 'w'))
     np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
-
+#CUDA_VISIBLE_DEVICES=7 python mpc_stage1.py -de 1
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-de', '--debug', type=int, default=0)
@@ -524,7 +572,6 @@ if __name__ == "__main__":
             debug=args.debug
             # n_goal_obs=structures[s_idx][1]
         )
-        #
 
         n_seeds = 1
         exp_prefix = 'iodine-mpc-stage1-%s' % 'final3'

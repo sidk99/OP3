@@ -29,7 +29,17 @@ def createMultipleSims(args, obs_size, ac_size, createSingleSim, num_workers=1):
             results = pool.map(createSingleSim, [args for _ in range(num_sims)])
         all_results.append(results)
 
-    with h5py.File(args.filename, 'w') as f:
+    #Save env data to pickle
+    if 'env' in all_results[0][0].keys():
+        env_data = {}
+        for f_idx, folder in enumerate(datasets):
+            env_data[folder] = [a_result['env'] for a_result in all_results[f_idx]]
+        with open(args.filename+'.pkl', 'wb') as f:
+            pickle.dump(env_data, f)
+
+
+    #Save data to hdf5 file
+    with h5py.File(args.filename+'.h5', 'w') as f:
         for f_idx, folder in enumerate(datasets):
             num_sims = datasets[folder]
             cur_folder = f.create_group(folder)
@@ -43,12 +53,12 @@ def createMultipleSims(args, obs_size, ac_size, createSingleSim, num_workers=1):
             # groups_dataset = cur_folder.create_dataset('groups', groups_data_shape, dtype='float32')
             action_dataset = cur_folder.create_dataset('actions', action_data_shape, dtype='float32')
 
-
-
-            # for i in range(num_sims):
             for i in range(num_sims):
-                frames, action_vec = all_results[f_idx][i] #createSingleSim()  # (T, M, N, C),
-                # (T, A)
+                # frames, action_vec = all_results[f_idx][i] #createSingleSim()  # (T, M, N, C), (T, A)
+                a_result_dict = all_results[f_idx][i]
+                frames = a_result_dict['features']
+                action_vec = a_result_dict['actions']
+
                 # frames, group_frames, action_vec = createSingleSim() #(T, M, N, C), (T, M, N, 1)
                 # pdb.set_trace()
 
@@ -96,7 +106,7 @@ def hdf5_to_image(filename):
                     for j in range(dataset.shape[0]):
                         imfile = os.path.join(dataset_folder, str(j)+'.png')
                         if d == 'features':
-                            cv2.imwrite(imfile, dataset[j, ex]*255)
+                            cv2.imwrite(imfile, dataset[j, ex])
                         elif d == 'groups':
                             cv2.imwrite(imfile, dataset[j, ex]*255.0/(num_groups))
                         elif d == 'collisions':

@@ -152,7 +152,7 @@ class RefinementNetwork(nn.Module):
         h = input
         for layer in hidden_layers:
             h = layer(h)
-            #if use_batch_norm:
+            # if use_batch_norm:
             #    h = norm_layer(h)
             h = self.hidden_activation(h)
         return h

@@ -2,12 +2,15 @@ import os
 import pdb
 import numpy as np
 import shutil
+import pickle
+import cv2
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 import rlkit.envs.blocks.mujoco.utils.data_generation_utils as dgu
+from rlkit.util.plot import plot_multi_image
 import mujoco_py
 from mujoco_py import load_model_from_xml, MjSim, MjViewer
 import rlkit.envs.blocks.mujoco.contacts as contacts
@@ -108,13 +111,6 @@ class BlockPickAndPlaceEnv():
             condim='3' friction='1 1 1' solimp="0.998 0.998 0.001" solref="0.02 1"/>
           </body>
         '''
-        # body_base = '''
-        #   <body name='{}' pos='{}' quat='{}'
-        #     <joint type='free' name='{}' damping='0'/>
-        #     <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim='1' friction='1 1 1'/>
-        #   </body>
-        # '''
-        # '''<geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim="6" friction="1 1 1"/>'''
         body_list = [body_base.format(m['name'], self.convert_to_str(m['pos']),
                                       self.convert_to_str(m['quat']), m['name'],
                                       m['name'], m['name'], m['material']) for i, m in enumerate(self.blocks)]
@@ -513,12 +509,12 @@ def createSingleSim(args):
     myenv = BlockPickAndPlaceEnv(num_blocks, args.num_colors, args.img_dim, args.include_z,
                                  random_initialize=True, view=False)
     myenv.img_dim = args.img_dim
+    # global myenv
     imgs = []
     acs = []
+    initial_env_info = myenv.get_env_info()
     imgs.append(myenv.get_observation())
     for t in range(args.num_frames-1):
-        rand_float = np.random.uniform()
-
         if args.remove_objects == 'True':
             ac = myenv.sample_action('remove_block')
         else:
@@ -534,56 +530,87 @@ def createSingleSim(args):
 
     acs.append(myenv.sample_action(None))
 
-    return np.array(imgs), np.array(acs)
+    values = {
+        'features': np.array(imgs),
+        'actions': np.array(acs),
+        'env': initial_env_info
+    }
+    return values
+    # return np.array(imgs), np.array(acs)
 
 
 """
-python rlkit/envs/blocks/mujoco/block_pick_and_place.py -f data/pickplace50k.h5 -nmin 3 -nax 4 -nf 2 -ns 50000 -fpick 0.3 -fplace 0.4
+python rlkit/envs/blocks/mujoco/block_pick_and_place.py -f data/pickplace50k.h5 -nmin 3 -nmax 4 -nf 2 -ns 50000 -fpick 0.3 -fplace 0.4
 """
+
+# python block_pick_and_place.py -f pickplace_multienv_10k -nmin 2 -nax 2 -nf 21 -ns 10000 -fpick 0.3 -fplace 0.4
+# python block_pick_and_place.py -f pickplace_multienv_c3_10k -nmin 2 -nmax 2 -nf 21 -ns 10000 -fpick 0.3 -fplace 0.4 -c 3 -p 1
+
 
 if __name__ == '__main__':
-    # parser = ArgumentParser()
-    # parser.add_argument('-f', '--filename', type=str, default=None, required=True)
-    # parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
-    # parser.add_argument('-nax', '--max_num_objects', type=int, default=3)
-    # parser.add_argument('-i', '--img_dim', type=int, default=64)
-    # parser.add_argument('-nf', '--num_frames', type=int, default=10)
-    # parser.add_argument('-ns', '--num_sims', type=int, default=10)
-    # parser.add_argument('-mi', '--make_images', type=bool, default=False)
-    # parser.add_argument('-c', '--num_colors', type=int, default=None)
-    # parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
-    # parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
-    # parser.add_argument('-r', '--remove_objects', type=bool, default=False)
-    # parser.add_argument('-z', '--include_z', type=bool, default=False)
-    # parser.add_argument('--output_path', default='', type=str,
-    #                     help='path to save images')
-    # parser.add_argument('-p', '--num_workers', type=int, default=0)
+    parser = ArgumentParser()
+    parser.add_argument('-f', '--filename', type=str, default=None, required=True)
+    parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
+    parser.add_argument('-nmax', '--max_num_objects', type=int, default=3)
+    parser.add_argument('-i', '--img_dim', type=int, default=64)
+    parser.add_argument('-nf', '--num_frames', type=int, default=21)
+    parser.add_argument('-ns', '--num_sims', type=int, default=2)
+    parser.add_argument('-mi', '--make_images', type=bool, default=False)
+    parser.add_argument('-c', '--num_colors', type=int, default=None)
+    parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
+    parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
+    parser.add_argument('-r', '--remove_objects', type=bool, default=False)
+    parser.add_argument('-z', '--include_z', type=bool, default=False)
+    parser.add_argument('--output_path', default='', type=str,
+                        help='path to save images')
+    parser.add_argument('-p', '--num_workers', type=int, default=1)
+    args = parser.parse_args()
+
+    if args.filename[-3:] == ".h5":
+        args.filename = args.filename[:-3]
+
+
+    print(args)
+    info = {}
+    info["min_num_objects"] = args.min_num_objects
+    info["max_num_objects"] = args.max_num_objects
+    info["img_dim"] = args.img_dim
+
+    if args.remove_objects:
+        args.num_frames = 2
+
+    info["num_frames"] = args.num_frames
+    # single_sim_func = lambda : createSingleSim(args)
+    single_sim_func = createSingleSim
+    #createSingleSim(args)
+    env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
+    ac_size = env.get_actions_size()
+    obs_size = env.get_obs_size()
+
+    # myenv = BlockPickAndPlaceEnv(2, args.num_colors, args.img_dim, args.include_z,
+    #                              random_initialize=True, view=False)
+    dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
+
+    dgu.hdf5_to_image(args.filename+'.h5')
+    for i in range(min(10, args.num_sims)):
+        tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
+        dgu.make_gif(tmp, "animation.gif")
+
+    ###Testing loading###
+    # with open('local_test.pkl', 'rb') as f:
+    #     data = pickle.load(f)
     #
-    # args = parser.parse_args()
-    # print(args)
-    # info = {}
-    # info["min_num_objects"] = args.min_num_objects
-    # info["max_num_objects"] = args.max_num_objects
-    # info["img_dim"] = args.img_dim
-    #
-    # if args.remove_objects:
-    #     args.num_frames = 2
-    #
-    # info["num_frames"] = args.num_frames
-    # # single_sim_func = lambda : createSingleSim(args)
-    # single_sim_func = createSingleSim
-    # #createSingleSim(args)
-    # env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
-    # ac_size = env.get_actions_size()
-    # obs_size = env.get_obs_size()
-    # dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
-    #
-    # dgu.hdf5_to_image(args.filename)
-    # for i in range(min(10, args.num_sims)):
-    #     tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
-    #     dgu.make_gif(tmp, "animation.gif")
-    #     # tmp = os.path.join(args.output_path, "imgs/training/{}/groups".format(str(i)))
-    #     # dgu.make_gif(tmp, "animation.gif")
+    # cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(1 * 6, 1 * 6))
+    # b = BlockPickAndPlaceEnv(6, None, 64, include_z=False, random_initialize=False, view=False)
+    # for i in range(0, 2):
+    #     tmp = data['training'][i]
+    #     b.set_env_info(tmp)
+    #     print(tmp)
+    #     axes[i].imshow(b.get_observation(), interpolation='nearest')
+    #     imfile = os.path.join("local_test_recon_{}.png".format(i))
+    #     cv2.imwrite(imfile, b.get_observation())
+    #     # plot_multi_image(np.array([[b.get_observation()]]), 'testing.png')
+    # cur_fig.savefig("testing")
 
     # num_rows = 2
     # cur_fig, axes = plt.subplots(nrows=num_rows, ncols=6, figsize=(num_rows * 6, 1 * 6))
@@ -610,22 +637,22 @@ if __name__ == '__main__':
     #         axes[k, i].imshow(obs[k], interpolation='nearest')
     # cur_fig.savefig("HELLO")
 
-    num_rows = 1
-    cur_fig, axes = plt.subplots(nrows=num_rows, ncols=6, figsize=(num_rows * 6, 1 * 6))
-
-    b = BlockPickAndPlaceEnv(4, None, 64, False, random_initialize=True, view=False)
-    b.create_tower_shape()
-    ob = b.get_observation()
-    axes[0].imshow(ob, interpolation='nearest')
-
-    env_info = b.get_env_info()
-    # print(env_info)
-
-    c = BlockPickAndPlaceEnv(2, None, 64, False, random_initialize=False, view=False)
-    c.set_env_info(env_info)
-    # print(c.get_env_info())
-    axes[1].imshow(c.get_observation(), interpolation='nearest')
-    cur_fig.savefig("HELLO")
+    # num_rows = 1
+    # cur_fig, axes = plt.subplots(nrows=num_rows, ncols=6, figsize=(num_rows * 6, 1 * 6))
+    #
+    # b = BlockPickAndPlaceEnv(4, None, 64, False, random_initialize=True, view=False)
+    # b.create_tower_shape()
+    # ob = b.get_observation()
+    # axes[0].imshow(ob, interpolation='nearest')
+    #
+    # env_info = b.get_env_info()
+    # # print(env_info)
+    #
+    # c = BlockPickAndPlaceEnv(2, None, 64, False, random_initialize=False, view=False)
+    # c.set_env_info(env_info)
+    # # print(c.get_env_info())
+    # axes[1].imshow(c.get_observation(), interpolation='nearest')
+    # cur_fig.savefig("HELLO")
 
     # b=c
     # for i in range(10):

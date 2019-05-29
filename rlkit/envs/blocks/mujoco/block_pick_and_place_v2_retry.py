@@ -2,12 +2,14 @@ import os
 import pdb
 import numpy as np
 import shutil
+import pickle
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 import rlkit.envs.blocks.mujoco.utils.data_generation_utils as dgu
+from rlkit.util.plot import plot_multi_image
 import mujoco_py
 from mujoco_py import load_model_from_xml, MjSim, MjViewer
 import rlkit.envs.blocks.mujoco.contacts as contacts
@@ -105,7 +107,8 @@ class BlockPickAndPlaceEnv():
         body_base = '''
           <body name='{}' pos='{}' quat='{}'>
             <joint type='free' name='{}'/>
-            <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim="6" friction="1 0.005 0.0001"/>
+            <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}' condim="3" friction="1 0.005 0.0001"
+            solimp="0.998 0.998 0.001" solref="0.02 1"/>
           </body>
         '''
         # body_base = '''
@@ -499,9 +502,14 @@ class BlockPickAndPlaceEnv():
         return env_info
 
     def set_env_info(self, env_info):
-        self.names = env_info["names"]
-        self.blocks = env_info["blocks"]
-        self.initialize(True)
+        env_info = {}
+        env_info["names"] = copy.deepcopy(self.names)
+        env_info["blocks"] = copy.deepcopy(self.blocks)
+        for i, aname in enumerate(self.names):
+            info = self.get_block_info(aname)
+            env_info["blocks"][i]["pos"] = copy.deepcopy(info["pos"])
+            env_info["blocks"][i]["quat"] = copy.deepcopy(info["quat"])
+        return env_info
 
 
 def createSingleSim(args):
@@ -530,7 +538,13 @@ def createSingleSim(args):
 
     acs.append(myenv.sample_action(None))
 
-    return np.array(imgs), np.array(acs)
+    values = {
+        'features': np.array(imgs),
+        'actions': np.array(acs),
+        'env': myenv.get_env_info()
+    }
+    return values
+    # return np.array(imgs), np.array(acs)
 
 
 """
@@ -539,7 +553,7 @@ python rlkit/envs/blocks/mujoco/block_pick_and_place.py -f data/pickplace50k.h5 
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('-f', '--filename', type=str, default=None)
+    parser.add_argument('-f', '--filename', type=str, default=None, required=True)
     parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
     parser.add_argument('-nax', '--max_num_objects', type=int, default=3)
     parser.add_argument('-i', '--img_dim', type=int, default=64)
@@ -554,9 +568,12 @@ if __name__ == '__main__':
     parser.add_argument('--output_path', default='', type=str,
                         help='path to save images')
     parser.add_argument('-p', '--num_workers', type=int, default=1)
-
     args = parser.parse_args()
     print(args)
+
+    if args.filename[-3:] == ".h5":
+        args.filename = args.filename[:-3]
+
     info = {}
     info["min_num_objects"] = args.min_num_objects
     info["max_num_objects"] = args.max_num_objects
@@ -576,12 +593,18 @@ if __name__ == '__main__':
 
     dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
 
-    dgu.hdf5_to_image(args.filename)
+    dgu.hdf5_to_image(args.filename+'.h5')
     for i in range(min(10, args.num_sims)):
         tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
         dgu.make_gif(tmp, "animation.gif")
-        # tmp = os.path.join(args.output_path, "imgs/training/{}/groups".format(str(i)))
-        # dgu.make_gif(tmp, "animation.gif")
+
+    # with open('local_test.pkl', 'rb') as f:
+    #     data = pickle.load(f)
+    # tmp = data['training'][0]
+    # b = BlockPickAndPlaceEnv(6, None, 64, include_z=False, random_initialize=False, view=False)
+    # b.set_env_info(tmp)
+    # plot_multi_image(np.array([[b.get_observation()]]), 'testing.png')
+
 
     # cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
     # b = BlockPickAndPlaceEnv(6, None, 64, include_z=False, random_initialize=False, view=False)

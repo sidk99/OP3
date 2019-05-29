@@ -20,21 +20,21 @@ class IodineTrainer(Serializable):
             model,
             train_T=5,
             test_T=5,
+            max_T=None,
             seed_steps=4,
             schedule_type='single_step_physics',
             batch_size=128,
             log_interval=0,
-            gamma=0.5,
             lr=1e-3,
     ):
         self.quick_init(locals())
         self.log_interval = log_interval
         self.batch_size = batch_size
-        self.gamma = gamma
 
         self.seed_steps = seed_steps
         self.train_T = train_T
         self.test_T = test_T
+        self.max_T = max_T
         self.seed_steps = seed_steps
         self.schedule_type = schedule_type
 
@@ -59,15 +59,19 @@ class IodineTrainer(Serializable):
         else:
             return imgs, None #Action is none
 
-
-    # def prepare_inputs(self, obs):
-    #     # Prepare lambdas and hidden states so dataparallel works
+    def get_schedule_type(self, epoch):
+        if 'curriculum' in self.schedule_type:
+            rollout_len = epoch // 20 + 1
+            if epoch % 20 == 0:
+                torch.save(self.state_dict(), open(logger.get_snapshot_dir() + '/params.pkl', "wb"))
+            return 'curriculum_{}'.format(rollout_len)
+        else:
+            return self.schedule_type
 
 
     def train_epoch(self, epoch):
         self.model.train()
         losses, log_probs, kles, mses = [], [], [], []
-
         for batch_idx, tensors in enumerate(self.train_dataset.dataloader):
             obs, actions = self.prepare_tensors(tensors)
             self.optimizer.zero_grad()
@@ -76,8 +80,14 @@ class IodineTrainer(Serializable):
             # refinement = 0, physics = 1
             # when only doing refinement predict same image
             # when only doing physics predict next image
-            schedule = create_schedule(True, self.train_T, self.schedule_type, self.seed_steps)
-            x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(obs, actions=actions, schedule=schedule)
+            schedule_type = self.get_schedule_type(epoch)
+            schedule = create_schedule(True, self.train_T, schedule_type, self.seed_steps, self.max_T)
+            # print("obs: {}".format(obs.shape))
+            x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(input=obs, actions=actions, schedule=schedule)
+            # if (loss.mean().item() > 1e8):
+            #     print("MASSIVE LOSS!")
+            #     print(loss, schedule, kle_loss, mse)
+            #     continue
             loss.mean().backward()
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()], 5.0)
             self.optimizer.step()
@@ -109,14 +119,14 @@ class IodineTrainer(Serializable):
             batches=1,
     ):
 
-        schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps)
+        schedule_type = self.get_schedule_type(epoch)
+        schedule = create_schedule(False, self.test_T, schedule_type, self.seed_steps, self.max_T)
 
         self.model.eval()
         losses, log_probs, kles, mses = [], [], [], []
         dataloader = self.train_dataset.dataloader if train else self.test_dataset.dataloader
         for batch_idx, tensors in enumerate(dataloader):
             obs, actions = self.prepare_tensors(tensors)
-            self.optimizer.zero_grad() #RV: This is not needed
             x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(obs, actions=actions, schedule=schedule)
 
             losses.append(loss.mean().item())
@@ -137,11 +147,12 @@ class IodineTrainer(Serializable):
                 full_rec = rec.sum(0, keepdim=True)
 
                 comparison = torch.cat([ground_truth, full_rec, m, rec], 0).view(-1, 3, imsize, imsize)
-                #import pdb; pdb.set_trace()
+                # import pdb; pdb.set_trace()
                 save_dir = osp.join(logger.get_snapshot_dir(),
                                     '%s_r%d.png' % ('train' if train else 'val', epoch))
 
-                save_image(comparison.data.cpu(), save_dir, nrow=self.test_T)
+                # save_image(comparison.data.cpu(), save_dir, nrow=self.test_T)
+                save_image(comparison.data.cpu(), save_dir, nrow=len(schedule))
             if batch_idx >= batches - 1:
                 break
 

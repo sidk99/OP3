@@ -16,6 +16,7 @@ from rlkit.core import logger
 from rlkit.launchers import conf
 from rlkit.torch.pytorch_util import set_gpu_mode
 import rlkit.pythonplusplus as ppp
+import pdb
 
 GitInfo = namedtuple(
     'GitInfo',
@@ -646,7 +647,7 @@ def run_experiment(
         aws_s3_path = conf.AWS_S3_PATH
     else:
         aws_s3_path = None
-
+    # pdb.set_trace()
     """
     Create mode
     """

@@ -2,6 +2,8 @@ import os
 import argparse
 import pickle
 import random
+import copy
+import pdb
 
 import colorsys
 
@@ -246,7 +248,6 @@ class BlockEnv():
         return obs
 
     def try_actions(self, actions):
-        import copy
         xml = XML(self.asset_path)
         # Note: We need to recreate the entire scene
         for ind, prev_action in enumerate(self.xml_actions_taken):  # Adding previous actions
@@ -377,10 +378,10 @@ class BlockEnv():
     def compare_matching(self, data, mjc_data, threshold=0.2):
         # data is env, mjc_data is target
         # data = data.val[0].val
-        import copy
         mjc_data = copy.deepcopy(mjc_data)
 
         max_err = -float('inf')
+        # pdb.set_trace()
         for pred_name, pred_datum in data.items():
             err, mjc_match, err_pos, err_rgb = self._best_obj_match(pred_datum, mjc_data)
             del mjc_data[mjc_match]
