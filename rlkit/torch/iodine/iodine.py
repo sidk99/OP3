@@ -17,6 +17,7 @@ from rlkit.torch.vae.vae_base import GaussianLatentVAE
 from rlkit.torch.modules import LayerNorm2D
 from rlkit.core import logger
 import os
+import pdb
 
 imsize84_iodine_architecture = dict(
     deconv_args=dict(
@@ -183,18 +184,160 @@ imsize64_large_iodine_architecture_multistep_physics = dict(
     ),
     physics_kwargs=dict(
         action_enc_size=32,
+    ) #,
+    # schedule_kwargs=dict(
+    #     train_T=10,
+    #     test_T=10,
+    #     seed_steps=5,
+    #     schedule_type='random_alternating'
+    # )
+)
+
+imsize64_small_iodine_architecture = dict(
+    K=5,
+    vae_kwargs=dict(
+        imsize=64,
+        representation_size=REPSIZE_128,
+        input_channels=3,
+        beta=1,
+        sigma=0.1,
     ),
-    schedule_kwargs=dict(
-        train_T=10,
-        test_T=10,
-        seed_steps=5,
-        schedule_type='multi_step_physics'
+    deconv_args=dict(
+        hidden_sizes=[],
+        output_size=64 * 64 * 4, #Note: This does not seem to be used in Broadcast
+        input_width=64,
+        input_height=64,
+        input_channels=REPSIZE_128 + 2,
+
+        kernel_sizes=[5, 5],
+        n_channels=[64, 4],
+        strides=[1, 1],
+        paddings=[2, 2]
+    ),
+    deconv_kwargs=dict(
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    ),
+    refine_args=dict(
+        input_width=64,
+        input_height=64,
+        input_channels=17,
+        paddings=[0, 0],
+        kernel_sizes=[5, 5],
+        n_channels=[64, 64],
+        strides=[2, 2],
+        hidden_sizes=[128, 128],
+        output_size=REPSIZE_128,
+        lstm_size=256,
+        lstm_input_size=768,
+        added_fc_input_size=0
+    ),
+    physics_kwargs=dict(
+        action_enc_size=32,
     )
 )
 
+imsize64_medium_iodine_architecture_k7 = dict(
+    K=7,
+    vae_kwargs=dict(
+        imsize=64,
+        representation_size=REPSIZE_128,
+        input_channels=3,
+        beta=1,
+        sigma=0.1,
+    ),
+    deconv_args=dict(
+        hidden_sizes=[],
+        output_size=64 * 64 * 3,
+        input_width=64,
+        input_height=64,
+        input_channels=REPSIZE_128 + 2,
+
+        kernel_sizes=[3, 3, 3, 3],
+        n_channels=[64, 64, 64, 4],
+        strides=[1, 1, 1 ,1],
+        paddings=[1, 1, 1, 1]
+    ),
+    deconv_kwargs=dict(
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    ),
+    refine_args=dict(
+        input_width=64,
+        input_height=64,
+        input_channels=17,
+        paddings=[0, 0, 0],
+        kernel_sizes=[3, 3, 3],
+        n_channels=[64, 64, 64],
+        strides=[1, 1, 1],
+        hidden_sizes=[128, 128],
+        output_size=REPSIZE_128,
+        lstm_size=256,
+        lstm_input_size=768,
+        added_fc_input_size=0
+    ),
+    physics_kwargs=dict(
+        action_enc_size=32,
+    )
+)
+
+imsize64_medium_iodine_architecture = dict(
+    vae_kwargs=dict(
+        imsize=64,
+        representation_size=REPSIZE_128,
+        input_channels=3,
+        beta=1,
+        sigma=0.1,
+    ),
+    deconv_args=dict(
+        hidden_sizes=[],
+        output_size=64 * 64 * 3,
+        input_width=64,
+        input_height=64,
+        input_channels=REPSIZE_128 + 2,
+
+        kernel_sizes=[3, 3, 3, 3],
+        n_channels=[64, 64, 64, 4],
+        strides=[1, 1, 1 ,1],
+        paddings=[1, 1, 1, 1]
+    ),
+    deconv_kwargs=dict(
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    ),
+    refine_args=dict(
+        input_width=64,
+        input_height=64,
+        input_channels=17,
+        paddings=[0, 0, 0],
+        kernel_sizes=[3, 3, 3],
+        n_channels=[64, 64, 64],
+        strides=[1, 1, 1],
+        hidden_sizes=[128, 128],
+        output_size=REPSIZE_128,
+        lstm_size=256,
+        lstm_input_size=768,
+        added_fc_input_size=0
+    ),
+    physics_kwargs=dict(
+        action_enc_size=32,
+    )
+)
+
+# schedule_parameters=dict(
+#     train_T = 21,
+#     test_T = 21,
+#     seed_steps = 5,
+#     schedule_type='random_alternating'
+# )
+
 
 def create_model(model, action_dim):
-    K = model['vae_kwargs']['K']
+    if 'K' in model.keys(): #New version
+        K = model['K']
+    else: #Old version
+        K = model['vae_kwargs']['K']
+    print('K: {}'.format(K))
     rep_size = model['vae_kwargs']['representation_size']
 
     decoder = BroadcastCNN(**model['deconv_args'], **model['deconv_kwargs'],
@@ -210,11 +353,10 @@ def create_model(model, action_dim):
         refinement_net=refinement_net,
         physics_net=physics_net,
         action_dim=action_dim,
-
     )
     return m
 
-def create_schedule(train, T, schedule_type, seed_steps):
+def create_schedule(train, T, schedule_type, seed_steps, max_T=None):
     if schedule_type == 'single_step_physics':
         schedule = np.ones((T,))
         schedule[:seed_steps] = 0
@@ -227,21 +369,34 @@ def create_schedule(train, T, schedule_type, seed_steps):
     elif schedule_type == 'multi_step_physics':
         schedule = np.ones((T, ))
         schedule[:seed_steps] = 0
+    elif 'curriculum' in schedule_type:
+        if train:
+            max_multi_step = int(schedule_type[-1])
+            # schedule = np.zeros((T,))
+            rollout_len = np.random.randint(max_multi_step)+1
+            schedule = np.zeros(seed_steps+rollout_len)
+            schedule[seed_steps:seed_steps+rollout_len] = 1
+        else:
+            max_multi_step = int(schedule_type[-1])
+            schedule = np.zeros(seed_steps + max_multi_step)
+            schedule[seed_steps:seed_steps + max_multi_step] = 1
     else:
         raise Exception
+    if max_T is not None: #Enforces that we have at most max_T-1 physics steps
+        timestep_count = np.cumsum(schedule)
+        schedule = np.where(timestep_count <= max_T-1, schedule, 0)
     return schedule
 
-# loss weight just for physics
-def get_loss_weight(t, T, schedule_type):
+####Get loss weight depending on schedule
+def get_loss_weight(t, schedule, schedule_type):
     if schedule_type == 'single_step_physics':
         return t
-
     elif schedule_type == 'random_alternating':
         return t
-
     elif schedule_type == 'multi_step_physics':
         return t
-
+    elif 'curriculum' in schedule_type:
+        return t
     else:
         raise Exception
 
@@ -286,7 +441,7 @@ class IodineVAE(GaussianLatentVAE):
         self.beta = beta
         self.physics_net = physics_net
         self.lstm_size = 256
-        self.train_T = train_T
+        # self.train_T = train_T
         self.test_T = test_T
         self.seed_steps = seed_steps
         self.schedule_type = schedule_type
@@ -328,7 +483,8 @@ class IodineVAE(GaussianLatentVAE):
 
         broadcast_ones = ptu.ones((latents.shape[0], latents.shape[1], self.decoder_imsize, self.decoder_imsize)).to(
             latents.device) #RV: (bs, lstm_size, decoder_imsize. decoder_imsize)
-        decoded = self.decoder(latents, broadcast_ones) #RV: Uses broadcast decoding network, output (bs*K, 4, D, D)?
+        decoded = self.decoder(latents, broadcast_ones) #RV: Uses broadcast decoding network, output (bs*K, 4, D, D)
+        # print("decoded.shape: {}".format(decoded.shape))
         x_hat = decoded[:, :3] #RV: (bs*K, 3, D, D)
         m_hat_logits = decoded[:, 3] #RV: (bs*K, 1, D, D), raw depth values
 
@@ -385,7 +541,7 @@ class IodineVAE(GaussianLatentVAE):
         bs = 8
         input = input.repeat(bs, 1, 1, 1).unsqueeze(1)
 
-        T = 7
+        T = 7 #Refine for 7 steps
 
         outputs = [[], [], [], [], []]
         # Run multiple times to get best one
@@ -393,8 +549,8 @@ class IodineVAE(GaussianLatentVAE):
             x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(
                 input, None,
                 schedule=np.zeros((T)))
-            outputs[0].append(x_hats.data)
-            outputs[1].append(masks.data)
+            outputs[0].append(x_hats)
+            outputs[1].append(masks)
             outputs[2].append(final_recon)
             outputs[3].append(lambdas[0].view(-1, K, self.representation_size))
 
@@ -420,11 +576,12 @@ class IodineVAE(GaussianLatentVAE):
                                                                                               -1].data.squeeze()
 
     def step(self, input, actions, plot_latents=False):
+        # from linetimer import CodeTimer
+
         K = self.K
         bs = input.shape[0]
-        imsize = self.imsize
+        # imsize = self.imsize
         input = input.unsqueeze(1).repeat(1, 9, 1, 1, 1) #RV: Why 9? Shouldn't it be just 1 or K?
-
 
         schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps) #RV: Returns schedule of 1's and 0's
         if actions is not None: #RV: Overwrites schedule to be refinement for seed steps and physics afterwards
@@ -527,7 +684,7 @@ class IodineVAE(GaussianLatentVAE):
         actions_done = False
         applied_action = False
 
-        for t in range(1, T + 1):
+        for t in range(1, T+1):
             # Refine
             if schedule[t - 1] == 0:
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape) #RV: (bs*K, ch, imsize, imsize)
@@ -536,10 +693,8 @@ class IodineVAE(GaussianLatentVAE):
                                                                  tiled_k_shape, bs) #RV: Update lambdas and h's using info
                 # if not applied_action: # Do physics on static scene if haven't applied action yet
                 #     lambdas1, _ = self.physics_net(lambdas1, lambdas2, None)
-                loss_w = t
             # Physics
             else:
-
                 current_step += 1
                 # if current_step == input.shape[1]:
                 #     current_step = input.shape[1] - 1
@@ -553,11 +708,12 @@ class IodineVAE(GaussianLatentVAE):
                 if current_step >= input.shape[1] - 1:
                     actions_done = True
                     current_step = input.shape[1] - 1
-                inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(
-                    tiled_k_shape)
+                inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
 
                 lambdas1, _ = self.physics_net(lambdas1, lambdas2, actionsK)
-                loss_w = get_loss_weight(t, T, self.schedule_type)
+                loss_w = t #RV modification
+
+            loss_w = get_loss_weight(t, schedule, self.schedule_type)
 
             # Decode and get loss
             x_hat, mask, m_hat_logit, latents, pixel_x_prob, pixel_likelihood, kle_loss, loss, log_likelihood = \
@@ -575,5 +731,5 @@ class IodineVAE(GaussianLatentVAE):
 
         all_x_hats = torch.stack([x.view(untiled_k_shape) for x in x_hats], 1)  # (bs, T, K, 3, imsize, imsize)
         all_masks = torch.stack([x.view(untiled_k_shape) for x in masks], 1)  # # (bs, T, K, 1, imsize, imsize)
-        return all_x_hats, all_masks, total_loss, kle_loss.data / self.beta, \
+        return all_x_hats.data, all_masks.data, total_loss, kle_loss.data / self.beta, \
                log_likelihood.data, mse, final_recon.data, [lambdas1.data, lambdas2.data]
