@@ -74,7 +74,7 @@ def run_experiment_func(variant):
     train_dataset = load_dataset(train_path, train=True, batchsize=bs, size=train_size)
     test_dataset = load_dataset(test_path, train=False, batchsize=bs, size=100)
 
-    logger.get_snapshot_dir()
+    logger.set_snapshot_dir(os.getcwd())
 
     m = iodine.create_model(variant['model'], train_dataset.action_dim)
     if variant['dataparallel']:
@@ -92,15 +92,14 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-da', '--dataset', type=str, default=None) # stack50k
     parser.add_argument('-de', '--debug', type=int, default=1)
+    parser.add_argument('-m', '--mode', type=str, default='local')
 
     args = parser.parse_args()
 
-    mode = 'local'
     if args.debug == 1:
-        bs = 4
+        bs = 2
     else:
         bs = 64
-        mode = 'aws'
 
     variant = dict(
         model=iodine.imsize64_large_iodine_architecture,
@@ -122,7 +121,7 @@ if __name__ == "__main__":
     exp_prefix = 'iodine-blocks-%s' % args.dataset
 
     launch_experiment(
-        mode=mode,
+        mode=args.mode,
         use_gpu=True,
 
         local_launch_variant=dict(

@@ -29,10 +29,10 @@ class RayVAETrainer:
 
         should_save_imgs = (epoch % save_period == 0)
         train_stats = t.train_epoch(epoch)
-        test_stats = t.test_epoch(epoch, save_vae=False, train=False, record_stats=True, batches=1,
+        test_stats = t.test_epoch(epoch, train=False, batches=1,
                    save_reconstruction=should_save_imgs)
         train_stats.update(test_stats)
-        t.test_epoch(epoch, save_vae=False, train=True, record_stats=False, batches=1,
+        t.test_epoch(epoch, train=True, batches=1,
                     save_reconstruction=should_save_imgs)
 
         torch.save(t.model.state_dict(), open(os.getcwd() + '/model_params.pkl', "wb"))
