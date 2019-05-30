@@ -29,18 +29,19 @@ class PhysicsNetwork(nn.Module):
 
         #self.action_encoder = Mlp((128,), self.action_enc_size, action_size, hidden_activation=nn.ELU())
         #hidden_sizes,output_size,input_size,
+        #RV CHECK
 
         self.lambda_encoder = Mlp((128,), self.rep_size, self.rep_size,
-                                  hidden_activation=nn.ELU())
+                                  hidden_activation=nn.ELU(), output_activation=nn.ELU())
 
         #Action networks
         if action_size > 0:
             self.action_encoder = Mlp((128,), self.action_enc_size, action_size,
-                                      hidden_activation=nn.ELU())
+                                      hidden_activation=nn.ELU(), output_activation=nn.ELU())
             self.action_attention_network = Mlp((128,), self.rep_size, self.action_enc_size + self.rep_size,
                                                 hidden_activation=nn.ELU(), output_activation=nn.Sigmoid())
             self.action_effect_network = Mlp((128,), 1, self.action_enc_size + self.rep_size,
-                                             hidden_activation=nn.ELU())
+                                             hidden_activation=nn.ELU(), output_activation=nn.ELU())
 
         self.pairwise_encoder_network = Mlp((256,), self.interaction_size, self.rep_size*2,
                                      hidden_activation=nn.ELU(), output_activation=nn.ELU())
@@ -65,7 +66,7 @@ class PhysicsNetwork(nn.Module):
                 action_enc = self.action_encoder(actions[:, torch.LongTensor([0, 1, 3, 4])]) #RV: Encode actions, why torch.longTensor?
             else:
                 action_enc = self.action_encoder(actions) #Encode actions
-            lambda1_enc_actions = torch.cat([lambda1_enc_flat, action_enc], -1) #RV: Concatonate lambdas with actions, does this automatically broadcast?
+            lambda1_enc_actions = torch.cat([lambda1_enc_flat, action_enc], -1) #RV: Concatonate lambdas with actions?
             # lambda1_enc_actions = lambda1_enc_actions.view(-1, K, self.rep_size + self.action_enc_size)
             # lambda1_enc = lambda1_enc_actions.view(-1, K, self.enc_rep_size + self.action_enc_size) #bs, k, h
 

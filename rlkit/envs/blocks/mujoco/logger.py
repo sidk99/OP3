@@ -16,26 +16,26 @@ class Logger:
         self.render_dim = self.img_dim * 2
         self.meshes = {}
         self.masks = {}
-        # for mesh in xml.meshes:
-        #   mesh_name = mesh['name']
-        #   mesh_log = {}
-        #   mesh_log['xpos']  = np.zeros( (steps, 3) )
-        #   mesh_log['xaxangle'] = np.zeros( (steps, 4) )
-        #   mesh_log['xvelp'] = np.zeros( (steps, 3) )
-        #   mesh_log['xvelr'] = np.zeros( (steps, 3) )
-        #
-        #   mesh_log['xscale'] = np.zeros( (steps, 1) )
-        #   mesh_log['xrgba'] = np.zeros( (steps, 3) )
-        #   mesh_log['xscale'][:,:] = mesh['xscale']
-        #   mesh_log['xrgba'][:,:] = mesh['xrgba'][:3]
-        #   mesh_log['ply'] = mesh_name[:-2]
-        #   self.meshes[mesh_name] = mesh_log
-        #   self.masks[mesh_name] = np.zeros( (steps, self.img_dim, self.img_dim, 3) )
+        for mesh in xml.meshes:
+          mesh_name = mesh['name']
+          mesh_log = {}
+          mesh_log['xpos']  = np.zeros( (steps, 3) )
+          mesh_log['xaxangle'] = np.zeros( (steps, 4) )
+          mesh_log['xvelp'] = np.zeros( (steps, 3) )
+          mesh_log['xvelr'] = np.zeros( (steps, 3) )
+
+          mesh_log['xscale'] = np.zeros( (steps, 1) )
+          mesh_log['xrgba'] = np.zeros( (steps, 3) )
+          mesh_log['xscale'][:,:] = mesh['xscale']
+          mesh_log['xrgba'][:,:] = mesh['xrgba'][:3]
+          mesh_log['ply'] = mesh_name[:-2]
+          self.meshes[mesh_name] = mesh_log
+          self.masks[mesh_name] = np.zeros( (steps, self.img_dim, self.img_dim, 3) )
 
     def log_step(self, step):
         self.sim.forward()
-        #for mesh_name in self.meshes.keys():
-        #  self.log_mesh(mesh_name, step)
+        for mesh_name in self.meshes.keys():
+         self.log_mesh(mesh_name, step)
 
     def log_mesh(self, mesh_name, step):
         xpos, xaxangle, xvelp, xvelr = self.get_body_data(mesh_name)

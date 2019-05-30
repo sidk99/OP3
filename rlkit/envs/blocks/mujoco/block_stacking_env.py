@@ -18,7 +18,7 @@ from rlkit.envs.blocks.mujoco.logger import Logger
 import rlkit.envs.blocks.mujoco.utils as utils
 from rlkit.envs.blocks.mujoco.XML import XML
 
-
+#RV
 # polygons = ['cube', 'horizontal_rectangle', 'tetrahedron']
 
 # num_objects = range(args.min_objects, args.max_objects + 1)
@@ -424,22 +424,52 @@ class BlockEnv():
 
 
 
-if __name__ == '__main__':
-    cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
+def sanity_check_accuracy():
+    env1 = BlockEnv(5)
+    actions = []
+    for i in range(3):
+        action = env1.sample_action()
+        env1.step(action)
+        actions.append(action)
 
-    myenv = BlockEnv(5)
-    axes[0].imshow(myenv.get_observation(), interpolation='nearest')
-    # cur_fig.savefig("HELLO")
-    # plt.show()
+    env2 = BlockEnv(5)
+    for i in range(3):
+        action = env2.sample_action_gaussian(np.array(actions[i]), 3)
+        env2.step(action)
 
-    # the_input = input("Suffix: ")
-    tmp = myenv.step(myenv.sample_action())
-    axes[1].imshow(tmp)
-    obs = myenv.try_actions([myenv.sample_action() for i in range(4)])
+    true_data = env1.logger.get_state()
+    for obj_name, obj_data in true_data.items():
+        true_data[obj_name]['xpos'] = np.array([true_data[obj_name]['qpos'][:3]])
+        true_data[obj_name]['xrgba'] = np.array([true_data[obj_name]['rgba'][:3]])
+    true_data = {'data': true_data}
+    tmp = env2.compute_accuracy(true_data)
+    print(tmp)
 
-    for i in range(4):
-        axes[i+2].imshow(obs[i])
-
-
+    cur_fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(4 * 6, 1 * 6))
+    axes[0].imshow(env1.get_observation(), interpolation='nearest')
+    axes[1].imshow(env2.get_observation(), interpolation='nearest')
     cur_fig.savefig("HELLO")
+
+
+
+
+if __name__ == '__main__':
+    sanity_check_accuracy()
+    # cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
+    #
+    # myenv = BlockEnv(5)
+    # axes[0].imshow(myenv.get_observation(), interpolation='nearest')
+    # # cur_fig.savefig("HELLO")
+    # # plt.show()
+    #
+    # # the_input = input("Suffix: ")
+    # tmp = myenv.step(myenv.sample_action())
+    # axes[1].imshow(tmp)
+    # obs = myenv.try_actions([myenv.sample_action() for i in range(4)])
+    #
+    # for i in range(4):
+    #     axes[i+2].imshow(obs[i])
+    #
+    #
+    # cur_fig.savefig("HELLO")
 

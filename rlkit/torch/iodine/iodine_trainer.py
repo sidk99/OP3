@@ -62,8 +62,6 @@ class IodineTrainer(Serializable):
     def get_schedule_type(self, epoch):
         if 'curriculum' in self.schedule_type:
             rollout_len = epoch // 20 + 1
-            if epoch % 20 == 0:
-                torch.save(self.state_dict(), open(logger.get_snapshot_dir() + '/params.pkl', "wb"))
             return 'curriculum_{}'.format(rollout_len)
         else:
             return self.schedule_type
@@ -127,7 +125,7 @@ class IodineTrainer(Serializable):
         dataloader = self.train_dataset.dataloader if train else self.test_dataset.dataloader
         for batch_idx, tensors in enumerate(dataloader):
             obs, actions = self.prepare_tensors(tensors)
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(obs, actions=actions, schedule=schedule)
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(input=obs, actions=actions, schedule=schedule)
 
             losses.append(loss.mean().item())
             log_probs.append(x_prob_loss.mean().item())

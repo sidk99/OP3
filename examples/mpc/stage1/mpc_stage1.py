@@ -361,7 +361,7 @@ class MPC:
 
         # Compare final obs to goal obs
         mse = np.square(ptu.get_numpy(goal_image_tensor.squeeze().permute(1, 2, 0)) - obs).mean()
-        pdb.set_trace()
+        # pdb.set_trace()
         (correct, max_pos, max_rgb), state = self.env.compute_accuracy(self.true_data)
         np.save(logger.get_snapshot_dir() + '%s/block_pos.p' % self.logger_prefix_dir, state)
         stats = {'mse': mse, 'correct': int(correct), 'max_pos': max_pos, 'max_rgb': max_rgb}
@@ -475,8 +475,8 @@ def main(variant):
     # module_path = os.path.expanduser('~') + '/Research/fun_rlkit'
     module_path = '/nfs/kun1/users/rishiv/Research/fun_rlkit'
     # model_file = module_path + '/examples/mpc/saved_models/iodine_params_5_15.pkl'
-    model_file = '/nfs/kun1/users/rishiv/Research/op3_exps/05-29-iodine-blocks-stack-o2p2-60k/05-29-iodine-blocks-stack_o2p2_60k_2019_05_29_00_55_37_0000--s-81417/params.pkl'
-
+    # model_file = '/nfs/kun1/users/rishiv/Research/op3_exps/05-29-iodine-blocks-stack-o2p2-60k/05-29-iodine-blocks-stack_o2p2_60k_2019_05_29_00_55_37_0000--s-81417/params.pkl'
+    model_file = '/nfs/kun1/users/rishiv/Research/op3_exps/05-29-iodine-blocks-stack-o2p2-60k/05-29-iodine-blocks-stack_o2p2_60k_2019_05_29_23_06_32_0000--s-93500/params.pkl'
 
     # model_file = module_path + \
     #              '/saved_models/iodine-blocks-stack_o2p2_60k/SequentialRayExperiment_0_2019' \
@@ -511,16 +511,18 @@ def main(variant):
     structure, n_goal_obs = variant['structure']
     #n_goal_obs = self.variant['n_goal_obs']
 
+
     for i, goal_idx in enumerate(goal_idxs):
-        goal_file = module_path + '/examples/mpc/stage1/manual_constructions/%s/%d_1.png' % (structure, goal_idx)
-        # goal_file = module_path + '/examples/mpc/stage1/goals_3/img_%d.png' % goal_idx
+        # goal_file = module_path + '/examples/mpc/stage1/manual_constructions/%s/%d_1.png' % (structure, goal_idx)
+        goal_file = module_path + '/examples/mpc/stage1/goals_3/img_%d.png' % goal_idx
         true_data = np.load(
             module_path + '/examples/mpc/stage1/manual_constructions/%s/%d.p' % (structure, goal_idx), allow_pickle=True)
+        # pdb.set_trace()
         env = BlockEnv(n_goal_obs)
         mpc = MPC(m, env, n_actions=10, mpc_steps=n_goal_obs, true_actions=None,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=n_goal_obs,
                   logger_prefix_dir='/%s_goal_%d' % (structure, goal_idx),
-                  mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True,
+                  mpc_style=variant['mpc_style'], cem_steps=1, use_action_image=True,
                   true_data=true_data)
         goal_image = imageio.imread(goal_file)
         single_stats, actions = mpc.run(goal_image)

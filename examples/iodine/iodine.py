@@ -95,6 +95,7 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
 
 
 def train_vae(variant):
+    # print("HIHIHIHIHI")
     seed = int(variant['seed'])
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -103,7 +104,7 @@ def train_vae(variant):
     variant['model']['schedule_kwargs'] = variant['schedule_kwargs'] #Adding it to dictionary
     variant['model']['K'] = variant['K'] #Adding K to model dictionary
 
-    train_path = get_module_path() + '/data/%s.h5' % variant['dataset']
+    train_path = get_module_path() + '/ec2_data/%s.h5' % variant['dataset']
     test_path = train_path
     bs = variant['training_kwargs']['batch_size']
     train_size = 100 if variant['debug'] == 1 else None
@@ -154,17 +155,17 @@ if __name__ == "__main__":
         model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
         K=7,
         training_kwargs = dict(
-            batch_size=8, #Used in IodineTrainer, change to appropriate constant based off dataset size
+            batch_size=1, #Used in IodineTrainer, change to appropriate constant based off dataset size
             lr=1e-4, #Used in IodineTrainer, sweep
             log_interval=0,
         ),
         schedule_kwargs=dict(
-            train_T=10, #Number of steps in single training sequence, change with dataset
-            test_T=10,  #Number of steps in single testing sequence, change with dataset
+            train_T=5, #Number of steps in single training sequence, change with dataset
+            test_T=5,  #Number of steps in single testing sequence, change with dataset
             seed_steps=4, #Number of seed steps
-            schedule_type='curriculum' #random_alternating, single_step_physics
+            schedule_type='single_step_physics' #single_step_physics, single_step_physics
         ),
-        num_epochs=100,
+        num_epochs=5,
         algorithm='Iodine',
         save_period=1,
         dataparallel=True,
@@ -172,8 +173,7 @@ if __name__ == "__main__":
         debug=args.debug
     )
 
-    mode = 'here_no_doodad'
-    mode = 'local_docker'
+    #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
         exp_prefix='iodine-blocks-%s' % args.dataset,
