@@ -5,20 +5,43 @@ local_dir: directory/file on the local machine.
 remote_dir: directory/file name to copy to on the remote instance.
 mount_point: where the directory/file will be mounted in the docker instance.
 """
+# DIR_AND_MOUNT_POINT_MAPPINGS = [
+#     dict(
+#         local_dir='/home/jcoreyes/.mujoco',
+#         remote_dir='/home/ubuntu/.mujoco',
+#         mount_point='/root/.mujoco',
+#     ),
+#     dict(
+#         local_dir='/home/jcoreyes/objects/rlkit',
+#         remote_dir='/home/ubuntu/objects/rlkit',
+#         mount_point='/home/jcoreyes/objects/rlkit',
+#     ),
+#
+#     dict(
+#         local_dir='/home/jcoreyes/.aws',
+#         remote_dir='/home/ubuntu/.aws',
+#         mount_point='/home/ubuntu/.aws',
+#     ),
+#     dict(
+#         local_dir='/tmp/local_exp.pkl',
+#         remote_dir='/home/ubuntu/local_exp.pkl',
+#         mount_point='/tmp/local_exp.pkl',
+#     ),
+# ]
 DIR_AND_MOUNT_POINT_MAPPINGS = [
     dict(
-        local_dir='/home/jcoreyes/.mujoco',
+        local_dir='/home/rishiv/.mujoco',
         remote_dir='/home/ubuntu/.mujoco',
         mount_point='/root/.mujoco',
     ),
     dict(
-        local_dir='/home/jcoreyes/objects/rlkit',
-        remote_dir='/home/ubuntu/objects/rlkit',
-        mount_point='/home/jcoreyes/objects/rlkit',
+        local_dir='/home/rishiv/Research/fun_rlkit/',
+        remote_dir='/home/ubuntu/Research/fun_rlkit/', #EC2 server
+        mount_point='/home/rishiv/Research/fun_rlkit/', #Docker
     ),
 
     dict(
-        local_dir='/home/jcoreyes/.aws',
+        local_dir='/home/rishiv/.aws',
         remote_dir='/home/ubuntu/.aws',
         mount_point='/home/ubuntu/.aws',
     ),
@@ -28,6 +51,8 @@ DIR_AND_MOUNT_POINT_MAPPINGS = [
         mount_point='/tmp/local_exp.pkl',
     ),
 ]
+
+
 # This can basically be anything. Used for launching on instances. The
 # local launch parameters (exo_func, exp_variant, etc) are saved at this location
 # on the local machine and then transfered to the remote machine.
@@ -37,7 +62,7 @@ EXPERIMENT_INFO_PKL_FILEPATH = '/tmp/local_exp.pkl'
 LAUNCH_FILEPATH = '/tmp/autoscaler_launch.yaml'
 
 # TODO:Steven remove this. File syncing from s3 still uses this.
-LOCAL_LOG_DIR = '/home/jcoreyes/objects/s3_logs'
+LOCAL_LOG_DIR = '/home/rishiv/Research/fun_rlkit/s3_logs'
 
 AWS_CONFIG_NO_GPU=dict(
     REGION='us-west-2',
@@ -54,13 +79,14 @@ AWS_CONFIG_NO_GPU=dict(
 
 AWS_CONFIG_GPU = dict(
     REGION='us-west-2',
-    INSTANCE_TYPE = 'p3.8xlarge',
-    SPOT_PRICE = 4.50,
+    INSTANCE_TYPE = 'g3.8xlarge',
+    SPOT_PRICE = 0.75,
     REGION_TO_AWS_IMAGE_ID = {
         'us-west-2': 'ami-076347b8649dddb00'
     },
     REGION_TO_AWS_AVAIL_ZONE = {
-        'us-west-2': 'us-west-2a,us-west-2b'
+        'us-west-2': 'us-west-2a'
+        # 'us-west-2': 'us-west-2a,us-west-2b'
     },
 )
 
@@ -98,7 +124,7 @@ DOCKER_IMAGE = {
     True: GPU_DOCKER_IMAGE,
     False: GPU_DOCKER_IMAGE
 }
-LOG_BUCKET = 's3://op3-rlkit-ray'
+LOG_BUCKET = 's3://op3.rlkit.data'
 
 try:
     from rlkit.launchers.ray_config_personal import *

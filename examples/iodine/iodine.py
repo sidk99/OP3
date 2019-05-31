@@ -96,7 +96,10 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
 
 def train_vae(variant):
     # print("HIHIHIHIHI")
-    seed = int(variant['seed'])
+    return
+    print(variant)
+    seed = 1
+    # seed = int(variant['seed'])
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -145,7 +148,7 @@ def train_vae(variant):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument('-da', '--dataset', type=str, default=None, required=True) # stack50k, pickplace_1env_1k
+    parser.add_argument('-da', '--dataset', type=str, default=None, required=True) # stack_o2p2_60k, pickplace_1env_1k
     parser.add_argument('-de', '--debug', type=int, default=1)
     parser.add_argument('-m', '--mode', type=str,default='here_no_doodad')
 
@@ -168,7 +171,7 @@ if __name__ == "__main__":
         num_epochs=5,
         algorithm='Iodine',
         save_period=1,
-        dataparallel=True,
+        dataparallel=False,
         dataset=args.dataset,
         debug=args.debug
     )
@@ -180,7 +183,7 @@ if __name__ == "__main__":
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
-        seed=None,
+        seed=1,
         region='us-west-2'
     )
 

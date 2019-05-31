@@ -10,18 +10,21 @@ CODE_DIRS_TO_MOUNT = [
     # TODO: Add baseline SAVP package as well
 ]
 DIR_AND_MOUNT_POINT_MAPPINGS = [
+    # dict(
+    #     local_dir='/home/rishiv/.mujoco/',
+    #     mount_point='/root/.mujoco',
+    # ),
     dict(
-        local_dir='/home/rishiv/.mujoco/',
-        mount_point='/root/.mujoco',
-    ),
-    dict(
+        # local_dir='/home/rishiv/Research/fun_rlkit/',
        local_dir='/nfs/kun1/users/rishiv/Research/fun_rlkit/',
-       mount_point='/nfs/kun1/users/rishiv/Research/fun_rlkit/',
+        mount_point='/home/ubuntu/Research/fun_rlkit/',
+       # mount_point='/nfs/kun1/users/rishiv/Research/fun_rlkit/',
        filter_dir=['output', 'data'],
        pythonpath=True,
    )
 ]
 LOCAL_LOG_DIR = '/nfs/kun1/users/rishiv/Research/op3_exps'
+# LOCAL_LOG_DIR = '/home/rishiv/Research/op3_exps'
 
 """
 ********************************************************************************
@@ -37,6 +40,7 @@ ignoring most of these things and only using them on an as-needed basis.
 ********************************************************************************
 """
 RUN_DOODAD_EXPERIMENT_SCRIPT_PATH = (
+# '/home/rishiv/Research/fun_rlkit/scripts/run_experiment_from_doodad.py'
     '/nfs/kun1/users/rishiv/Research/fun_rlkit/scripts/run_experiment_from_doodad.py'
 )
 
@@ -48,11 +52,11 @@ AWS_S3_PATH = 's3://op3.rlkit.data/'
 
 # You probably don't need to change things below
 # Specifically, the docker image is looked up on dockerhub.com.
-DOODAD_DOCKER_IMAGE = "'jcoreyes/op3-ray'"
-INSTANCE_TYPE = 'c4.large'
-SPOT_PRICE = 0.03
+DOODAD_DOCKER_IMAGE = "'rishiv/rv_ray_docker'" #"'jcoreyes/op3-ray'"
+INSTANCE_TYPE = 'c1.medium' #
+SPOT_PRICE = 0.035
 
-GPU_DOODAD_DOCKER_IMAGE = 'jcoreyes/op3-ray'
+GPU_DOODAD_DOCKER_IMAGE = "'rishiv/rv_ray_docker'" #'jcoreyes/op3-ray'
 GPU_INSTANCE_TYPE = 'g3.8xlarge' #g2.2xlarge, p3.8xlarge
 GPU_SPOT_PRICE = 0.75
 # These AMI images have the docker images already installed.

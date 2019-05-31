@@ -19,6 +19,7 @@ import torch
 import random
 from argparse import ArgumentParser
 import os
+from rlkit.util.misc import get_module_path
 
 def load_dataset(data_path, train=True, size=None, batchsize=8):
     hdf5_file = h5py.File(data_path, 'r')  # RV: Data file
@@ -64,17 +65,20 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
         dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
         return dataset
 
-
+#CUDA_VISIBLE_DEVICES=6,7 python examples/iodine/iodine_ray.py -de 1 -da stack_o2p2_60k
 def run_experiment_func(variant):
 
-    train_path = os.path.expanduser('~') + '/objects/rlkit/data/%s.h5' % variant['dataset']
+    # train_path = os.path.expanduser('~') + '/objects/rlkit/data/%s.h5' % variant['dataset']
+    train_path = get_module_path() + '/ec2_data/%s.h5' % variant['dataset']
     test_path = train_path
     bs = variant['algo_kwargs']['batch_size']
     train_size = 4 if variant['debug'] == 1 else None
     train_dataset = load_dataset(train_path, train=True, batchsize=bs, size=train_size)
     test_dataset = load_dataset(test_path, train=False, batchsize=bs, size=100)
 
-    logger.get_snapshot_dir() #RV: ?
+
+    logger.set_snapshot_dir(os.getcwd())
+    # print(logger.get_snapshot_dir())
 
     m = iodine.create_model(variant['model'], train_dataset.action_dim)
     if variant['dataparallel']:
@@ -92,25 +96,23 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-da', '--dataset', type=str, default=None) # stack50k
     parser.add_argument('-de', '--debug', type=int, default=1)
+    parser.add_argument('-m', '--mode', type=str, default='local')
 
     args = parser.parse_args()
 
-    mode = 'local'
     if args.debug == 1:
-        bs = 4
+        bs = 2
     else:
         bs = 64
-        mode = 'aws'
 
     variant = dict(
         model=iodine.imsize64_large_iodine_architecture,
         algo_kwargs = dict(
-            gamma=0.5,
             batch_size=bs,
             lr=1e-4,
             log_interval=0,
         ),
-        num_epochs=1000,
+        num_epochs=10,
         algorithm='Iodine',
         save_period=1,
         dataparallel=True,
@@ -122,7 +124,7 @@ if __name__ == "__main__":
     exp_prefix = 'iodine-blocks-%s' % args.dataset
 
     launch_experiment(
-        mode=mode,
+        mode=args.mode,
         use_gpu=True,
 
         local_launch_variant=dict(
@@ -133,7 +135,7 @@ if __name__ == "__main__":
             exp_prefix=exp_prefix,
             resources_per_trial={
                 'cpu': 4,
-                'gpu': 4,
+                'gpu': 1,
             }
         ),
         remote_launch_variant=dict(

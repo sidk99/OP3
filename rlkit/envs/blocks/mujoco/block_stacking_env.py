@@ -434,7 +434,7 @@ def sanity_check_accuracy():
 
     env2 = BlockEnv(5)
     for i in range(3):
-        action = env2.sample_action_gaussian(np.array(actions[i]), 3)
+        action = env2.sample_action_gaussian(np.array(actions[i]), 0.01)
         env2.step(action)
 
     true_data = env1.logger.get_state()
@@ -446,8 +446,8 @@ def sanity_check_accuracy():
     print(tmp)
 
     cur_fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(4 * 6, 1 * 6))
-    axes[0].imshow(env1.get_observation(), interpolation='nearest')
-    axes[1].imshow(env2.get_observation(), interpolation='nearest')
+    axes[0].imshow(env1.get_observation()/255, interpolation='nearest')
+    axes[1].imshow(env2.get_observation()/255, interpolation='nearest')
     cur_fig.savefig("HELLO")
 
 
