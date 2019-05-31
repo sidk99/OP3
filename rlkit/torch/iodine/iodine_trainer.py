@@ -155,3 +155,5 @@ class IodineTrainer(Serializable):
 
         return stats
 
+    def save_model(self, epoch):
+        torch.save(self.model.state_dict(), open(osp.join(logger.get_snapshot_dir(), 'params.pkl'), "wb"))
