@@ -15,6 +15,7 @@ import torch
 import random
 from argparse import ArgumentParser
 from rlkit.util.misc import get_module_path
+import os
 
 def load_dataset(data_path, train=True, size=None, batchsize=8):
     hdf5_file = h5py.File(data_path, 'r')  # RV: Data file
@@ -77,7 +78,6 @@ def train_vae(variant):
     train_dataset = load_dataset(train_path, train=True, batchsize=bs, size=train_size)
     test_dataset = load_dataset(test_path, train=False, batchsize=bs, size=100)
 
-    logger.get_snapshot_dir()
 
     m = iodine.create_model(variant['model'], train_dataset.action_dim)
     if variant['dataparallel']:
@@ -95,9 +95,9 @@ def train_vae(variant):
         for k, v in {**train_stats, **test_stats}.items():
             logger.record_tabular(k, v)
         logger.dump_tabular()
-
-        torch.save(m.state_dict(), open(logger.get_snapshot_dir() + '/params.pkl', \
-                                                                 "wb"))
+        print(logger.get_snapshot_dir())
+        torch.save(m.state_dict(), open(os.path.join(logger.get_snapshot_dir(), 'params.pkl'), 
+                                        "wb"))
     logger.save_extra_data(m, 'vae.pkl', mode='pickle')
 
 
@@ -134,6 +134,7 @@ if __name__ == "__main__":
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
         seed=None,
+        region='us-west-2'
     )
 
 

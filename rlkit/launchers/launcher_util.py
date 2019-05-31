@@ -205,7 +205,8 @@ def create_log_dir(
         log_dir = osp.join(base_log_dir, exp_name)
     if osp.exists(log_dir):
         print("WARNING: Log directory already exists {}".format(log_dir))
-    os.makedirs(log_dir, exist_ok=True)
+
+    os.makedirs(log_dir, exist_ok=False)
     return log_dir
 
 
