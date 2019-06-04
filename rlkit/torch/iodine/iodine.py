@@ -148,7 +148,7 @@ imsize64_large_iodine_architecture_multistep_physics = dict(
         input_channels=3,
         # decoder_distribution='gaussian_identity_variance',
         beta=1,
-        K=7,
+        K=7, #7
         sigma=0.1,
     ),
     deconv_args=dict(
@@ -385,6 +385,7 @@ def create_schedule(train, T, schedule_type, seed_steps, max_T=None):
     if max_T is not None: #Enforces that we have at most max_T-1 physics steps
         timestep_count = np.cumsum(schedule)
         schedule = np.where(timestep_count <= max_T-1, schedule, 0)
+    # print(schedule)
     return schedule
 
 ####Get loss weight depending on schedule
@@ -589,8 +590,6 @@ class IodineVAE(GaussianLatentVAE):
             self.test_T = self.seed_steps + actions.shape[1]
             schedule = np.ones((self.test_T,))
             schedule[:self.seed_steps] = 0
-
-
 
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(
             input, actions,

@@ -143,7 +143,8 @@ class BlockEnv():
         pos = np.clip(random_a[3:6], [x[0] for x in self.drop_bounds['pos']],
                       [x[1] for x in self.drop_bounds['pos']])
 
-        pos[-1] = np.clip(pos[-1], -.4, 0)
+        # pos[-1] = np.clip(pos[-1], -.4, 0)
+        # pos[-1] = 2
 
         if 'horizontal' in ply:
             axis = [1, 0, 0]
@@ -451,10 +452,36 @@ def sanity_check_accuracy():
     cur_fig.savefig("HELLO")
 
 
+def check_bugs_in_try_action():
+    num_blocks = 5
+    env = BlockEnv(num_blocks)
+    cur_fig, axes = plt.subplots(nrows=2, ncols=num_blocks, figsize=(num_blocks * 6, 2 * 6))
+    for i in range(num_blocks):
+        action = env.sample_action()
+        axes[0, i].imshow(env.try_action(action)/255, interpolation='nearest')
+        axes[1, i].imshow(env.step(action) / 255, interpolation='nearest')
+    cur_fig.savefig("HELLO")
+
+def check_bugs_in_try_actionS():
+    num_actions = 5
+    env = BlockEnv(4)
+    cur_fig, axes = plt.subplots(nrows=2, ncols=num_actions, figsize=(num_actions * 6, 2 * 6))
+    actions = [env.sample_action() for _ in range(num_actions)]
+    results = env.try_actions(actions)
+
+    for i in range(num_actions):
+        axes[0, i].imshow(env.try_action(actions[i]) / 255, interpolation='nearest')
+        axes[1, i].imshow(results[i] / 255, interpolation='nearest')
+
+    cur_fig.savefig("HELLO")
+
 
 
 if __name__ == '__main__':
-    sanity_check_accuracy()
+    # sanity_check_accuracy()
+    # check_bugs_in_try_action()
+    check_bugs_in_try_actionS()
+
     # cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
     #
     # myenv = BlockEnv(5)

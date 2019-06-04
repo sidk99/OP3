@@ -115,7 +115,8 @@ GCP_CONFIG = {
 }
 
 # GPU_DOCKER_IMAGE = 'stevenlin598/ray_railrl'
-GPU_DOCKER_IMAGE = 'jcoreyes/op3-ray'
+# GPU_DOCKER_IMAGE = 'jcoreyes/op3-ray'
+GPU_DOCKER_IMAGE = 'rishiv/rv_ray_docker'
 """
 DOCKER_IMAGE['use_gpu']
 I think for our case, the GPU docker image can be used as the non-gpu image as well.

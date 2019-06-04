@@ -8,6 +8,8 @@ from rlkit.pythonplusplus import identity
 from rlkit.torch import pytorch_util as ptu
 import numpy as np
 
+# from linetimer import CodeTimer
+
 class RefinementNetwork(nn.Module):
     def __init__(
             self,

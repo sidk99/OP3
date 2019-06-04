@@ -1,5 +1,8 @@
 from torch import nn
 import time
+import shutil
+
+from rlkit.core import logger
 
 from rlkit.torch.iodine.iodine import IodineVAE
 
@@ -7,7 +10,7 @@ import rlkit.torch.iodine.iodine as iodine
 from rlkit.torch.iodine.iodine_trainer import IodineTrainer
 import rlkit.torch.pytorch_util as ptu
 from rlkit.launchers.launcher_util import run_experiment
-from rlkit.core import logger
+
 import numpy as np
 import h5py
 from rlkit.torch.data_management.dataset import Dataset, BlocksDataset
@@ -92,14 +95,19 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
 #             gamma=0.5,
 #             lr=1e-3,
 
-
+def copy_to_save_file():
+    dir_str = logger.get_snapshot_dir()
+    base = get_module_path()
+    shutil.copy2(base+'/rlkit/torch/iodine/iodine.py', dir_str)
+    shutil.copy2(base+'/rlkit/torch/iodine/iodine_trainer.py', dir_str)
+    shutil.copy2(base+'/rlkit/torch/iodine/physics_network.py', dir_str)
+    shutil.copy2(base+'/rlkit/torch/iodine/refinement_network.py', dir_str)
+    shutil.copy2(base+'/examples/iodine/iodine.py', dir_str)
 
 def train_vae(variant):
-    # print("HIHIHIHIHI")
-    return
-    print(variant)
-    seed = 1
-    # seed = int(variant['seed'])
+    copy_to_save_file()
+    # seed = 1
+    seed = int(variant['seed'])
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -137,9 +145,11 @@ def train_vae(variant):
         for k, v in {**train_stats, **test_stats}.items():
             logger.record_tabular(k, v)
         logger.dump_tabular()
+        print(t.timing_info)
+        t.save_model(epoch)
 
-        torch.save(m.state_dict(), open(logger.get_snapshot_dir() + '/params.pkl', "wb"))
-    logger.save_extra_data(m, 'vae.pkl', mode='pickle')
+        # torch.save(m.state_dict(), open(logger.get_snapshot_dir() + '/params.pkl', "wb"))
+    # logger.save_extra_data(m, 'vae.pkl', mode='pickle')
 
 #CUDA_VISIBLE_DEVICES=1,2 python iodine.py -da pickplace_1env_1k -de 0
 #CUDA_VISIBLE_DEVICES=1 python iodine.py -da pickplace_multienv_10k -de 0
@@ -158,7 +168,7 @@ if __name__ == "__main__":
         model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
         K=7,
         training_kwargs = dict(
-            batch_size=1, #Used in IodineTrainer, change to appropriate constant based off dataset size
+            batch_size=8, #Used in IodineTrainer, change to appropriate constant based off dataset size
             lr=1e-4, #Used in IodineTrainer, sweep
             log_interval=0,
         ),
@@ -168,7 +178,7 @@ if __name__ == "__main__":
             seed_steps=4, #Number of seed steps
             schedule_type='single_step_physics' #single_step_physics, single_step_physics
         ),
-        num_epochs=5,
+        num_epochs=10,
         algorithm='Iodine',
         save_period=1,
         dataparallel=False,
@@ -183,7 +193,7 @@ if __name__ == "__main__":
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
-        seed=1,
+        seed=None,
         region='us-west-2'
     )
 

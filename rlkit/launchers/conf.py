@@ -52,12 +52,12 @@ AWS_S3_PATH = 's3://op3.rlkit.data/'
 
 # You probably don't need to change things below
 # Specifically, the docker image is looked up on dockerhub.com.
-DOODAD_DOCKER_IMAGE = "'rishiv/rv_ray_docker'" #"'jcoreyes/op3-ray'"
+DOODAD_DOCKER_IMAGE = "'jcoreyes/op3-ray'" #"'rishiv/rv_ray_docker'" #"'jcoreyes/op3-ray'"
 INSTANCE_TYPE = 'c1.medium' #
 SPOT_PRICE = 0.035
 
-GPU_DOODAD_DOCKER_IMAGE = "'rishiv/rv_ray_docker'" #'jcoreyes/op3-ray'
-GPU_INSTANCE_TYPE = 'g3.8xlarge' #g2.2xlarge, p3.8xlarge
+GPU_DOODAD_DOCKER_IMAGE = "'jcoreyes/op3-ray'" #"'rishiv/rv_ray_docker'" #'jcoreyes/op3-ray'
+GPU_INSTANCE_TYPE = 'g3.4xlarge' #g2.2xlarge, p3.8xlarge
 GPU_SPOT_PRICE = 0.75
 # These AMI images have the docker images already installed.
 REGION_TO_GPU_AWS_IMAGE_ID = {

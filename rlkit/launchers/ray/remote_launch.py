@@ -2,7 +2,8 @@ import cloudpickle
 import uuid
 import yaml
 
-import rlkit.launchers.ray_config as config
+# import rlkit.launchers.ray_config as config
+import rlkit.launchers.ray_config_personal as config
 
 import ray
 from ray.autoscaler.commands import exec_cluster

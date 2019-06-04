@@ -27,10 +27,7 @@ class PhysicsNetwork(nn.Module):
         # self.enc_rep_size = representation_size - self.effect_size
         self.interaction_size = 128
 
-        #self.action_encoder = Mlp((128,), self.action_enc_size, action_size, hidden_activation=nn.ELU())
-        #hidden_sizes,output_size,input_size,
-        #RV CHECK
-
+        #New version
         self.lambda_encoder = Mlp((128,), self.rep_size, self.rep_size,
                                   hidden_activation=nn.ELU(), output_activation=nn.ELU())
 
@@ -51,8 +48,28 @@ class PhysicsNetwork(nn.Module):
                                                  hidden_activation=nn.ELU(), output_activation=nn.Sigmoid())
 
         self.final_merge_network = Mlp((128,), self.rep_size, self.effect_size+self.rep_size, hidden_activation=nn.ELU())
-        #self.encoder2_network = Mlp((128,), representation_size, representation_size,
-        #                            hidden_activation=nn.ELU())
+
+        # #Old version
+        # self.lambda_encoder = Mlp((128,), self.rep_size, self.rep_size,
+        #                           hidden_activation=nn.ELU())
+        #
+        # #Action networks
+        # if action_size > 0:
+        #     self.action_encoder = Mlp((128,), self.action_enc_size, action_size,
+        #                               hidden_activation=nn.ELU())
+        #     self.action_attention_network = Mlp((128,), self.rep_size, self.action_enc_size + self.rep_size,
+        #                                         hidden_activation=nn.ELU(), output_activation=nn.Sigmoid())
+        #     self.action_effect_network = Mlp((128,), 1, self.action_enc_size + self.rep_size,
+        #                                      hidden_activation=nn.ELU())
+        #
+        # self.pairwise_encoder_network = Mlp((256,), self.interaction_size, self.rep_size*2,
+        #                              hidden_activation=nn.ELU(), output_activation=nn.ELU())
+        # self.interaction_effect_network = Mlp((128,), self.effect_size, self.interaction_size,
+        #                                       hidden_activation=nn.ELU(), output_activation=nn.ELU())
+        # self.interaction_attention_network = Mlp((128,), 1, self.interaction_size,
+        #                                          hidden_activation=nn.ELU(), output_activation=nn.Sigmoid())
+        #
+        # self.final_merge_network = Mlp((128,), self.rep_size, self.effect_size+self.rep_size, hidden_activation=nn.ELU())
 
 
     def forward(self, lambda1, lambdas2, actions):

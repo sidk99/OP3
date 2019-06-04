@@ -1,6 +1,7 @@
 import rlkit.torch.pytorch_util as ptu
 from rlkit.launchers.launcher_util import run_experiment
 import numpy as np
+import shutil
 # from rlkit.launchers.ray.launcher import launch_experiment
 from torch.distributions import Normal
 import pickle
@@ -17,6 +18,7 @@ import json
 import os
 import rlkit.torch.iodine.iodine as iodine
 from collections import OrderedDict
+from rlkit.util.misc import get_module_path
 # from ray import tune
 import time
 import pdb
@@ -335,6 +337,7 @@ class MPC:
 
         obs_lst = [np.moveaxis(goal_image.astype(np.float32) / 255., 2, 0)[:3]]
         pred_obs_lst = [ptu.get_numpy(rec_goal_image)]
+        try_action_obs_list = [ptu.get_numpy(rec_goal_image)] #RV
 
         actions = []
         for mpc_step in range(self.mpc_steps):
@@ -344,6 +347,7 @@ class MPC:
                                                        goal_latents_recon)
             mpc_time = time.time()
             actions.append(action)
+            try_action_obs_list.append(np.moveaxis(self.env.try_action(action)/255, 2, 0))
             obs = self.env.step(action)/255
             step_time = time.time()
             pred_obs_lst.append(pred_obs)
@@ -355,9 +359,13 @@ class MPC:
                 goal_latents = self.remove_idx(goal_latents, goal_idx)
                 goal_latents_recon = self.remove_idx(goal_latents_recon, goal_idx)
             #print(mpc_time - t0, step_time - mpc_time)
-        save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst)),
+        # save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst)),
+        #            logger.get_snapshot_dir() + '%s/mpc.png' % self.logger_prefix_dir,
+        #            nrow=len(obs_lst))
+        save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst + try_action_obs_list)),
                    logger.get_snapshot_dir() + '%s/mpc.png' % self.logger_prefix_dir,
                    nrow=len(obs_lst))
+        # pdb.set_trace()
 
         # Compare final obs to goal obs
         mse = np.square(ptu.get_numpy(goal_image_tensor.squeeze().permute(1, 2, 0)) - obs).mean()
@@ -367,7 +375,7 @@ class MPC:
         stats = {'mse': mse, 'correct': int(correct), 'max_pos': max_pos, 'max_rgb': max_rgb}
         return stats, np.stack(actions)
 
-    def model_step_batched(self, obs, actions, bs=16):
+    def model_step_batched(self, obs, actions, bs=4):
 
         # Handle large obs in batches
         n_batches = int(np.ceil(obs.shape[0] / float(bs)))
@@ -438,7 +446,10 @@ class MPC:
 
 
         if self.use_action_image:
-            obs_rep = ptu.from_numpy(np.moveaxis(np.stack(self.env.try_actions(actions)), 3, 1))/255
+            obs_rep = ptu.from_numpy(np.moveaxis(np.stack([self.env.try_action(action) for action in actions]), 3, 1))/255
+            # obs_rep = ptu.from_numpy(np.moveaxis(np.stack(self.env.try_actions(actions)), 3, 1))/255
+            # tmp = ptu.get_numpy(obs_rep)
+            # print(np.max(tmp), np.min(tmp), np.max(tmp)*255, np.min(tmp)*255)
         else:
             obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0],
                                                                                  1, 1,
@@ -468,8 +479,17 @@ class MPC:
         return best_pred_obs, best_actions, best_goal_idx
 
 
-def main(variant):
+def copy_to_save_file():
+    dir_str = logger.get_snapshot_dir()
+    base = get_module_path()
+    shutil.copy2(base+'/rlkit/torch/iodine/iodine.py', dir_str)
+    shutil.copy2(base+'/rlkit/torch/iodine/iodine_trainer.py', dir_str)
+    shutil.copy2(base+'/rlkit/torch/iodine/physics_network.py', dir_str)
+    shutil.copy2(base+'/rlkit/torch/iodine/refinement_network.py', dir_str)
+    shutil.copy2(base+'/examples/mpc/stage1/mpc_stage1.py', dir_str)
 
+def main(variant):
+    copy_to_save_file()
     # module_path = os.path.expanduser('~') + '/objects/rlkit'
     # model_file = module_path + '/saved_models/iodine-blocks-stack50k/SequentialRayExperiment_0_2019-05-15_01-24-38zy_wn4_6/model_params.pkl'
     # module_path = os.path.expanduser('~') + '/Research/fun_rlkit'
@@ -513,16 +533,16 @@ def main(variant):
 
 
     for i, goal_idx in enumerate(goal_idxs):
-        # goal_file = module_path + '/examples/mpc/stage1/manual_constructions/%s/%d_1.png' % (structure, goal_idx)
-        goal_file = module_path + '/examples/mpc/stage1/goals_3/img_%d.png' % goal_idx
+        goal_file = module_path + '/examples/mpc/stage1/manual_constructions/%s/%d_1.png' % (structure, goal_idx)
+        # goal_file = module_path + '/examples/mpc/stage1/goals_3/img_%d.png' % goal_idx
         true_data = np.load(
             module_path + '/examples/mpc/stage1/manual_constructions/%s/%d.p' % (structure, goal_idx), allow_pickle=True)
         # pdb.set_trace()
         env = BlockEnv(n_goal_obs)
-        mpc = MPC(m, env, n_actions=10, mpc_steps=n_goal_obs, true_actions=None,
+        mpc = MPC(m, env, n_actions=960, mpc_steps=n_goal_obs, true_actions=None,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=n_goal_obs,
                   logger_prefix_dir='/%s_goal_%d' % (structure, goal_idx),
-                  mpc_style=variant['mpc_style'], cem_steps=1, use_action_image=True,
+                  mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True,
                   true_data=true_data)
         goal_image = imageio.imread(goal_file)
         single_stats, actions = mpc.run(goal_image)
@@ -559,9 +579,10 @@ if __name__ == "__main__":
         ('three-shapes', 5),
         ('towers', 9),
     ]
-    n = 3
+    n = 3 #(11+1)//n is the number of splits
     splits = [structures[i:i + n] for i in range(0, len(structures), n)]
     structure_split = splits[args.split]
+    # pdb.set_trace()
 
 
     for s in structure_split:

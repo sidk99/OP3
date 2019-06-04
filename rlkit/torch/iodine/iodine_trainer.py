@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from collections import defaultdict
 from os import path as osp
 import numpy as np
 import torch
@@ -11,6 +12,9 @@ from rlkit.core.eval_util import create_stats_ordered_dict
 from rlkit.torch import pytorch_util as ptu
 from rlkit.torch.pytorch_util import from_numpy
 import os
+
+
+# from linetimer import CodeTimer
 
 class IodineTrainer(Serializable):
     def __init__(
@@ -51,6 +55,10 @@ class IodineTrainer(Serializable):
 
         self.vae_logger_stats_for_rl = {}
         self._extra_stats_to_log = None
+        self.timing_info = defaultdict(list)
+
+    def save_model(self, epoch):
+        torch.save(self.model.state_dict(), open(osp.join(logger.get_snapshot_dir(), 'params.pkl'), "wb"))
 
     def prepare_tensors(self, tensors):
         imgs = tensors[0].to(ptu.device) / 255. #Normalize image to 0-1
@@ -68,6 +76,8 @@ class IodineTrainer(Serializable):
 
 
     def train_epoch(self, epoch):
+        timing_dict = defaultdict(list)
+        # ct = CodeTimer(silent=True)
         self.model.train()
         losses, log_probs, kles, mses = [], [], [], []
         for batch_idx, tensors in enumerate(self.train_dataset.dataloader):
@@ -81,14 +91,20 @@ class IodineTrainer(Serializable):
             schedule_type = self.get_schedule_type(epoch)
             schedule = create_schedule(True, self.train_T, schedule_type, self.seed_steps, self.max_T)
             # print("obs: {}".format(obs.shape))
+            # with ct:
             x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(input=obs, actions=actions, schedule=schedule)
+            # timing_dict['forward_pass'].append(ct.took)
             # if (loss.mean().item() > 1e8):
             #     print("MASSIVE LOSS!")
             #     print(loss, schedule, kle_loss, mse)
             #     continue
+            # with ct:
             loss.mean().backward()
+            # timing_dict['backward'].append(ct.took)
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()], 5.0)
+            # with ct:
             self.optimizer.step()
+            # timing_dict['optimizer_step'].append(ct.took)
 
             losses.append(loss.mean().item())
             log_probs.append(x_prob_loss.mean().item())
@@ -103,8 +119,14 @@ class IodineTrainer(Serializable):
             ("train/Log Prob", np.mean(log_probs)),
             ("train/KL", np.mean(kles)),
             ("train/loss", np.mean(losses)),
-            ("train/mse", np.mean(mses))
+            ("train/mse", np.mean(mses)),
+            # ("train/forward_pass", np.mean(timing_dict["forward_pass"])),
+            # ("train/backward", np.mean(timing_dict["backward"])),
+            # ("train/optimizer_step", np.mean(timing_dict["optimizer_step"]))
         ])
+
+        # for akey in timing_dict.keys():
+        #     self.timing_info[akey].append(np.mean(timing_dict[akey]))
 
         return stats
 
