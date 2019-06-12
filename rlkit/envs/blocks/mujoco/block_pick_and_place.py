@@ -379,10 +379,10 @@ class BlockPickAndPlaceEnv():
         # Move blocks to either side
         z = self.drop_heights
         side_pos = [
-            [-2.2, 3.0, z],
-            [2.2, 3.0, z],
-            [-2.2, 3.0, z],
-            [2.3, 3.5, z]]
+            [-2.2, 1.5, z],
+            [2.2, 1.5, z],
+            [-2.2, 3.5, z],
+            [2.2, 3.5, z]]
         # self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min': 1.0, 'y_max' :4.0, 'z_min':0.05, 'z_max'2.2}
         place_lst = []
         for i, block in enumerate(self.names):
@@ -410,7 +410,7 @@ class BlockPickAndPlaceEnv():
 
 
         sorted(true_actions, key=lambda x : x[5])
-        print(true_actions)
+        # print(true_actions)
 
         return true_actions
 
@@ -485,7 +485,7 @@ class BlockPickAndPlaceEnv():
             if self.heights[i-1] == self.heights[i+1] and new_height == self.heights[i-1]:
                 self.heights[i] = self.heights[i-1]
 
-        print(poly, ind, self.types, self.heights)
+        # print(poly, ind, self.types, self.heights)
 
     def get_env_info(self):
         env_info = {}

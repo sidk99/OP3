@@ -140,7 +140,7 @@ if __name__ == "__main__":
         ),
         remote_launch_variant=dict(
             # head_instance_type='m1.xlarge',
-            max_spot_price=.2,
+            max_spot_price=.75,
         ),
         docker_variant=dict(),
     )

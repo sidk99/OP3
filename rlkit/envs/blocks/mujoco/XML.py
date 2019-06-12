@@ -81,9 +81,11 @@ class XML:
       body_base = '''
         <body name='{}' pos='{}' quat='{}'>
           <joint type='free' name='{}'/>
-          <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}'/>
+          <geom name='{}' type='mesh' mesh='{}' pos='0 0 0' quat='1 0 0 0' material='{}'
+          condim='6' friction='1 1 1' />
         </body>
       '''
+    #condim='3' friction='1 1 1' solimp="0.998 0.998 0.001" solref="0.02 1"
 
       body_list = [body_base.format( \
          m['name'], m['pos'], m['quat'], m['name'], m['name'], m['name'], m['material'] )

@@ -57,8 +57,17 @@ INSTANCE_TYPE = 'c1.medium' #
 SPOT_PRICE = 0.035
 
 GPU_DOODAD_DOCKER_IMAGE = "'jcoreyes/op3-ray'" #"'rishiv/rv_ray_docker'" #'jcoreyes/op3-ray'
-GPU_INSTANCE_TYPE = 'g3.4xlarge' #g2.2xlarge, p3.8xlarge
-GPU_SPOT_PRICE = 0.75
+gpu_instance_to_price = {
+    'g3.16xlarge': 1.4, #4 GPU, 32 GB, 1 limit
+    'p2.8xlarge': 2.3, #8 GPU, 96 GB, 0 limit
+    'p2.16xlarge': 4.5, #16 GPU, 192 GB, 0 limit
+    'p3.8xlarge': 3.8, #4 GPU, 64 GB, 5 limit
+    'p3.16xlarge': 7.5, #8 GPU, 128 GB, 0 limit
+    'p3dn.24xlarge': 9.5, #8 GPU, 256, 0 limit
+}
+which_gpu = 'g3.16xlarge' #g3.16xlarge
+GPU_INSTANCE_TYPE = which_gpu #g2.2xlarge, g3.4xlarge, g3.16xlarge, p3.8xlarge
+GPU_SPOT_PRICE = gpu_instance_to_price[which_gpu]
 # These AMI images have the docker images already installed.
 REGION_TO_GPU_AWS_IMAGE_ID = {
     'us-west-2': 'ami-076347b8649dddb00'

@@ -56,9 +56,10 @@ class IodineTrainer(Serializable):
         self.vae_logger_stats_for_rl = {}
         self._extra_stats_to_log = None
         self.timing_info = defaultdict(list)
+        self.curriculum_len = 30
 
-    def save_model(self, epoch):
-        torch.save(self.model.state_dict(), open(osp.join(logger.get_snapshot_dir(), 'params.pkl'), "wb"))
+    def save_model(self, prefix=""):
+        torch.save(self.model.state_dict(), open(osp.join(logger.get_snapshot_dir(), '{}_params.pkl'.format(prefix)), "wb"))
 
     def prepare_tensors(self, tensors):
         imgs = tensors[0].to(ptu.device) / 255. #Normalize image to 0-1
@@ -69,7 +70,7 @@ class IodineTrainer(Serializable):
 
     def get_schedule_type(self, epoch):
         if 'curriculum' in self.schedule_type:
-            rollout_len = epoch // 20 + 1
+            rollout_len = epoch // self.curriculum_len + 1
             return 'curriculum_{}'.format(rollout_len)
         else:
             return self.schedule_type
@@ -78,6 +79,8 @@ class IodineTrainer(Serializable):
     def train_epoch(self, epoch):
         timing_dict = defaultdict(list)
         # ct = CodeTimer(silent=True)
+        if self.schedule_type == "curriculum" and epoch % self.curriculum_len == 0:
+            self.save_model("{}_physics_steps".format(epoch//self.curriculum_len))
         self.model.train()
         losses, log_probs, kles, mses = [], [], [], []
         for batch_idx, tensors in enumerate(self.train_dataset.dataloader):

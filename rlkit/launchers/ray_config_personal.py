@@ -28,16 +28,27 @@ mount_point: where the directory/file will be mounted in the docker instance.
 #         mount_point='/tmp/local_exp.pkl',
 #     ),
 # ]
+
+# dict(
+#         # local_dir='/home/rishiv/Research/fun_rlkit/',
+#        local_dir='/nfs/kun1/users/rishiv/Research/fun_rlkit/',
+#         mount_point='/home/ubuntu/Research/fun_rlkit/',
+#        # mount_point='/nfs/kun1/users/rishiv/Research/fun_rlkit/',
+#        filter_dir=['output', 'data'],
+#        pythonpath=True,
+#    )
+
 DIR_AND_MOUNT_POINT_MAPPINGS = [
-    dict(
-        local_dir='/home/rishiv/.mujoco',
-        remote_dir='/home/ubuntu/.mujoco',
-        mount_point='/root/.mujoco',
-    ),
+    # dict(
+    #     local_dir='/home/rishiv/.mujoco',
+    #     remote_dir='/home/ubuntu/.mujoco',
+    #     mount_point='/root/.mujoco',
+    # ),
     dict(
         local_dir='/home/rishiv/Research/fun_rlkit/',
         remote_dir='/home/ubuntu/Research/fun_rlkit/', #EC2 server
         mount_point='/home/rishiv/Research/fun_rlkit/', #Docker
+        filter_dir=['output', 'data']
     ),
 
     dict(
@@ -77,10 +88,20 @@ AWS_CONFIG_NO_GPU=dict(
 
 )
 
+gpu_instance_to_price = {
+    'g3.16xlarge': 1.4, #4 GPU, 32 GB, 1 limit
+    'p2.8xlarge': 2.3, #8 GPU, 96 GB, 0 limit
+    'p2.16xlarge': 4.5, #16 GPU, 192 GB, 0 limit
+    'p3.8xlarge': 3.8, #4 GPU, 64 GB, 5 limit
+    'p3.16xlarge': 7.5, #8 GPU, 128 GB, 0 limit
+    'p3dn.24xlarge': 9.5, #8 GPU, 256, 0 limit
+}
+which_gpu = 'p3.8xlarge' #g3.16xlarge
+
 AWS_CONFIG_GPU = dict(
     REGION='us-west-2',
-    INSTANCE_TYPE = 'g3.8xlarge',
-    SPOT_PRICE = 0.75,
+    INSTANCE_TYPE = which_gpu,
+    SPOT_PRICE = gpu_instance_to_price[which_gpu],
     REGION_TO_AWS_IMAGE_ID = {
         'us-west-2': 'ami-076347b8649dddb00'
     },

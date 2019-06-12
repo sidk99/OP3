@@ -2,7 +2,7 @@ from torch import nn
 import time
 import shutil
 
-from rlkit.core import logger
+# from rlkit.core import logger
 
 from rlkit.torch.iodine.iodine import IodineVAE
 
@@ -74,6 +74,7 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
 #Dataset information regarding T
 # dataset_info = {
 #     'pickplace_1env_1k.h5': 21
+#     'pickplace_multienv_10k.h5': 21
 # }
 
 # (10000, 21, 3, 64, 64) 182 0
@@ -95,8 +96,7 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
 #             gamma=0.5,
 #             lr=1e-3,
 
-def copy_to_save_file():
-    dir_str = logger.get_snapshot_dir()
+def copy_to_save_file(dir_str):
     base = get_module_path()
     shutil.copy2(base+'/rlkit/torch/iodine/iodine.py', dir_str)
     shutil.copy2(base+'/rlkit/torch/iodine/iodine_trainer.py', dir_str)
@@ -105,27 +105,28 @@ def copy_to_save_file():
     shutil.copy2(base+'/examples/iodine/iodine.py', dir_str)
 
 def train_vae(variant):
-    copy_to_save_file()
+    from rlkit.core import logger
+    copy_to_save_file(logger.get_snapshot_dir())
     # seed = 1
     seed = int(variant['seed'])
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
 
-    variant['model']['schedule_kwargs'] = variant['schedule_kwargs'] #Adding it to dictionary
-    variant['model']['K'] = variant['K'] #Adding K to model dictionary
+    # variant['model']['schedule_kwargs'] = variant['schedule_kwargs'] #Adding it to dictionary
+    # variant['model']['K'] = variant['K'] #Adding K to model dictionary
 
     train_path = get_module_path() + '/ec2_data/%s.h5' % variant['dataset']
     test_path = train_path
     bs = variant['training_kwargs']['batch_size']
-    train_size = 100 if variant['debug'] == 1 else None
+    train_size = 1000 if variant['debug'] == 1 else None
     train_dataset, max_T = load_dataset(train_path, train=True, batchsize=bs, size=train_size)
     test_dataset, _ = load_dataset(test_path, train=False, batchsize=bs, size=100)
 
     print(logger.get_snapshot_dir())
     # pdb.set_trace()
 
-    m = iodine.create_model(variant['model'], train_dataset.action_dim)
+    m = iodine.create_model(variant, train_dataset.action_dim)
     if variant['dataparallel']:
         m = torch.nn.DataParallel(m)
     m.cuda()
@@ -145,8 +146,8 @@ def train_vae(variant):
         for k, v in {**train_stats, **test_stats}.items():
             logger.record_tabular(k, v)
         logger.dump_tabular()
-        print(t.timing_info)
-        t.save_model(epoch)
+        # print(t.timing_info)
+        t.save_model()
 
         # torch.save(m.state_dict(), open(logger.get_snapshot_dir() + '/params.pkl', "wb"))
     # logger.save_extra_data(m, 'vae.pkl', mode='pickle')
@@ -155,6 +156,9 @@ def train_vae(variant):
 #CUDA_VISIBLE_DEVICES=1 python iodine.py -da pickplace_multienv_10k -de 0
 #CUDA_VISIBLE_DEVICES=1,2 python iodine.py -da stack_o2p2_60k -de 0
 #CUDA_VISIBLE_DEVICES=1,2 python iodine.py -da pickplace_multienv_c3_10k -de 0
+#pickplace_multienv_10k.h5, pickplace_multienv_c3_10k.h5
+#CUDA_VISIBLE_DEVICES=1 python iodine.py -da pickplace_multienv_10k -de 1
+
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -166,22 +170,22 @@ if __name__ == "__main__":
 
     variant = dict(
         model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
-        K=7,
+        K=4,
         training_kwargs = dict(
-            batch_size=8, #Used in IodineTrainer, change to appropriate constant based off dataset size
+            batch_size=64, #Used in IodineTrainer, change to appropriate constant based off dataset size
             lr=1e-4, #Used in IodineTrainer, sweep
             log_interval=0,
         ),
         schedule_kwargs=dict(
-            train_T=5, #Number of steps in single training sequence, change with dataset
-            test_T=5,  #Number of steps in single testing sequence, change with dataset
+            train_T=21, #Number of steps in single training sequence, change with dataset
+            test_T=21,  #Number of steps in single testing sequence, change with dataset
             seed_steps=4, #Number of seed steps
-            schedule_type='single_step_physics' #single_step_physics, single_step_physics
+            schedule_type='curriculum' #single_step_physics, curriculum
         ),
-        num_epochs=10,
+        num_epochs=200,
         algorithm='Iodine',
         save_period=1,
-        dataparallel=False,
+        dataparallel=True,
         dataset=args.dataset,
         debug=args.debug
     )

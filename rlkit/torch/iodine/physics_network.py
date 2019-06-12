@@ -8,6 +8,7 @@ from rlkit.pythonplusplus import identity
 from rlkit.torch.networks import Mlp
 from rlkit.torch import pytorch_util as ptu
 import numpy as np
+import pdb
 
 class PhysicsNetwork(nn.Module):
     def __init__(
@@ -35,10 +36,10 @@ class PhysicsNetwork(nn.Module):
         if action_size > 0:
             self.action_encoder = Mlp((128,), self.action_enc_size, action_size,
                                       hidden_activation=nn.ELU(), output_activation=nn.ELU())
-            self.action_attention_network = Mlp((128,), self.rep_size, self.action_enc_size + self.rep_size,
-                                                hidden_activation=nn.ELU(), output_activation=nn.Sigmoid())
-            self.action_effect_network = Mlp((128,), 1, self.action_enc_size + self.rep_size,
+            self.action_effect_network = Mlp((128,), self.rep_size, self.action_enc_size + self.rep_size,
                                              hidden_activation=nn.ELU(), output_activation=nn.ELU())
+            self.action_attention_network = Mlp((128,), 1, self.action_enc_size + self.rep_size,
+                                                hidden_activation=nn.ELU(), output_activation=nn.Sigmoid())
 
         self.pairwise_encoder_network = Mlp((256,), self.interaction_size, self.rep_size*2,
                                      hidden_activation=nn.ELU(), output_activation=nn.ELU())

@@ -27,7 +27,7 @@ if __name__ == "__main__":
                                random_initialize=False, view=False)
 
     #Creating dataset
-    n_goals = 2
+    n_goals = 5
     env_data = []
     for i in range(n_goals):
         goal_image, env_info = get_goal_info(env)

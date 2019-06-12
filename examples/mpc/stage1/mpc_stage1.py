@@ -22,6 +22,7 @@ from rlkit.util.misc import get_module_path
 # from ray import tune
 import time
 import pdb
+print("Hello Sid")
 
 class Cost:
     def __init__(self, type, logger_prefix_dir):
@@ -375,7 +376,7 @@ class MPC:
         stats = {'mse': mse, 'correct': int(correct), 'max_pos': max_pos, 'max_rgb': max_rgb}
         return stats, np.stack(actions)
 
-    def model_step_batched(self, obs, actions, bs=4):
+    def model_step_batched(self, obs, actions, bs=8):
 
         # Handle large obs in batches
         n_batches = int(np.ceil(obs.shape[0] / float(bs)))
@@ -539,7 +540,7 @@ def main(variant):
             module_path + '/examples/mpc/stage1/manual_constructions/%s/%d.p' % (structure, goal_idx), allow_pickle=True)
         # pdb.set_trace()
         env = BlockEnv(n_goal_obs)
-        mpc = MPC(m, env, n_actions=960, mpc_steps=n_goal_obs, true_actions=None,
+        mpc = MPC(m, env, n_actions=1000, mpc_steps=n_goal_obs, true_actions=None,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=n_goal_obs,
                   logger_prefix_dir='/%s_goal_%d' % (structure, goal_idx),
                   mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True,
@@ -550,14 +551,15 @@ def main(variant):
             stats[k] += v
         actions_lst.append(actions)
         goal_counter += 1
+        np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
     for k, v in stats.items():
         stats[k] /= float(goal_counter)
     print(stats)
     json.dump(stats, open(logger.get_snapshot_dir() + '/stats.json', 'w'))
-    np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
+    # np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
-#CUDA_VISIBLE_DEVICES=7 python mpc_stage1.py -de 1
+#CUDA_VISIBLE_DEVICES=7 python mpc_stage1.py -de 1 -s
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-de', '--debug', type=int, default=0)
@@ -567,19 +569,19 @@ if __name__ == "__main__":
 
 
     structures = [
-        ('bridge', 5),
-        ('double-bridge', 8),
-        ('double-bridge-close', 8),
-        ('double-bridge-close-topfar', 8),
-        ('pyramid', 6),
-        ('pyramid-triangle', 6),
-        ('spike', 6),
-        ('stacked', 5),
-        ('tall-bridge', 7),
-        ('three-shapes', 5),
-        ('towers', 9),
+        ('bridge', 5), #1
+        ('pyramid', 6), #1
+        ('pyramid-triangle', 6), #2
+        ('spike', 6), #2
+        ('stacked', 5), #3
+        ('tall-bridge', 7), #3
+        ('three-shapes', 5), #4
+        ('double-bridge', 8),  #4
+        ('double-bridge-close', 8),  #5
+        ('double-bridge-close-topfar', 8),  #5
+        ('towers', 9), #6
     ]
-    n = 3 #(11+1)//n is the number of splits
+    n = 2 #(11+1)//n is the number of splits
     splits = [structures[i:i + n] for i in range(0, len(structures), n)]
     structure_split = splits[args.split]
     # pdb.set_trace()

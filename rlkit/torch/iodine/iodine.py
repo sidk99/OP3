@@ -96,7 +96,7 @@ imsize64_large_iodine_architecture = dict(
         input_channels=3,
         # decoder_distribution='gaussian_identity_variance',
         beta=1,
-        K=7,
+        # K=7,
         sigma=0.1,
     ),
     deconv_args=dict(
@@ -148,7 +148,7 @@ imsize64_large_iodine_architecture_multistep_physics = dict(
         input_channels=3,
         # decoder_distribution='gaussian_identity_variance',
         beta=1,
-        K=7, #7
+        # K=7, #7
         sigma=0.1,
     ),
     deconv_args=dict(
@@ -194,7 +194,6 @@ imsize64_large_iodine_architecture_multistep_physics = dict(
 )
 
 imsize64_small_iodine_architecture = dict(
-    K=5,
     vae_kwargs=dict(
         imsize=64,
         representation_size=REPSIZE_128,
@@ -226,50 +225,6 @@ imsize64_small_iodine_architecture = dict(
         kernel_sizes=[5, 5],
         n_channels=[64, 64],
         strides=[2, 2],
-        hidden_sizes=[128, 128],
-        output_size=REPSIZE_128,
-        lstm_size=256,
-        lstm_input_size=768,
-        added_fc_input_size=0
-    ),
-    physics_kwargs=dict(
-        action_enc_size=32,
-    )
-)
-
-imsize64_medium_iodine_architecture_k7 = dict(
-    K=7,
-    vae_kwargs=dict(
-        imsize=64,
-        representation_size=REPSIZE_128,
-        input_channels=3,
-        beta=1,
-        sigma=0.1,
-    ),
-    deconv_args=dict(
-        hidden_sizes=[],
-        output_size=64 * 64 * 3,
-        input_width=64,
-        input_height=64,
-        input_channels=REPSIZE_128 + 2,
-
-        kernel_sizes=[3, 3, 3, 3],
-        n_channels=[64, 64, 64, 4],
-        strides=[1, 1, 1 ,1],
-        paddings=[1, 1, 1, 1]
-    ),
-    deconv_kwargs=dict(
-        batch_norm_conv=False,
-        batch_norm_fc=False,
-    ),
-    refine_args=dict(
-        input_width=64,
-        input_height=64,
-        input_channels=17,
-        paddings=[0, 0, 0],
-        kernel_sizes=[3, 3, 3],
-        n_channels=[64, 64, 64],
-        strides=[1, 1, 1],
         hidden_sizes=[128, 128],
         output_size=REPSIZE_128,
         lstm_size=256,
@@ -332,12 +287,13 @@ imsize64_medium_iodine_architecture = dict(
 # )
 
 
-def create_model(model, action_dim):
-    if 'K' in model.keys(): #New version
-        K = model['K']
-    else: #Old version
-        K = model['vae_kwargs']['K']
+def create_model(variant, action_dim):
+    # if 'K' in model.keys(): #New version
+    K = variant['K']
+    # else: #Old version
+    #     K = model['vae_kwargs']['K']
     print('K: {}'.format(K))
+    model = variant['model']
     rep_size = model['vae_kwargs']['representation_size']
 
     decoder = BroadcastCNN(**model['deconv_args'], **model['deconv_kwargs'],
@@ -348,12 +304,14 @@ def create_model(model, action_dim):
 
     m = IodineVAE(
         **model['vae_kwargs'],
-        **model['schedule_kwargs'],
+        **variant['schedule_kwargs'],
+        K=K,
         decoder=decoder,
         refinement_net=refinement_net,
         physics_net=physics_net,
         action_dim=action_dim,
     )
+    # pdb.set_trace()
     return m
 
 def create_schedule(train, T, schedule_type, seed_steps, max_T=None):
@@ -374,11 +332,11 @@ def create_schedule(train, T, schedule_type, seed_steps, max_T=None):
             max_multi_step = int(schedule_type[-1])
             # schedule = np.zeros((T,))
             rollout_len = np.random.randint(max_multi_step)+1
-            schedule = np.zeros(seed_steps+rollout_len)
-            schedule[seed_steps:seed_steps+rollout_len] = 1
+            schedule = np.zeros(seed_steps+rollout_len+1)
+            schedule[seed_steps:seed_steps+rollout_len] = 1 #schedule looks like [0,0,0,0,1,1,1,0]
         else:
             max_multi_step = int(schedule_type[-1])
-            schedule = np.zeros(seed_steps + max_multi_step)
+            schedule = np.zeros(seed_steps + max_multi_step+1)
             schedule[seed_steps:seed_steps + max_multi_step] = 1
     else:
         raise Exception
@@ -582,6 +540,7 @@ class IodineVAE(GaussianLatentVAE):
         K = self.K
         bs = input.shape[0]
         # imsize = self.imsize
+        # pdb.set_trace()
         input = input.unsqueeze(1).repeat(1, 9, 1, 1, 1) #RV: Why 9? Shouldn't it be just 1 or K?
 
         schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps) #RV: Returns schedule of 1's and 0's
@@ -612,8 +571,13 @@ class IodineVAE(GaussianLatentVAE):
                                    0).view(-1, 3, imsize, imsize)
             # import pdb; pdb.set_trace()
 
-            save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/test.png',
-                       nrow=self.test_T)
+            if isinstance(plot_latents, str):
+                name = logger.get_snapshot_dir() + plot_latents
+            else:
+                name = logger.get_snapshot_dir() + '/test.png'
+
+            save_image(comparison.data.cpu(), name, nrow=self.test_T)
+            # save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/test.png', nrow=self.test_T)
         #  x_hats, 0, i)
         # pred_obs, obs_latents, obs_latents_recon
 
@@ -684,6 +648,8 @@ class IodineVAE(GaussianLatentVAE):
         applied_action = False
 
         for t in range(1, T+1):
+            if lambdas1.shape[0] % self.K != 0:
+                print("UH OH: {}".format(t))
             # Refine
             if schedule[t - 1] == 0:
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape) #RV: (bs*K, ch, imsize, imsize)
@@ -708,7 +674,6 @@ class IodineVAE(GaussianLatentVAE):
                     actions_done = True
                     current_step = input.shape[1] - 1
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
-
                 lambdas1, _ = self.physics_net(lambdas1, lambdas2, actionsK)
                 loss_w = t #RV modification
 
