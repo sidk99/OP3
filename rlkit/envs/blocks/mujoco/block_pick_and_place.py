@@ -146,7 +146,7 @@ class BlockPickAndPlaceEnv():
         else:
             self.viewer = mujoco_py.MjRenderContextOffscreen(self.sim, -1)
 
-        self.sim_state = self.sim.get_state()
+        # self.sim_state = self.sim.get_state()
         self.get_starting_step(use_cur_pos)
 
     def get_starting_step(self, use_cur_pos):
@@ -167,7 +167,7 @@ class BlockPickAndPlaceEnv():
                 self.internal_step()
                 if self.view:
                     self.viewer.render()
-            self.sim_state = self.sim.get_state()
+            # self.sim_state = self.sim.get_state()
 
     ####Env internal step functions
     def add_block(self, ablock, pos):
@@ -209,24 +209,25 @@ class BlockPickAndPlaceEnv():
         #import pdb; pdb.set_trace()
         # print(a_block, info)
         # print("Setting state: {}, {}".format(a_block, info))
+        sim_state = self.sim.get_state()
         start_ind = self.sim.model.get_joint_qpos_addr(a_block)[0]
         if "pos" in info:
-            self.sim_state.qpos[start_ind:start_ind+3] = np.array(info["pos"])
-        #if "quat" in info:
-        #    self.sim_state.qpos[start_ind+3:start_ind+7] = info["quat"]
-        #else:
-        self.sim_state.qpos[start_ind + 3:start_ind + 7] = np.array([1, 0, 0, 0])
+            sim_state.qpos[start_ind:start_ind+3] = np.array(info["pos"])
+        if "quat" in info:
+           sim_state.qpos[start_ind+3:start_ind+7] = info["quat"]
+        else:
+            sim_state.qpos[start_ind + 3:start_ind + 7] = np.array([1, 0, 0, 0])
 
         start_ind = self.sim.model.get_joint_qvel_addr(a_block)[0]
         if "vel" in info:
-            self.sim_state.qvel[start_ind:start_ind + 3] = info["vel"]
+            sim_state.qvel[start_ind:start_ind + 3] = info["vel"]
         else:
-            self.sim_state.qvel[start_ind:start_ind + 3] = np.zeros(3)
-        # if "rot_vel" in info:
-        #     self.sim_state.qvel[start_ind + 3:start_ind + 6] = info["rot_vel"]
-        # else:
-        self.sim_state.qvel[start_ind + 3:start_ind + 6] = np.zeros(3)
-        self.sim.set_state(self.sim_state)
+            sim_state.qvel[start_ind:start_ind + 3] = np.zeros(3)
+        if "rot_vel" in info:
+            sim_state.qvel[start_ind + 3:start_ind + 6] = info["rot_vel"]
+        else:
+            sim_state.qvel[start_ind + 3:start_ind + 6] = np.zeros(3)
+        self.sim.set_state(sim_state)
 
     def internal_step(self, action=None):
         ablock = False
@@ -241,17 +242,20 @@ class BlockPickAndPlaceEnv():
             if (ablock):
                 # print("Dropping: {} {}".format(ablock, drop_place))
                 self.add_block(ablock, drop_place)
-        self.sim_state = self.sim.get_state()
+        # self.sim_state = self.sim.get_state()
         return ablock
 
 
     ####Env external step functions
     def step(self, action):
         ablock = self.internal_step(action)
+        # print(ablock)
+        # print(self.get_env_info())
         #if ablock:
         for i in range(self.internal_steps_per_step):
             self.sim.forward()
             self.sim.step()
+            # self.internal_step()
             if self.view:
                 self.viewer.render()
 
@@ -259,11 +263,27 @@ class BlockPickAndPlaceEnv():
         # for i in range(200):
         #     self.sim.forward()
         #     self.sim.step()
-        self.sim_state = self.sim.get_state()
+        # self.sim_state = self.sim.get_state()
 
-        for aname in self.names:
-            self.add_block(aname, self.get_block_info(aname)["pos"])
+        # for aname in self.names: #This looks incorrect TODO: CHECK THIS
+        #     self.add_block(aname, self.get_block_info(aname)["pos"])
         return self.get_observation()
+
+    #Note: action can either be (A) or (T, A) where we want to execute T actions in a row
+    def try_step(self, actions):
+        tmp = self.get_env_info()
+        # cur_state = copy.deepcopy(self.sim.get_state())
+        if len(actions.shape) == 1:
+            self.step(actions)
+        elif len(actions.shape) == 2:
+            for action in actions:
+                self.step(action)
+        else:
+            raise KeyError("Wrong shape for actions: {}".format(actions.shape))
+        obs = self.get_observation()
+        # self.sim.set_state(cur_state)
+        self.set_env_info(tmp)
+        return obs
 
 
     def reset(self):
@@ -280,7 +300,7 @@ class BlockPickAndPlaceEnv():
 
     def get_observation(self):
         img = self.sim.render(self.img_dim, self.img_dim, camera_name="fixed") #img is upside down, values btwn 0-255
-        img = img[::-1, :, :]
+        img = img[::-1, :, :] #flips image right side up
         return np.ascontiguousarray(img) #values btwn 0-255
 
     def get_obs_size(self):
@@ -296,36 +316,7 @@ class BlockPickAndPlaceEnv():
 
             aname = np.random.choice(self.names)
         else:
-            #
-            # def x_y_thresh(pos1, pos2):
-            #     if np.linalg.norm(pos1[:2] - pos2[:2]) < 0.2:
-            #         return True
-            #     else:
-            #         return False
-            # def taller(pos1, pos2):
-            #     if pos1[-1] > pos2[-1]:
-            #         return True
-            #     else:
-            #         return False
-
             z_lim = 0.5
-            # poss = {aname: self.get_block_info(aname)['pos'] for aname in self.names}
-            # clusters = [[self.names[0]]]
-            # for aname in self.names[1:]:
-            #     for i, c in enumerate(clusters):
-            #         if x_y_thresh(poss[aname], poss[c[-1]]):
-            #             if taller(poss[aname], poss[c[-1]]):
-            #                 clusters[i].append(aname)
-            #             break
-            #         else:
-            #             clusters.append([aname])
-            #
-            # cluster_idx = np.random.choice(range(len(clusters)))
-            # aname = clusters[cluster_idx][-1]
-
-
-
-
             tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
             while (len(tmp) == 0):
                 z_lim += 0.5
@@ -372,7 +363,15 @@ class BlockPickAndPlaceEnv():
         random_a[2] = 0.6
         # set place height
         random_a[5] = self.drop_heights
+        return random_a
 
+    def sample_multiple_action_gaussian(self, mean, std, num_samples):
+        #mean and std should be (T, A)
+        random_a = np.random.normal(mean, std, [num_samples] + list(mean.shape))
+        # set pick height
+        random_a[:, :, 2] = 0.6
+        # set place height
+        random_a[:, :, 5] = self.drop_heights
         return random_a
 
     def move_blocks_side(self):
@@ -543,58 +542,97 @@ def createSingleSim(args):
 python rlkit/envs/blocks/mujoco/block_pick_and_place.py -f data/pickplace50k.h5 -nmin 3 -nmax 4 -nf 2 -ns 50000 -fpick 0.3 -fplace 0.4
 """
 
+def test_try_step():
+    env = BlockPickAndPlaceEnv(num_objects=2, num_colors=None, img_dim=64, include_z=False, random_initialize=True)
+    num_actions = 5
+    rand_actions = np.array([env.sample_action("pick_block") for _ in range(num_actions)])
+
+    ncols = num_actions+1
+    nrows = 3
+    cur_fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols * 6, nrows * 6))
+
+    axes[0, 0].imshow(env.get_observation() / 255, interpolation='nearest')
+    axes[1, 0].imshow(env.get_observation() / 255, interpolation='nearest')
+    axes[2, 0].imshow(env.get_observation() / 255, interpolation='nearest')
+
+    ###Testing try_step()
+    for i in range(num_actions):
+        # print(rand_actions[:i+1])
+        axes[0, i + 1].set_title("Try step")
+        # print(env.get_env_info())
+        axes[0, i + 1].imshow(env.try_step(rand_actions[:i+1]) / 255, interpolation='nearest')
+        # print(env.get_env_info())
+
+        axes[2, i + 1].set_title("Env obs")
+        axes[2, i + 1].imshow(env.get_observation() / 255, interpolation='nearest')
+        # axes[0, i+1].set_title("{:2f}".format(rand_actions[i][0]))
+
+    # print("HELLO")
+    for i in range(num_actions):
+        # print(rand_actions[i])
+        # print(env.sim.get_state())
+        # print(env.get_env_info())
+        axes[1, i+1].imshow(env.step(rand_actions[i]) / 255, interpolation='nearest')
+        axes[1, i+1].set_title("Env step")
+        # print(env.get_env_info())
+        # print(env.sim.get_state())
+    cur_fig.savefig("test_try_step")
+
+
 # python block_pick_and_place.py -f pickplace_multienv_10k -nmin 2 -nax 2 -nf 21 -ns 10000 -fpick 0.3 -fplace 0.4
 # python block_pick_and_place.py -f pickplace_multienv_c3_10k -nmin 2 -nmax 2 -nf 21 -ns 10000 -fpick 0.3 -fplace 0.4 -c 3 -p 1
 
-
 if __name__ == '__main__':
-    parser = ArgumentParser()
-    parser.add_argument('-f', '--filename', type=str, default=None, required=True)
-    parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
-    parser.add_argument('-nmax', '--max_num_objects', type=int, default=3)
-    parser.add_argument('-i', '--img_dim', type=int, default=64)
-    parser.add_argument('-nf', '--num_frames', type=int, default=21)
-    parser.add_argument('-ns', '--num_sims', type=int, default=2)
-    parser.add_argument('-mi', '--make_images', type=bool, default=False)
-    parser.add_argument('-c', '--num_colors', type=int, default=None)
-    parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
-    parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
-    parser.add_argument('-r', '--remove_objects', type=bool, default=False)
-    parser.add_argument('-z', '--include_z', type=bool, default=False)
-    parser.add_argument('--output_path', default='', type=str,
-                        help='path to save images')
-    parser.add_argument('-p', '--num_workers', type=int, default=1)
-    args = parser.parse_args()
+    test_try_step()
+    # parser = ArgumentParser()
+    # parser.add_argument('-f', '--filename', type=str, default=None, required=True)
+    # parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
+    # parser.add_argument('-nmax', '--max_num_objects', type=int, default=3)
+    # parser.add_argument('-i', '--img_dim', type=int, default=64)
+    # parser.add_argument('-nf', '--num_frames', type=int, default=21)
+    # parser.add_argument('-ns', '--num_sims', type=int, default=2)
+    # parser.add_argument('-mi', '--make_images', type=bool, default=False)
+    # parser.add_argument('-c', '--num_colors', type=int, default=None)
+    # parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
+    # parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
+    # parser.add_argument('-r', '--remove_objects', type=bool, default=False)
+    # parser.add_argument('-z', '--include_z', type=bool, default=False)
+    # parser.add_argument('--output_path', default='', type=str,
+    #                     help='path to save images')
+    # parser.add_argument('-p', '--num_workers', type=int, default=1)
+    # args = parser.parse_args()
+    #
+    # if args.filename[-3:] == ".h5":
+    #     args.filename = args.filename[:-3]
+    #
+    #
+    # print(args)
+    # info = {}
+    # info["min_num_objects"] = args.min_num_objects
+    # info["max_num_objects"] = args.max_num_objects
+    # info["img_dim"] = args.img_dim
+    #
+    # if args.remove_objects:
+    #     args.num_frames = 2
+    #
+    # info["num_frames"] = args.num_frames
+    # # single_sim_func = lambda : createSingleSim(args)
+    # single_sim_func = createSingleSim
+    # #createSingleSim(args)
+    # env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
+    # ac_size = env.get_actions_size()
+    # obs_size = env.get_obs_size()
+    #
+    # # myenv = BlockPickAndPlaceEnv(2, args.num_colors, args.img_dim, args.include_z,
+    # #                              random_initialize=True, view=False)
+    # dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
+    #
+    # dgu.hdf5_to_image(args.filename+'.h5')
+    # for i in range(min(10, args.num_sims)):
+    #     tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
+    #     dgu.make_gif(tmp, "animation.gif")
 
-    if args.filename[-3:] == ".h5":
-        args.filename = args.filename[:-3]
 
-
-    print(args)
-    info = {}
-    info["min_num_objects"] = args.min_num_objects
-    info["max_num_objects"] = args.max_num_objects
-    info["img_dim"] = args.img_dim
-
-    if args.remove_objects:
-        args.num_frames = 2
-
-    info["num_frames"] = args.num_frames
-    # single_sim_func = lambda : createSingleSim(args)
-    single_sim_func = createSingleSim
-    #createSingleSim(args)
-    env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
-    ac_size = env.get_actions_size()
-    obs_size = env.get_obs_size()
-
-    # myenv = BlockPickAndPlaceEnv(2, args.num_colors, args.img_dim, args.include_z,
-    #                              random_initialize=True, view=False)
-    dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
-
-    dgu.hdf5_to_image(args.filename+'.h5')
-    for i in range(min(10, args.num_sims)):
-        tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
-        dgu.make_gif(tmp, "animation.gif")
 
     ###Testing loading###
     # with open('local_test.pkl', 'rb') as f:
