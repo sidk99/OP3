@@ -8,7 +8,6 @@ import torch
 import torch.nn as nn
 from argparse import ArgumentParser
 import imageio
-from rlkit.envs.blocks.mujoco.block_stacking_env import BlockEnv
 from rlkit.core import logger
 from torchvision.utils import save_image
 from rlkit.util.plot import plot_multi_image
@@ -17,6 +16,7 @@ import os
 import rlkit.torch.iodine.iodine as iodine
 from collections import OrderedDict
 from rlkit.util.misc import get_module_path
+import pdb
 
 class Cost:
     def __init__(self, type, logger_prefix_dir):
@@ -284,8 +284,7 @@ class MPC:
         return torch.stack([array[i] for i in set(range(array.shape[0])) - set([idx])])
 
     def run(self, goal_image):
-        goal_image_tensor = ptu.from_numpy(np.moveaxis(goal_image, 2, 0)).unsqueeze(
-            0).float()[:, :3] / 255.  # (1, 3, imsize, imsize)
+        goal_image_tensor = ptu.from_numpy(np.moveaxis(goal_image, 2, 0)).unsqueeze(0).float()[:, :3] / 255.  # (1, 3, imsize, imsize)
 
         rec_goal_image, goal_latents, goal_latents_recon, goal_latents_mask = self.model.refine(
             goal_image_tensor,
@@ -294,9 +293,7 @@ class MPC:
 
         # Keep top 4 goal latents with greatest mask area excluding 1st (background)
         if self.filter_goals:
-            goal_latents, goal_latents_recon = self.filter_goal_latents(goal_latents,
-                                                                        goal_latents_mask,
-                                                                        goal_latents_recon)
+            goal_latents, goal_latents_recon = self.filter_goal_latents(goal_latents, goal_latents_mask, goal_latents_recon)
 
         #true_actions = self.env.move_blocks_side()
         #self.true_actions = true_actions
@@ -313,18 +310,15 @@ class MPC:
         #true_actions[:, 2] = 0.2
         #true_actions[:, -1] = 3.5
 
-        imageio.imsave(logger.get_snapshot_dir() + '%s/initial_image.png' %
-                       self.logger_prefix_dir, obs)
+        imageio.imsave(logger.get_snapshot_dir() + '{}/initial_image.png'.format(self.logger_prefix_dir), obs)
         obs_lst = [np.moveaxis(goal_image.astype(np.float32) / 255., 2, 0)[:3]]
         pred_obs_lst = [ptu.get_numpy(rec_goal_image)]
 
         actions = []
         for mpc_step in range(self.mpc_steps):
-            pred_obs, action, goal_idx = self.step_mpc(obs, goal_latents, goal_image_tensor,
-                                                       mpc_step,
-                                                       goal_latents_recon)
+            pred_obs, action, goal_idx = self.step_mpc(obs, goal_latents, goal_image_tensor, mpc_step, goal_latents_recon)
             actions.append(action)
-            obs = self.env.step(action)
+            obs = self.env.step(action)/255
             pred_obs_lst.append(pred_obs)
             obs_lst.append(np.moveaxis(obs, 2, 0))
             if goal_latents.shape[0] == 1:
@@ -335,15 +329,14 @@ class MPC:
                 goal_latents_recon = self.remove_idx(goal_latents_recon, goal_idx)
 
         save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst)),
-                   logger.get_snapshot_dir() + '%s/mpc.png' % self.logger_prefix_dir,
-                   nrow=len(obs_lst))
+                   logger.get_snapshot_dir() + '%s/mpc.png' % self.logger_prefix_dir, nrow=len(obs_lst))
 
         # Compare final obs to goal obs
         mse = np.square(ptu.get_numpy(goal_image_tensor.squeeze().permute(1, 2, 0)) - obs).mean()
 
         return mse, np.stack(actions)
 
-    def model_step_batched(self, obs, actions, bs=32):
+    def model_step_batched(self, obs, actions, bs=4):
         # Handle large obs in batches
         n_batches = int(np.ceil(obs.shape[0] / float(bs)))
         outputs = [[], [], []]
@@ -362,10 +355,7 @@ class MPC:
             end_idx = min(start_idx + bs, obs.shape[0])
             actions_batch = actions[start_idx:end_idx] if not self.use_action_image else None
 
-            pred_obs, obs_latents, obs_latents_recon = self.model.step(obs[start_idx:end_idx] /
-                                                                       255.,
-                                                                       actions_batch,
-                                                                       plot_latents=True)
+            pred_obs, obs_latents, obs_latents_recon = self.model.step(obs[start_idx:end_idx]/255., actions_batch, plot_latents=True)
             outputs[0].append(pred_obs)
             outputs[1].append(obs_latents)
             outputs[2].append(obs_latents_recon)
@@ -413,22 +403,18 @@ class MPC:
         # obs is (imsize, imsize, 3)
         # goal latents is (<K, rep_size)
         if actions is None:
-            actions = np.stack([self.env.sample_action(action_type='pick_block') for _ in range(
-                self.n_actions)])
+            actions = np.stack([self.env.sample_action(action_type='pick_block') for _ in range(self.n_actions)])
         print(actions)
         # polygox_idx, pos, axangle, rgb
         if self.true_actions is not None:
-            actions = np.concatenate([self.true_actions[mpc_step].reshape((1, -1)), actions])
+            actions = np.concatenate([self.true_actions[mpc_step].reshape((1, -1)), actions]) #Add the true action to list of candidate actions
 
         if self.use_action_image:
-            obs_rep = ptu.from_numpy(np.moveaxis(np.stack([self.env.try_action(action) for action in
-                                               actions]), 3, 1))
+            obs_rep = ptu.from_numpy(np.moveaxis(np.stack([self.env.try_action(action) for action in actions]), 3, 1))
         else:
-            obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0], 1, 1,
-                                                                             1)
+            obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0], 1, 1, 1) #obs: (D, D, 3) -> (num_actions, 3, D, D)
 
-        pred_obs, obs_latents, obs_latents_recon = self.model_step_batched(obs_rep,
-                                                                           ptu.from_numpy(actions))
+        pred_obs, obs_latents, obs_latents_recon = self.model_step_batched(obs_rep, ptu.from_numpy(actions))
 
         best_pred_obs, best_actions, best_goal_idx = self.cost.best_action(mpc_step, goal_latents,
                                                                            goal_latents_recon,
@@ -449,7 +435,7 @@ def main(variant):
 
     goal_idxs = [1]
 
-    m = iodine.create_model(variant['model'], 4)
+    m = iodine.create_model(variant, 4)
     state_dict = torch.load(model_file)
 
     new_state_dict = OrderedDict()
@@ -469,14 +455,15 @@ def main(variant):
     for i, goal_idx in enumerate(goal_idxs):
         #goal_file = module_path + '/examples/mpc/stage1/manual_constructions/bridge/%d_1.png' % i
         goal_file = module_path + '/examples/mpc/stage3/goals/img_%d.png' % goal_idx
-        true_actions = np.load(module_path + '/examples/mpc/stage3/goals/actions.npy')[goal_idx]
-        env = BlockPickAndPlaceEnv(num_objects=3, num_colors=None, img_dim=64, include_z=False)
-        env.set_env_info(true_actions)
+        env_info = np.load(module_path + '/examples/mpc/stage3/goals/env_data.npy')[goal_idx]
+        env = BlockPickAndPlaceEnv(num_objects=1, num_colors=None, img_dim=64, include_z=False)
+        env.set_env_info(env_info) #Places the correct blocks in the environment, blocks will also be set in the goal position
+        true_actions = env.move_blocks_side() #Moves blocks to the side for mpc, returns true optimal actions
 
-        mpc = MPC(m, env, n_actions=7, mpc_steps=1, true_actions=None,
-                  cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=3,
-                  logger_prefix_dir='/goal_%d' % goal_idx,
-                  mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=False)
+        mpc = MPC(m, env, n_actions=7, mpc_steps=1, true_actions=true_actions,
+                  cost_type=variant['cost_type'], filter_goals=False, n_goal_objs=1,
+                  logger_prefix_dir='/goal_{}'.format(goal_idx),
+                  mpc_style=variant['mpc_style'], cem_steps=1, use_action_image=False)
         goal_image = imageio.imread(goal_file)
         mse, actions = mpc.run(goal_image)
         stats['mse'] += mse
@@ -487,6 +474,7 @@ def main(variant):
     np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
 
+#CUDA_VISIBLE_DEVICES=7 python mpc_stage3.py -f /nfs/kun1/users/rishiv/Research/op3_exps/06-10-iodine-blocks-pickplace-multienv-10k/06-10-iodine-blocks-pickplace_multienv_10k_2019_06_10_23_24_47_0000--s-18660/_params.pkl
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-f', '--modelfile', type=str, default=None)
@@ -494,11 +482,17 @@ if __name__ == "__main__":
 
     variant = dict(
         algorithm='MPC',
-        modelfile=args.modelfile,
-        goalfile=args.goalfile,
+        model_file=args.modelfile,
         cost_type='latent_pixel',  # 'sum_goal_min_latent' 'latent_pixel
         mpc_style='cem', # random_shooting or cem
-        model=iodine.imsize64_large_iodine_architecture
+        model=iodine.imsize64_large_iodine_architecture, #imsize64_large_iodine_architecture
+        K=4,
+        schedule_kwargs=dict(
+            train_T=21,  # Number of steps in single training sequence, change with dataset
+            test_T=21,  # Number of steps in single testing sequence, change with dataset
+            seed_steps=4,  # Number of seed steps
+            schedule_type='curriculum'  # single_step_physics, curriculum
+        )
     )
 
     run_experiment(

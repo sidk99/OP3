@@ -192,7 +192,7 @@ class BlockPickAndPlaceEnv():
 
     def intersect(self, a_block, pos):
         #Threshold
-        THRESHHOLD = 0.2
+        THRESHHOLD = 0.2 #Originally 0.2 in dataset
         cur_pos = self.get_block_info(a_block)["pos"]
         return np.max(np.abs(cur_pos - pos)) < THRESHHOLD
 

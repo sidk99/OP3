@@ -1,6 +1,6 @@
 import torch
 import torch.utils.data
-from rlkit.torch.iodine.physics_network import PhysicsNetwork
+from rlkit.torch.iodine.physics_network import PhysicsNetwork, PhysicsNetworkMLP
 from rlkit.torch.iodine.refinement_network import RefinementNetwork
 from rlkit.torch.networks import Mlp
 from torch import nn
@@ -18,6 +18,7 @@ from rlkit.torch.modules import LayerNorm2D
 from rlkit.core import logger
 import os
 import pdb
+import copy
 
 imsize84_iodine_architecture = dict(
     deconv_args=dict(
@@ -193,7 +194,7 @@ imsize64_large_iodine_architecture_multistep_physics = dict(
     # )
 )
 
-imsize64_large_iodine_architecture_multistep_physics_K1 = dict(
+imsize64_large_iodine_architecture_multistep_physics_BIG = dict(
     vae_kwargs=dict(
         imsize=64,
         representation_size=128*4,
@@ -235,6 +236,53 @@ imsize64_large_iodine_architecture_multistep_physics_K1 = dict(
 
     ),
     physics_kwargs=dict(
+        action_enc_size=32,
+    )
+)
+
+imsize64_large_iodine_architecture_multistep_physics_MLP = dict(
+    vae_kwargs=dict(
+        imsize=64,
+        representation_size=128,
+        input_channels=3,
+        # decoder_distribution='gaussian_identity_variance',
+        beta=1,
+        # K=7, #7
+        sigma=0.1,
+    ),
+    deconv_args=dict(
+        hidden_sizes=[],
+        output_size=64 * 64 * 3,
+        input_width=80,
+        input_height=80,
+        input_channels=128 + 2,
+
+        kernel_sizes=[5, 5, 5, 5],
+        n_channels=[64, 64, 64, 64],
+        strides=[1, 1, 1, 1],
+        paddings=[0, 0, 0, 0]
+    ),
+    deconv_kwargs=dict(
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    ),
+    refine_args=dict(
+        input_width=64,
+        input_height=64,
+        input_channels=17,
+        paddings=[0, 0, 0, 0],
+        kernel_sizes=[5, 5, 5, 5],
+        n_channels=[64, 64, 64, 64],
+        strides=[2, 2, 2, 2],
+        hidden_sizes=[128, 128],
+        output_size=128,
+        lstm_size=256,
+        lstm_input_size=128*6,
+        added_fc_input_size=0
+
+    ),
+    physics_kwargs=dict(
+        mlp=True,
         action_enc_size=32,
     )
 )
@@ -347,7 +395,15 @@ def create_model(variant, action_dim):
                            hidden_activation=nn.ELU())
     refinement_net = RefinementNetwork(**model['refine_args'],
                                        hidden_activation=nn.ELU())
-    physics_net = PhysicsNetwork(K, rep_size, action_dim, **model['physics_kwargs'])
+
+    if 'mlp' in model['physics_kwargs']:
+        #Make another dictionary without the mlp key
+        tmp = copy.deepcopy(model['physics_kwargs'])
+        del tmp['mlp']
+
+        physics_net = PhysicsNetworkMLP(K, rep_size, action_dim, **tmp)
+    else:
+        physics_net = PhysicsNetwork(K, rep_size, action_dim, **model['physics_kwargs'])
 
     m = IodineVAE(
         **model['vae_kwargs'],

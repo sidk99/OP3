@@ -516,7 +516,7 @@ def main(variant):
         env.set_env_info(env_info) #Places the correct blocks in the environment, blocks will also be set in the goal position
         true_actions = env.move_blocks_side() #Moves blocks to the side for mpc, returns true optimal actions
 
-        mpc = MPC(m, env, n_actions=2000, mpc_steps=3, true_actions=None,
+        mpc = MPC(m, env, n_actions=20, mpc_steps=3, true_actions=None,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=2,
                   logger_prefix_dir='/goal_{}'.format(goal_idx),
                   mpc_style=variant['mpc_style'], cem_steps=3, use_action_image=False, time_horizon=2, actions_per_step=2)

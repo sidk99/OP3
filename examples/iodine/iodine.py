@@ -169,7 +169,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     variant = dict(
-        model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
+        model=iodine.imsize64_large_iodine_architecture_multistep_physics_MLP,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
         K=4,
         training_kwargs = dict(
             batch_size=64, #Used in IodineTrainer, change to appropriate constant based off dataset size
@@ -187,13 +187,14 @@ if __name__ == "__main__":
         save_period=1,
         dataparallel=True,
         dataset=args.dataset,
-        debug=args.debug
+        debug=args.debug,
+        machine_type='g3.16xlarge'
     )
 
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
-        exp_prefix='iodine-blocks-%s' % args.dataset,
+        exp_prefix='iodine-blocks-{}-mlp'.format(args.dataset),
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

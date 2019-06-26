@@ -167,7 +167,7 @@ class Cost:
         return best_pred_obs, actions[ptu.get_numpy(best_action_idxs)], best_goal_idx, sorted_costs, best_action_idxs
 
     def sum_goal_min_latent_function(self,  mpc_step, goal_latents, goal_latents_recon, goal_image,
-                            pred_latents, pred_latents_recon, pred_image, actions, diff_type="subimage", function_type="raw"):
+                            pred_latents, pred_latents_recon, pred_image, actions, diff_type="subimage", function_type="negative_exp"):
         # mpc_step: int
         # goal_latents: (n_goal_latents=K, rep_size)
         # goal_latents_recon: (n_goal_latents=K, 3, 64, 64)

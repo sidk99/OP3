@@ -385,11 +385,8 @@ class MPC:
         for i in range(n_batches):
             start_idx = i * bs
             end_idx = min(start_idx + bs, obs.shape[0])
-            actions_batch = actions[start_idx:end_idx].contiguous() if not self.use_action_image \
-                else None
-            pred_obs, obs_latents, obs_latents_recon = self.model.step(obs[
-                                                                       start_idx:end_idx].contiguous(),
-                                                                       actions_batch)
+            actions_batch = actions[start_idx:end_idx].contiguous() if not self.use_action_image else None
+            pred_obs, obs_latents, obs_latents_recon = self.model.step(obs[start_idx:end_idx].contiguous(), actions_batch)
             outputs[0].append(pred_obs)
             outputs[1].append(obs_latents)
             outputs[2].append(obs_latents_recon)
@@ -592,7 +589,7 @@ if __name__ == "__main__":
             algorithm='MPC',
             cost_type='latent_pixel',  # 'sum_goal_min_latent' 'latent_pixel
             mpc_style='cem',  # random_shooting or cem
-            model=iodine.imsize64_large_iodine_architecture,
+            model=iodine.imsize64_large_iodine_architecture_multistep_physics,
             structure=s,
             debug=args.debug
             # n_goal_obs=structures[s_idx][1]

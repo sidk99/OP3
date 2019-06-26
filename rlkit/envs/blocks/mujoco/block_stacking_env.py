@@ -4,6 +4,7 @@ import pickle
 import random
 import copy
 import pdb
+import time
 
 import colorsys
 
@@ -105,14 +106,14 @@ class BlockEnv():
         ply = random.choice(self.polygons)
 
         pos = utils.uniform(*self.drop_bounds['pos'])
-        # pos[-1] = obj_num
+        # pos[-1] = 2.5
 
         if 'horizontal' in ply:
             axis = [1, 0, 0]
         else:
             axis = [0, 0, 1]
         axangle = utils.random_axangle(axis=axis)
-        axangle[-1] = 0
+        # axangle[-1] = 0 #Uncomment to remove rotation
 
         scale = utils.uniform(*self.settle_bounds['scale'])
         rgba = self.sample_rgba_from_hsv(*self.settle_bounds['hsv'])
@@ -153,7 +154,7 @@ class BlockEnv():
         axangle = utils.random_axangle(axis=axis)
 
         #axangle[-1] = random_a[9]
-        axangle[-1] = 0
+        # axangle[-1] = 0 #Uncomment to remove actions
 
         if 'horizontal' in ply:
             axangle[-1] = 0
@@ -181,19 +182,56 @@ class BlockEnv():
     def get_actions_size(self):
         return (15)
 
-    def step(self, an_action):
-        #an_action should contain one_hot of polygon[3], pos[3], axangle[4], scale[1], rgba[3]
-        #Total size: 3+3+4+1+4 = 15
+    #Olld step
+    # def step(self, an_action):
+    #     #an_action should contain one_hot of polygon[3], pos[3], axangle[4], scale[1], rgba[3]
+    #     #Total size: 3+3+4+1+4 = 15
+    #
+    #     xml = XML(self.asset_path)
+    #     #Note: We need to recreate the entire scene
+    #     for ind, prev_action in enumerate(self.xml_actions_taken): # Adding previous actions
+    #         prev_action['pos'][-1] = ind*2
+    #         xml.add_mesh(**prev_action)
+    #
+    #     xml_action = self.model_action_to_xml_action(an_action)
+    #     # print("Action to take: ", xml_action)
+    #     new_name = xml.add_mesh(**xml_action) #Note name is name of action (name of block dropped)
+    #
+    #     self.names.append(new_name)
+    #
+    #     xml_str = xml.instantiate()
+    #     model = mjc.load_model_from_xml(xml_str)
+    #     sim = mjc.MjSim(model)
+    #
+    #     logger = Logger(xml, sim, steps=self.max_num_objects_dropped + 1, img_dim=self.img_dim)
+    #     # logger.log(0)
+    #
+    #     for act_ind, act in enumerate(self.names):
+    #         logger.hold_drop_execute(self.names[act_ind+1:], self.names[act_ind], self.settle_steps)
+    #         # logger.log(act_ind+1)
+    #     # logger.hold_drop_execute(self.names, new_name, 1)
+    #     # logger.log(len(self.xml_actions_taken)+1)
+    #
+    #     # print(self.xml_actions_taken)
+    #     self.logger = logger
+    #     self.logger.log(0)
+    #
+    #     ##Update state information
+    #     self.xml_actions_taken.append(xml_action)
+    #     # self.names.append(new_name)
+    #
+    #     return self.get_observation()
 
+    def step(self, an_action):
         xml = XML(self.asset_path)
-        #Note: We need to recreate the entire scene
-        for ind, prev_action in enumerate(self.xml_actions_taken): # Adding previous actions
-            prev_action['pos'][-1] = ind*2
+        # Note: We need to recreate the entire scene
+        for ind, prev_action in enumerate(self.xml_actions_taken):  # Adding previous actions
+            prev_action['pos'][-1] = ind * 2
             xml.add_mesh(**prev_action)
 
         xml_action = self.model_action_to_xml_action(an_action)
         # print("Action to take: ", xml_action)
-        new_name = xml.add_mesh(**xml_action) #Note name is name of action (name of block dropped)
+        new_name = xml.add_mesh(**xml_action)  # Note name is name of action (name of block dropped)
 
         self.names.append(new_name)
 
@@ -202,26 +240,21 @@ class BlockEnv():
         sim = mjc.MjSim(model)
 
         logger = Logger(xml, sim, steps=self.max_num_objects_dropped + 1, img_dim=self.img_dim)
-        # logger.log(0)
 
-        for act_ind, act in enumerate(self.names):
-            logger.hold_drop_execute(self.names[act_ind+1:], self.names[act_ind], self.settle_steps)
-            # logger.log(act_ind+1)
-        # logger.hold_drop_execute(self.names, new_name, 1)
-        # logger.log(len(self.xml_actions_taken)+1)
+        #Set previous block states
+        for a_block in self.names[:-1]:
+            self.set_block_info(sim, a_block, self.get_block_info(a_block))
 
-        # print(self.xml_actions_taken)
+        logger.hold_drop_execute([], self.names[-1], self.settle_steps)
         self.logger = logger
         self.logger.log(0)
 
         ##Update state information
         self.xml_actions_taken.append(xml_action)
-        # self.names.append(new_name)
+        self.sim = self.logger.sim
 
         return self.get_observation()
 
-    ##Tries an action and returns the direct observation of the action (e.g. the block in the air)
-    ##  but does not actually take a step in the environment
     def try_action(self, an_action):
         xml = XML(self.asset_path)
         # Note: We need to recreate the entire scene
@@ -238,8 +271,12 @@ class BlockEnv():
         sim = mjc.MjSim(model)
 
         logger = Logger(xml, sim, steps=self.max_num_objects_dropped + 1, img_dim=self.img_dim)
-        for act_ind, act in enumerate(new_names[:-1]):
-            logger.hold_drop_execute(new_names[act_ind+1:], new_names[act_ind], self.settle_steps)
+        for a_block in self.names:
+            self.set_block_info(sim, a_block, self.get_block_info(a_block))
+        logger.hold_drop_execute([], new_name, 1)
+
+        # for act_ind, act in enumerate(new_names[:-1]):
+        #     logger.hold_drop_execute(new_names[act_ind+1:], new_names[act_ind], self.settle_steps)
         logger.log(0)
 
         original_logger = self.logger
@@ -248,74 +285,134 @@ class BlockEnv():
         self.logger = original_logger
         return obs
 
-    def try_actions(self, actions):
-        xml = XML(self.asset_path)
-        # Note: We need to recreate the entire scene
-        for ind, prev_action in enumerate(self.xml_actions_taken):  # Adding previous actions
-            prev_action['pos'][-1] = ind * 2
-            xml.add_mesh(**prev_action)
+    def get_block_info(self, a_block):
+        info = {}
+        info["poly"] = a_block[:-2]
+        info["pos"] = np.copy(self.logger.sim.data.get_body_xpos(a_block)) #np array
+        info["quat"] = np.copy(self.logger.sim.data.get_body_xquat(a_block))
+        info["vel"] = np.copy(self.logger.sim.data.get_body_xvelp(a_block))
+        info["rot_vel"] = np.copy(self.logger.sim.data.get_body_xvelr(a_block))
+        return info
 
-        #xml_action = self.model_action_to_xml_action(an_action)
+    def set_block_info(self, sim, a_block, info):
+        start_ind = sim.model.get_joint_qpos_addr(a_block)[0]
+        sim_state = sim.get_state()
+        if "pos" in info:
+            sim_state.qpos[start_ind:start_ind+3] = np.array(info["pos"])
+        if "quat" in info:
+            sim_state.qpos[start_ind+3:start_ind+7] = info["quat"]
+        else:
+            sim_state.qpos[start_ind + 3:start_ind + 7] = np.array([1, 0, 0, 0])
 
-        xml_str = xml.instantiate()
-        model = mjc.load_model_from_xml(xml_str)
-        sim = mjc.MjSim(model)
-
-        logger = Logger(xml, sim, steps=self.max_num_objects_dropped + 1, img_dim=self.img_dim)
-        for act_ind, act in enumerate(self.names):
-            logger.hold_drop_execute(self.names[act_ind+1:], self.names[act_ind], self.settle_steps)
-
-        sim_data = sim.get_state()
-
-        #import pdb; pdb.set_trace()
-
-        xml = XML(self.asset_path)
-        # Note: We need to recreate the entire scene
-        for ind, prev_action in enumerate(self.xml_actions_taken):  # Adding previous actions
-            prev_action['pos'][-1] = ind * 2
-            xml.add_mesh(**prev_action)
+        start_ind = sim.model.get_joint_qvel_addr(a_block)[0]
+        if "vel" in info:
+            sim_state.qvel[start_ind:start_ind + 3] = info["vel"]
+        else:
+            sim_state.qvel[start_ind:start_ind + 3] = np.zeros(3)
+        if "rot_vel" in info:
+            sim_state.qvel[start_ind + 3:start_ind + 6] = info["rot_vel"]
+        else:
+            sim_state.qvel[start_ind + 3:start_ind + 6] = np.zeros(3)
+        sim.set_state(sim_state)
 
 
-        # Add all new blocks but outside of scene at different heights so they don't collide
-        old_pos = []
-        for i, action in enumerate(actions):
-            xml_action = self.model_action_to_xml_action(action)
-            old_pos.append(copy.deepcopy(xml_action['pos']))
-            xml_action['pos'][-1] = (6 + i)
+    ##Tries an action and returns the direct observation of the action (e.g. the block in the air)
+    ##  but does not actually take a step in the environment
+    #Old try_action
+    # def try_action(self, an_action):
+    #     xml = XML(self.asset_path)
+    #     # Note: We need to recreate the entire scene
+    #     for ind, prev_action in enumerate(self.xml_actions_taken):  # Adding previous actions
+    #         prev_action['pos'][-1] = ind * 2
+    #         xml.add_mesh(**prev_action)
+    #
+    #     xml_action = self.model_action_to_xml_action(an_action)
+    #     new_name = xml.add_mesh(**xml_action)  # Note name is name of action (name of block dropped)
+    #     new_names = self.names + [new_name]
+    #
+    #     xml_str = xml.instantiate()
+    #     model = mjc.load_model_from_xml(xml_str)
+    #     sim = mjc.MjSim(model)
+    #
+    #     logger = Logger(xml, sim, steps=self.max_num_objects_dropped + 1, img_dim=self.img_dim)
+    #     for act_ind, act in enumerate(new_names[:-1]):
+    #         logger.hold_drop_execute(new_names[act_ind+1:], new_names[act_ind], self.settle_steps)
+    #     logger.log(0)
+    #
+    #     original_logger = self.logger
+    #     self.logger = logger
+    #     obs = self.get_observation()
+    #     self.logger = original_logger
+    #     return obs
 
-            new_name = xml.add_mesh(**xml_action)
-
-        xml_str = xml.instantiate()
-        model = mjc.load_model_from_xml(xml_str)
-        sim = mjc.MjSim(model)
-        obs_lst = []
-        old_sim = self.logger.sim
-        self.logger.sim = sim
-
-        for i, action in enumerate(actions):
-            # set old data
-            if len(self.xml_actions_taken) > 0:
-                sim.data.qpos[:sim_data.qpos.shape[0]] = sim_data.qpos
-                sim.data.qvel[:sim_data.qvel.shape[0]] = sim_data.qvel
-                #sim.forward()
-                # set new data
-            # set new block data
-            block_idx = (len(self.xml_actions_taken) + i)  * 7
-
-            air_pos = copy.deepcopy(sim.data.qpos[block_idx:block_idx+3])
-            #import pdb; pdb.set_trace()
-            sim.data.qpos[block_idx:block_idx+3] = old_pos[i]
-
-            sim.step()
-            obs = self.logger.log_image(0)
-            obs_lst.append(obs)
-
-            # set it back
-            sim.data.qpos[block_idx:block_idx + 3] = air_pos
-        #self.logger = original_logger
-        self.logger.sim = old_sim
-
-        return obs_lst
+    # def try_actions(self, actions):
+    #     xml = XML(self.asset_path)
+    #     # Note: We need to recreate the entire scene
+    #     for ind, prev_action in enumerate(self.xml_actions_taken):  # Adding previous actions
+    #         prev_action['pos'][-1] = ind * 2
+    #         xml.add_mesh(**prev_action)
+    #
+    #     #xml_action = self.model_action_to_xml_action(an_action)
+    #
+    #     xml_str = xml.instantiate()
+    #     model = mjc.load_model_from_xml(xml_str)
+    #     sim = mjc.MjSim(model)
+    #
+    #     logger = Logger(xml, sim, steps=self.max_num_objects_dropped + 1, img_dim=self.img_dim)
+    #     for act_ind, act in enumerate(self.names):
+    #         logger.hold_drop_execute(self.names[act_ind+1:], self.names[act_ind], self.settle_steps)
+    #
+    #     sim_data = sim.get_state()
+    #
+    #     #import pdb; pdb.set_trace()
+    #
+    #     xml = XML(self.asset_path)
+    #     # Note: We need to recreate the entire scene
+    #     for ind, prev_action in enumerate(self.xml_actions_taken):  # Adding previous actions
+    #         prev_action['pos'][-1] = ind * 2
+    #         xml.add_mesh(**prev_action)
+    #
+    #
+    #     # Add all new blocks but outside of scene at different heights so they don't collide
+    #     old_pos = []
+    #     for i, action in enumerate(actions):
+    #         xml_action = self.model_action_to_xml_action(action)
+    #         old_pos.append(copy.deepcopy(xml_action['pos']))
+    #         xml_action['pos'][-1] = (6 + i)
+    #
+    #         new_name = xml.add_mesh(**xml_action)
+    #
+    #     xml_str = xml.instantiate()
+    #     model = mjc.load_model_from_xml(xml_str)
+    #     sim = mjc.MjSim(model)
+    #     obs_lst = []
+    #     old_sim = self.logger.sim
+    #     self.logger.sim = sim
+    #
+    #     for i, action in enumerate(actions):
+    #         # set old data
+    #         if len(self.xml_actions_taken) > 0:
+    #             sim.data.qpos[:sim_data.qpos.shape[0]] = sim_data.qpos
+    #             sim.data.qvel[:sim_data.qvel.shape[0]] = sim_data.qvel
+    #             #sim.forward()
+    #             # set new data
+    #         # set new block data
+    #         block_idx = (len(self.xml_actions_taken) + i)  * 7
+    #
+    #         air_pos = copy.deepcopy(sim.data.qpos[block_idx:block_idx+3])
+    #         #import pdb; pdb.set_trace()
+    #         sim.data.qpos[block_idx:block_idx+3] = old_pos[i]
+    #
+    #         sim.step()
+    #         obs = self.logger.log_image(0)
+    #         obs_lst.append(obs)
+    #
+    #         # set it back
+    #         sim.data.qpos[block_idx:block_idx + 3] = air_pos
+    #     #self.logger = original_logger
+    #     self.logger.sim = old_sim
+    #
+    #     return obs_lst
 
 
     #############Internal functions#########
@@ -475,12 +572,75 @@ def check_bugs_in_try_actionS():
 
     cur_fig.savefig("HELLO")
 
+def improve_step():
+    num_blocks = 5
+    env1 = BlockEnv(num_blocks)
+    env2 = BlockEnv(num_blocks)
+    cur_fig, axes = plt.subplots(nrows=4, ncols=num_blocks, figsize=(num_blocks * 6, 4 * 6))
+    for i in range(num_blocks):
+        action = env1.sample_action()
+        axes[0, i].imshow(env1.try_action_2(action) / 255, interpolation='nearest')
+        axes[1, i].imshow(env1.step_2(action) / 255, interpolation='nearest')
+        axes[2, i].imshow(env2.try_action(action) / 255, interpolation='nearest')
+        axes[3, i].imshow(env2.step(action) / 255, interpolation='nearest')
+    cur_fig.savefig("HELLO")
+
+def check_new_try_actionS():
+    num_actions = 5
+    env = BlockEnv(4)
+    nrows = 3
+    cur_fig, axes = plt.subplots(nrows=nrows, ncols=num_actions, figsize=(num_actions * 6, nrows * 6))
+    actions = [env.sample_action() for _ in range(num_actions)]
+    results = env.try_actions_2(actions)
+
+    for i in range(num_actions):
+        axes[0, i].imshow(env.try_action_2(actions[i]) / 255, interpolation='nearest')
+        axes[1, i].imshow(results[i] / 255, interpolation='nearest')
+        # axes[2, i].imshow(env.step(actions[i]) / 255, interpolation='nearest')
+
+    cur_fig.savefig("HELLO")
+
+def timing():
+    num_actions = 100
+    env = BlockEnv(4)
+    t0 = time.time()
+    actions = [env.sample_action() for _ in range(num_actions)]
+    t1 = time.time()
+    print("Sampling action time: {}".format(t1-t0))
+
+    t0 = time.time()
+    for i in range(num_actions):
+        results = env.try_action(actions[i])
+    t1 = time.time()
+    print("Old try action: {}".format(t1-t0))
+
+    t0 = time.time()
+    for i in range(num_actions):
+        results = env.try_action_2(actions[i])
+    t1 = time.time()
+    print("New try action: {}".format(t1 - t0))
+
+    # t0 = time.time()
+    # for i in range(num_actions):
+    #     results = env.step(actions[i])
+    # t1 = time.time()
+    # print("Old step: {}".format(t1 - t0))
+    #
+    # t0 = time.time()
+    # for i in range(num_actions):
+    #     results = env.step_2(actions[i])
+    # t1 = time.time()
+    # print("New step: {}".format(t1 - t0))
+
 
 
 if __name__ == '__main__':
     # sanity_check_accuracy()
-    # check_bugs_in_try_action()
-    check_bugs_in_try_actionS()
+    check_bugs_in_try_action()
+    # check_bugs_in_try_actionS()
+    # improve_step()
+    # check_new_try_actionS()
+    # timing()
 
     # cur_fig, axes = plt.subplots(nrows=1, ncols=6, figsize=(4 * 6, 1 * 6))
     #

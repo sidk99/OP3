@@ -19,25 +19,26 @@ def get_goal_info(env):
     return goal_image, env_info
 
 
-if __name__ == "__main__":
 
+#python generate_goals.py
+if __name__ == "__main__":
     output_dir = get_module_path()
 
-    env = BlockPickAndPlaceEnv(num_objects=3, num_colors=None, img_dim=64, include_z=False,
+    env = BlockPickAndPlaceEnv(num_objects=2, num_colors=None, img_dim=64, include_z=False,
                                random_initialize=False, view=False)
 
     #Creating dataset
-    n_goals = 5
+    n_goals = 20
     env_data = []
     for i in range(n_goals):
         goal_image, env_info = get_goal_info(env)
         misc.imsave(output_dir + '/examples/mpc/stage3/goals/img_{}.png'.format(i), goal_image)
         env_data.append(env_info)
 
-    np.save(output_dir + '/examples/mpc/stage3/goals/actions.npy', env_data)
+    np.save(output_dir + '/examples/mpc/stage3/goals/env_data.npy', env_data)
 
     # Loading dataset example
-    env_data = np.load(output_dir + '/examples/mpc/stage3/goals/actions.npy')
+    env_data = np.load(output_dir + '/examples/mpc/stage3/goals/env_data.npy')
     for i in range(n_goals):
         env.set_env_info(env_data[i]) #Recreate the env with the correct blocks
         env.drop_heights = 3
@@ -52,3 +53,5 @@ if __name__ == "__main__":
             env.step(optimal_actions[j])
         ob = env.get_observation()
         misc.imsave(output_dir + '/examples/mpc/stage3/goals/rec_img_{}.png'.format(i), ob)
+
+
