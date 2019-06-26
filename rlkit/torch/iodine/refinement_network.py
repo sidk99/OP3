@@ -7,6 +7,7 @@ from torch.nn import functional as F
 from rlkit.pythonplusplus import identity
 from rlkit.torch import pytorch_util as ptu
 import numpy as np
+import pdb
 
 # from linetimer import CodeTimer
 
@@ -104,45 +105,48 @@ class RefinementNetwork(nn.Module):
         xcoords = np.expand_dims(np.linspace(-1, 1, self.input_width), 0).repeat(self.input_height, 0)
         ycoords = np.repeat(np.linspace(-1, 1, self.input_height), self.input_width).reshape((self.input_height, self.input_width))
 
-        self.coords = from_numpy(np.expand_dims(np.stack([xcoords, ycoords], 0), 0))
+        self.coords = from_numpy(np.expand_dims(np.stack([xcoords, ycoords], 0), 0)) #(1, 2, D, D)
 
 
 
     def forward(self, input, hidden1, hidden2, extra_input=None):
-
+        #RV: Extra input is (bs*k, rep_size*5)
         # need to reshape from batch of flattened images into (channsls, w, h)
         # import pdb; pdb.set_trace()
         # h = input.view(input.shape[0],
         #                 self.input_channels-2,
         #                 self.input_height,
         #                 self.input_width)
-        h = input
+        hi = input #(K, 15, D, D)
 
-        coords = self.coords.repeat(input.shape[0], 1, 1, 1)
-        h = torch.cat([h, coords], 1)
+        coords = self.coords.repeat(input.shape[0], 1, 1, 1) #(K, 2, D, D)
+        hi = torch.cat([hi, coords], 1) #(K, 17, D, D)
 
-        h = self.apply_forward(h, self.conv_layers, self.conv_norm_layers,
-                               use_batch_norm=self.batch_norm_conv)
+        hi = self.apply_forward(hi, self.conv_layers, self.conv_norm_layers,
+                               use_batch_norm=self.batch_norm_conv) #(K, 64, 1, 1)
         # flatten channels for fc layers
-        h = h.view(h.size(0), -1)
+        hi = hi.view(hi.size(0), -1) #(K, 64)
 
         # if extra_input is not None:
         #     h = torch.cat((h, extra_input), dim=1)
 
-        output = self.apply_forward(h, self.fc_layers, self.fc_norm_layers,
-                               use_batch_norm=self.batch_norm_fc)
+        output = self.apply_forward(hi, self.fc_layers, self.fc_norm_layers,
+                               use_batch_norm=self.batch_norm_fc) #(K, rep_size)
+        # pdb.set_trace()
 
         if extra_input is not None:
-            output = torch.cat([output, extra_input], dim=1)
+            output = torch.cat([output, extra_input], dim=1) #(K, rep_size*7)
 
         if len(hidden1.shape) == 2:
-            hidden1, hidden2 = hidden1.unsqueeze(0), hidden2.unsqueeze(0)
+            hidden1, hidden2 = hidden1.unsqueeze(0), hidden2.unsqueeze(0) #(1, K, lstm_size), (1, K, lstm_size)
         self.lstm.flatten_parameters()
         output, hidden = self.lstm(output.unsqueeze(1), (hidden1, hidden2))
+        #output: (K, 1, rep_size), hidden is tuple of size 2, each of size (1, K, lstm_size)
+
         #output1 = self.output_activation(self.last_fc(output.squeeze()))
 
-        output1 = self.output_activation(self.last_fc(output.squeeze()))
-        output2 = self.output_activation(self.last_fc2(output.squeeze()))
+        output1 = self.output_activation(self.last_fc(output.squeeze(1))) #(K, rep_size)
+        output2 = self.output_activation(self.last_fc2(output.squeeze(1))) #(K, rep_size)
         return output1, output2, hidden[0], hidden[1]
 
     def initialize_hidden(self, bs):

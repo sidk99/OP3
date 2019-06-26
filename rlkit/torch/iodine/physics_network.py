@@ -97,21 +97,24 @@ class PhysicsNetwork(nn.Module):
 
         bs = lambda1_enc.shape[0]
 
-        pairs = []
-        for i in range(K):
-            for j in range(K):
-                if i == j:
-                    continue
-                pairs.append(torch.cat([lambda1_enc[:, i], lambda1_enc[:, j]], -1))  #Create array of all pairs
+        if K != 1:
+            pairs = []
+            for i in range(K):
+                for j in range(K):
+                    if i == j:
+                        continue
+                    pairs.append(torch.cat([lambda1_enc[:, i], lambda1_enc[:, j]], -1))  #Create array of all pairs
 
-        all_pairs = torch.stack(pairs, 1).view(bs*K,  K-1, -1) #Create torch of all pairs
+            all_pairs = torch.stack(pairs, 1).view(bs*K,  K-1, -1) #Create torch of all pairs
 
-        pairwise_interaction = self.pairwise_encoder_network(all_pairs) #(bs*k,k-1,h)
-        effect = self.interaction_effect_network(pairwise_interaction)  # (bs*k,k-1,h)
-        attention = self.interaction_attention_network(pairwise_interaction)  #(bs*k,k-1,h)
-        total_effect = (effect*attention).sum(1)  #(bs*k,h)
+            pairwise_interaction = self.pairwise_encoder_network(all_pairs) #(bs*k,k-1,h)
+            effect = self.interaction_effect_network(pairwise_interaction)  # (bs*k,k-1,h)
+            attention = self.interaction_attention_network(pairwise_interaction)  #(bs*k,k-1,1)
+            total_effect = (effect*attention).sum(1)  #(bs*k,h)
+        else:
+            total_effect = ptu.zeros((bs, self.effect_size))
 
-        lambda_and_effect = torch.cat([lambda1_enc_flat, total_effect], -1) #(bs*k,h)
+        lambda_and_effect = torch.cat([lambda1_enc_flat, total_effect], -1)  # (bs*k,h)
         new_lambdas = self.final_merge_network(lambda_and_effect) #(bs*k,h)
 
         # interaction = self.embedding_network(all_pairs)  #(bs*k,k-1,h), input size is (h)?

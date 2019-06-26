@@ -193,6 +193,52 @@ imsize64_large_iodine_architecture_multistep_physics = dict(
     # )
 )
 
+imsize64_large_iodine_architecture_multistep_physics_K1 = dict(
+    vae_kwargs=dict(
+        imsize=64,
+        representation_size=128*4,
+        input_channels=3,
+        # decoder_distribution='gaussian_identity_variance',
+        beta=1,
+        # K=7, #7
+        sigma=0.1,
+    ),
+    deconv_args=dict(
+        hidden_sizes=[],
+        output_size=64 * 64 * 3,
+        input_width=80,
+        input_height=80,
+        input_channels=128*4 + 2,
+
+        kernel_sizes=[5, 5, 5, 5],
+        n_channels=[64, 64, 64, 64],
+        strides=[1, 1, 1, 1],
+        paddings=[0, 0, 0, 0]
+    ),
+    deconv_kwargs=dict(
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    ),
+    refine_args=dict(
+        input_width=64,
+        input_height=64,
+        input_channels=17,
+        paddings=[0, 0, 0, 0],
+        kernel_sizes=[5, 5, 5, 5],
+        n_channels=[64, 64, 64, 64],
+        strides=[2, 2, 2, 2],
+        hidden_sizes=[128*4, 128*4],
+        output_size=128*4,
+        lstm_size=256*4,
+        lstm_input_size=128*6*4,
+        added_fc_input_size=0
+
+    ),
+    physics_kwargs=dict(
+        action_enc_size=32,
+    )
+)
+
 imsize64_small_iodine_architecture = dict(
     vae_kwargs=dict(
         imsize=64,
@@ -288,10 +334,11 @@ imsize64_medium_iodine_architecture = dict(
 
 
 def create_model(variant, action_dim):
-    # if 'K' in model.keys(): #New version
+    # pdb.set_trace()
+    # if 'K' in variant.keys(): #New version
     K = variant['K']
     # else: #Old version
-    #     K = model['vae_kwargs']['K']
+    #     K = variant['vae_kwargs']['K']
     print('K: {}'.format(K))
     model = variant['model']
     rep_size = model['vae_kwargs']['representation_size']
@@ -399,7 +446,8 @@ class IodineVAE(GaussianLatentVAE):
         self.decoder_imsize = decoder.input_width
         self.beta = beta
         self.physics_net = physics_net
-        self.lstm_size = 256
+        # self.lstm_size = 256*4
+        self.lstm_size = self.refinement_net.lstm_size
         # self.train_T = train_T
         self.test_T = test_T
         self.seed_steps = seed_steps
@@ -474,7 +522,6 @@ class IodineVAE(GaussianLatentVAE):
         return torch.pow(inputs - targets, 2) / (2 * sigma ** 2)
 
     def forward(self, input, actions=None, schedule=None, seedsteps=5):
-
         return self._forward_dynamic_actions(input, actions, schedule)
 
     def initialize_hidden(self, bs):
@@ -482,7 +529,6 @@ class IodineVAE(GaussianLatentVAE):
                 ptu.from_numpy(np.zeros((bs, self.lstm_size))))
 
     def plot_latents(self, ground_truth, masks, x_hats, mse, idx):
-
         K = self.K
         imsize = self.imsize
         T = masks.shape[1]
@@ -534,42 +580,50 @@ class IodineVAE(GaussianLatentVAE):
         return recon[best_idx].data, best_lambda.data, lambda_recon[best_idx, -1].data, masks[best_idx,
                                                                                               -1].data.squeeze()
 
+    #input: should be tensor of shape (B, 3, D, D) or (B, T1, 3, D, D),
+    #actions: None or (B, T2, A)
     def step(self, input, actions, plot_latents=False):
+        if len(input.shape) == 4:
+            input = input.unsqueeze(1) # RV: TODO: CHECK IF THIS WORKS
         # from linetimer import CodeTimer
+        # pdb.set_trace()
 
         K = self.K
         bs = input.shape[0]
         # imsize = self.imsize
         # pdb.set_trace()
-        input = input.unsqueeze(1).repeat(1, 9, 1, 1, 1) #RV: Why 9? Shouldn't it be just 1 or K?
+        # input = input.unsqueeze(1).repeat(1, 9, 1, 1, 1) #RV: Why 9?
 
-        schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps) #RV: Returns schedule of 1's and 0's
-        if actions is not None: #RV: Overwrites schedule to be refinement for seed steps and physics afterwards
+        # schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps) #RV: Returns schedule of 1's and 0's
+        if actions is not None:
             #actions = actions.unsqueeze(1).repeat(1, 9, 1)
             self.test_T = self.seed_steps + actions.shape[1]
             schedule = np.ones((self.test_T,))
             schedule[:self.seed_steps] = 0
+        else:
+            schedule = np.zeros((self.seed_steps,))
+            # schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps)  # RV: Returns schedule of 1's and 0's
 
+
+        #Note: self._forward_dynamic_actions require that the schedule physics steps have corresponding "true" image
+        if sum(schedule) > input.shape[1] and input.shape[1] == 1:
+            input = input.repeat(1, int(sum(schedule)+1), 1, 1, 1) #RV: TODO: This is very bad if T > 1
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(
-            input, actions,
-            schedule=schedule)
+            input=input, actions=actions, schedule=schedule)
 
         lambda_recon = (x_hats * masks)
         recon = torch.clamp(final_recon, 0, 1)
         if plot_latents:
-            # i = 0
-            # self.plot_latents_trunc(input[0].unsqueeze(0).repeat(1, len(masks), 1, 1, 1), masks,
-            #                         x_hats, 0)
-
             imsize = 64
-            m = masks[0].permute(1, 0, 2, 3, 4).repeat(1, 1, 3, 1, 1)  # (K, T, ch, imsize, imsize)
-            x = x_hats[0].permute(1, 0, 2, 3, 4)
+            m = masks[0].permute(1, 0, 2, 3, 4).repeat(1, 1, 3, 1, 1)  # (K, T3, ch, imsize, imsize), T3 = seed_steps+T2
+            x = x_hats[0].permute(1, 0, 2, 3, 4) # (
             rec = (m * x)
-            full_rec = rec.sum(0, keepdim=True)
+            full_rec = rec.sum(0, keepdim=True) #(1, 6, 3, imsize, imsize)
 
-            comparison = torch.cat([input[0, :self.test_T].unsqueeze(0), full_rec, m, rec],
-                                   0).view(-1, 3, imsize, imsize)
-            # import pdb; pdb.set_trace()
+            # pdb.set_trace()
+            input = input[:1].repeat(1, self.test_T, 1, 1, 1)
+
+            comparison = torch.cat([input[0, :self.test_T].unsqueeze(0), full_rec, m, rec], 0).view(-1, 3, imsize, imsize)
 
             if isinstance(plot_latents, str):
                 name = logger.get_snapshot_dir() + plot_latents
@@ -582,6 +636,27 @@ class IodineVAE(GaussianLatentVAE):
         # pred_obs, obs_latents, obs_latents_recon
 
         return recon.data, lambdas[0].view(bs, K, -1).data, lambda_recon[:, -1].data
+
+    #Batch method for step
+    def step_batched(self, inputs, actions, bs=4):
+        # Handle large obs in batches
+        n_batches = int(np.ceil(inputs.shape[0] / float(bs)))
+        outputs = [[], [], []]
+
+        for i in range(n_batches):
+            start_idx = i * bs
+            end_idx = min(start_idx + bs, inputs.shape[0])
+            if actions is not None:
+                actions_batch = actions[start_idx:end_idx]
+            else:
+                actions_batch = None
+
+            pred_obs, obs_latents, obs_latents_recon = self.step(inputs[start_idx:end_idx], actions_batch)
+            outputs[0].append(pred_obs)
+            outputs[1].append(obs_latents)
+            outputs[2].append(obs_latents_recon)
+
+        return torch.cat(outputs[0]), torch.cat(outputs[1]), torch.cat(outputs[2])
 
     #RV: Inputs: Information needed for IODINE refinement network (note much more information needed than RNEM)
     #RV: Outputs: Updates lambdas and hs
@@ -644,9 +719,6 @@ class IodineVAE(GaussianLatentVAE):
             lambdas1, lambdas2, inputK, bs) #RV: Returns sampled latents, decoded outputs, and computes the likelihood/loss
         losses.append(loss)
 
-        actions_done = False
-        applied_action = False
-
         for t in range(1, T+1):
             if lambdas1.shape[0] % self.K != 0:
                 print("UH OH: {}".format(t))
@@ -661,17 +733,12 @@ class IodineVAE(GaussianLatentVAE):
             # Physics
             else:
                 current_step += 1
-                # if current_step == input.shape[1]:
-                #     current_step = input.shape[1] - 1
-                #     actions_done = True
-                applied_action = True
                 if actions is not None:
                     actionsK = actions[:, current_step - 1].unsqueeze(1).repeat(1, K, 1).view(bs * K, -1)
                 else:
                     actionsK = None
 
                 if current_step >= input.shape[1] - 1:
-                    actions_done = True
                     current_step = input.shape[1] - 1
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
                 lambdas1, _ = self.physics_net(lambdas1, lambdas2, actionsK)
@@ -681,15 +748,14 @@ class IodineVAE(GaussianLatentVAE):
 
             # Decode and get loss
             x_hat, mask, m_hat_logit, latents, pixel_x_prob, pixel_likelihood, kle_loss, loss, log_likelihood = \
-                self.decode(
-                lambdas1, lambdas2, inputK, bs)
+                self.decode(lambdas1, lambdas2, inputK, bs)
 
             x_hats.append(x_hat.data)
             masks.append(mask.data)
             losses.append(loss * loss_w)
+            # pdb.set_trace()
 
         total_loss = sum(losses) / T
-
         final_recon = (mask.unsqueeze(2) * x_hat.view(untiled_k_shape)).sum(1)
         mse = torch.pow(final_recon - input[:, -1], 2).mean()
 
