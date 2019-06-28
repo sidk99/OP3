@@ -68,30 +68,3 @@ def write_cloth(iterators, mode, num_sims, num_frames, features_dataset, action_
         except:
             break
     print('{} examples in mode {}'.format(counter, mode))
-
-
-def convert_data(args, reader, writer):
-    fname = os.path.join(args.root, args.filename)
-    print("Reading data")
-    num_sims, hps, iterators, mode_map  = reader(args)
-    print(num_sims)
-    print(hps.hp)
-    print("Writing data")
-    num_frames = hps.get('num_frames')
-    image_res = hps.get('image_res')
-    action_dim = hps.get('action_dim')
-
-    datasets = {'training':num_sims['train'],'validation':num_sims['val']}
-    with h5py.File(fname, 'w') as f:
-        for folder in datasets:
-            num_sims = datasets[folder]
-            cur_folder = f.create_group(folder)
-            image_data_shape = (num_frames, num_sims, image_res, image_res, 3)
-            action_data_shape = (num_frames, num_sims, action_dim)
-            features_dataset = cur_folder.create_dataset('features', image_data_shape, dtype='uint8')
-            action_dataset = cur_folder.create_dataset('actions', action_data_shape, dtype='float32')
-            mode = mode_map[folder]
-
-            writer(iterators, mode, num_sims, num_frames, features_dataset, action_dataset)
-
-    print('Finished writing to {}'.format(fname))
