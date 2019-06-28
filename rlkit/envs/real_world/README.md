@@ -43,3 +43,6 @@ Saves hdf5 file in `cloth/cloth.h5`
 Saves gifs in `cloth/imgs`
 
 Command `CUDA_VISIBLE_DEVICES=0 python real_world_env.py --root cloth`
+
+    {'train': 13866, 'val': 778, 'test': 791}
+    {'image_res': 64, 'num_frames': 20, 'action_dim': 4}
