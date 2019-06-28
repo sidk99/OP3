@@ -61,7 +61,7 @@ def write_solid(iterators, mode, num_sims, num_frames, features_dataset, action_
         act_tensor = iterators[mode][partition]['act'] # this is a TF op
         while True:
             try:
-                act_np = np.squeeze(sess.run(act_tensor), axis=0)  # (num_frames, 4)
+                act_np = np.squeeze(sess.run(act_tensor), axis=0)[:-1]  # (num_frames-1, 4)
                 obs_np = np.squeeze(sess.run(img_tensor), axis=0)  # (num_frames, 2, 48, 64, 3)
                 obs_np = process_bair_hard_obj_obs(obs_np)
                 # print('\t{}: Actions: Shape: {} Norm: {}'.format(counter, act_np.shape, np.linalg.norm(act_np)))
@@ -69,6 +69,7 @@ def write_solid(iterators, mode, num_sims, num_frames, features_dataset, action_
                 features_dataset[:, counter, :, :, :] = obs_np  # (num_frames, 64, 64, 3)
                 action_dataset[:, counter, :] = act_np  # (num_frames, 4)
                 counter += 1
+            # assert False
             except:
                 break
         print('{} examples in mode {} for partition {}'.format(counter, mode, partition))
@@ -111,11 +112,8 @@ def process_bair_hard_obj_obs(obs_np):
     """
     # pad
     obs_np = pad(obs_np)  # (num_frames, 2, 64, 64, 3)
-    print('\t\tPad: Obs: Shape: {}'.format(obs_np.shape))
-
     # take only one view
-    obs_np = obs_np [:, 0] # (num_frames, 64, 64, 3)
-    print('\t\tOne View: Obs: Shape: {}'.format(obs_np.shape))
+    obs_np = obs_np [:, 1] # (num_frames, 64, 64, 3)
     return obs_np
 
 
