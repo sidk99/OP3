@@ -12,6 +12,7 @@ import dataset_utils as du
 from poke import read_poke, write_poke
 from kevin import read_kevin, write_kevin
 from solid import read_solid, write_solid
+from cloth import read_cloth, write_cloth
 
 def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -83,6 +84,12 @@ if __name__ == '__main__':
         args.filename = 'solid.h5'
         reader = read_solid
         writer = write_solid
+
+    elif args.root == 'cloth':
+        args.root = 'cloth'
+        args.filename = 'cloth.h5'
+        reader = read_cloth
+        writer = write_cloth
     else:
         assert False
 
