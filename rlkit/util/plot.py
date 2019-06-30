@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 
 def plot_multi_image(imgs, save_dir, caption=None):
-    # imgs is (h, w, imsize, imsize, 3)
+    # imgs is (h, w, imsize, imsize, 3), numpy arrays and not pytorch tensors!
     if imgs.shape[-1] != 3:
         imgs = np.moveaxis(imgs, 2, -1)
     if imgs.dtype is not np.uint8:

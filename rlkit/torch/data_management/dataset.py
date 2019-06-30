@@ -23,11 +23,21 @@ class Dataset:
     def dataloader(self):
         return self._dataloader
 
+
 class BlocksDataset(Dataset):
     def __init__(self, torch_dataset, batchsize=8):
         super().__init__(torch_dataset, batchsize)
         if len(self.dataset.tensors) == 2:
-            self.action_dim = 4 #self.dataset.tensors[1].shape[-1]
+            self.action_dim = self.dataset.tensors[1].shape[-1]
+            #self.action_dim = 4 #self.dataset.tensors[1].shape[-1]
         else:
             self.action_dim = 0
 
+    def __getitem__(self, idx):
+        if self.action_dim == 0:
+            frames = self._dataloader.dataset[idx][0] #(T, 3, D, D)
+            return frames, None
+        else:
+            frames = self._dataloader.dataset[idx][0]  #(T, 3, D, D)
+            actions = self._dataloader.dataset[idx][1] #(T-1, A) or (T, A)
+            return frames, actions

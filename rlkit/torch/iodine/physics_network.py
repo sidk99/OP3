@@ -81,7 +81,7 @@ class PhysicsNetwork(nn.Module):
         lambda1_enc_flat = self.lambda_encoder(lambda1) #Encode initial lambdas
 
         if actions is not None:
-            if self.action_size == 4:
+            if self.action_size == 4 and actions.shape[-1] == 6:
                 action_enc = self.action_encoder(actions[:, torch.LongTensor([0, 1, 3, 4])]) #RV: Encode actions, why torch.longTensor?
             else:
                 action_enc = self.action_encoder(actions) #Encode actions

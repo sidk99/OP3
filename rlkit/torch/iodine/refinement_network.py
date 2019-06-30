@@ -32,6 +32,7 @@ class RefinementNetwork(nn.Module):
             hidden_init=nn.init.xavier_uniform_,
             hidden_activation=nn.ReLU(),
             output_activation=identity,
+            action_input_size=0
     ):
         if hidden_sizes is None:
             hidden_sizes = []
@@ -109,7 +110,7 @@ class RefinementNetwork(nn.Module):
 
 
 
-    def forward(self, input, hidden1, hidden2, extra_input=None):
+    def forward(self, input, hidden1, hidden2, extra_input=None, add_fc_input=None):
         #RV: Extra input is (bs*k, rep_size*5)
         # need to reshape from batch of flattened images into (channsls, w, h)
         # import pdb; pdb.set_trace()
@@ -130,8 +131,9 @@ class RefinementNetwork(nn.Module):
         # if extra_input is not None:
         #     h = torch.cat((h, extra_input), dim=1)
 
-        output = self.apply_forward(hi, self.fc_layers, self.fc_norm_layers,
-                               use_batch_norm=self.batch_norm_fc) #(K, rep_size)
+        if self.added_fc_input_size != 0:
+            hi = torch.cat([hi, add_fc_input], dim=1) #(K, 64+added_fc_input_size)
+        output = self.apply_forward(hi, self.fc_layers, self.fc_norm_layers, use_batch_norm=self.batch_norm_fc) #(K, rep_size)
         # pdb.set_trace()
 
         if extra_input is not None:

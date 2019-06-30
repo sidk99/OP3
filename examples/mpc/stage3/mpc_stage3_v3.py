@@ -14,14 +14,16 @@ from rlkit.util.plot import plot_multi_image
 import json
 import os
 import rlkit.torch.iodine.iodine as iodine
+
+from examples.mpc.savp_wrapper import SAVP_MODEL
+
 from collections import OrderedDict
 from rlkit.util.misc import get_module_path
 import pdb
 import random
 
 class Cost:
-    def __init__(self, type, logger_prefix_dir, latent_or_subimage='subimage', compare_func='mse', post_process='raw', aggregate='sum'):
-        self.type = type
+    def __init__(self, logger_prefix_dir, latent_or_subimage='subimage', compare_func='mse', post_process='raw', aggregate='sum'):
         self.remove_goal_latents = False
         self.logger_prefix_dir = logger_prefix_dir
         self.latent_or_subimage = latent_or_subimage
@@ -60,7 +62,7 @@ class Cost:
         elif self.latent_or_subimage == 'latent':
             dists = self.compare_latents(goal_latent, pred_latent)
         else:
-            raise KeyError
+            raise ValueError("Invalid latent_or_subimage: {}".format(self.latent_or_subimage))
 
         costs = self.post_process_func(dists)
         return costs
@@ -235,7 +237,7 @@ class MPC:
         self.mpc_steps = mpc_steps
         self.cost_type = cost_type
         self.filter_goals = filter_goals
-        self.cost = Cost(self.cost_type, logger_prefix_dir)
+        self.cost = Cost(logger_prefix_dir)
         self.true_actions = true_actions
         self.n_goal_objs = n_goal_objs
         self.mpc_style = mpc_style
@@ -283,12 +285,12 @@ class MPC:
             goal_image_tensor,
             hidden_state=None,
             plot_latents=False)  # (K, rep_size)
+        # pdb.set_trace()
 
         # Keep top 4 goal latents with greatest mask area excluding 1st (background)
         if self.filter_goals:
             goal_latents, goal_latents_recon = self.filter_goal_latents(goal_latents, goal_latents_mask, goal_latents_recon)
-        save_image(goal_latents_recon,
-                   logger.get_snapshot_dir() + '{}/goal_latents_recon.png'.format(self.logger_prefix_dir))
+        save_image(goal_latents_recon, logger.get_snapshot_dir() + '{}/goal_latents_recon.png'.format(self.logger_prefix_dir))
 
         #true_actions = self.env.move_blocks_side()
         #self.true_actions = true_actions
@@ -313,6 +315,7 @@ class MPC:
         full_obs_list = []
 
         chosen_actions = []
+        # print("self.mpc_steps: {}".format(self.mpc_steps))
         for mpc_step in range(self.mpc_steps):
             pred_obs, actions, goal_idx = self.step_mpc(obs, goal_latents, goal_image_tensor, mpc_step, goal_latents_recon)
             # pdb.set_trace()
@@ -329,8 +332,6 @@ class MPC:
             # obs = self.env.step(actions[0])/255 #Step the environment
             obs_lst.append(np.moveaxis(obs, 2, 0))
             pred_obs_lst.append(pred_obs)
-            if goal_latents.shape[0] == 1:
-                break
             # remove matching goal latent from goal latents
             if self.cost.remove_goal_latents:
                 goal_latents = self.remove_idx(goal_latents, goal_idx)
@@ -445,7 +446,7 @@ class MPC:
         else:
             obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0], 1, 1, 1) #obs: (D, D, 3) -> (num_actions, 3, D, D)
 
-        pred_obs, obs_latents, obs_latents_recon = self.model.step_batched(obs_rep, ptu.from_numpy(actions), bs=12) #self.model_step_batched(obs_rep, ptu.from_numpy(actions))
+        pred_obs, obs_latents, obs_latents_recon = self.model.step_batched(obs_rep, ptu.from_numpy(actions), bs=20) #self.model_step_batched(obs_rep, ptu.from_numpy(actions))
         # goal_latents (5,128)
         # goal_latents_recon (5, 3, 64, 64)
         # goal_image (1, 3, 64, 64)
@@ -479,6 +480,27 @@ class MPC:
         return ptu.get_numpy(pred_obs[best_action_idxs[0]]), sorted_actions, goal_latent_idxs[best_action_idxs[0]]
 
 
+def load_model(variant):
+    if variant['model'] == 'savp':
+        time_horizon = variant['mpc_args']['time_horizon']
+        m = SAVP_MODEL('/nfs/kun1/users/rishiv/Research/baseline/logs/pickplace_multienv_10k/ours_savp/', 'model-500000', 0,
+                       batch_size=20, time_horizon=time_horizon)
+    else:
+        model_file = variant['model_file']
+        m = iodine.create_model(variant, action_dim=4)
+        state_dict = torch.load(model_file)
+
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            name = k
+            if 'module.' in k:
+                name = k[7:]  # remove 'module.' of dataparallel
+            new_state_dict[name] = v
+        m.load_state_dict(new_state_dict)
+        m.cuda()
+        m.set_eval_mode(True)
+    return m
+
 
 def main(variant):
     seed = int(variant['seed'])
@@ -486,25 +508,11 @@ def main(variant):
     np.random.seed(seed)
     random.seed(seed)
 
-    model_file = variant['model_file']
     module_path = get_module_path()
 
-    goal_idxs = list(range(0,20))
+    m = load_model(variant)
 
-    m = iodine.create_model(variant, 4)
-    state_dict = torch.load(model_file)
-
-    new_state_dict = OrderedDict()
-    for k, v in state_dict.items():
-        name = k
-        if 'module.' in k:
-            name = k[7:]  # remove 'module.' of dataparallel
-        new_state_dict[name] = v
-    m.load_state_dict(new_state_dict)
-    m.cuda()
-
-    m.set_eval_mode(True)
-
+    goal_idxs = list(range(0, 20))
     actions_lst = []
     stats = {'mse': 0}
 
@@ -514,12 +522,19 @@ def main(variant):
         env_info = np.load(module_path + '/examples/mpc/stage3/goals/env_data.npy')[goal_idx]
         env = BlockPickAndPlaceEnv(num_objects=1, num_colors=None, img_dim=64, include_z=False) #Note num_objects & num_colors do not matter
         env.set_env_info(env_info) #Places the correct blocks in the environment, blocks will also be set in the goal position
-        true_actions = env.move_blocks_side() #Moves blocks to the side for mpc, returns true optimal actions
+        true_actions = env.move_blocks_side()  # Moves blocks to the side for mpc, returns true optimal actions
+        if variant['mpc_args']['true_actions']:
+            variant['mpc_args']['true_actions'] = true_actions
+        else:
+            variant['mpc_args']['true_actions'] = None
 
-        mpc = MPC(m, env, n_actions=20, mpc_steps=3, true_actions=None,
-                  cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=2,
-                  logger_prefix_dir='/goal_{}'.format(goal_idx),
-                  mpc_style=variant['mpc_style'], cem_steps=3, use_action_image=False, time_horizon=2, actions_per_step=2)
+
+        # mpc = MPC(m, env, n_actions=20, mpc_steps=3, true_actions=None,
+        #           cost_type=variant['cost_type'], filter_goals=False, n_goal_objs=2,
+        #           logger_prefix_dir='/goal_{}'.format(goal_idx),
+        #           mpc_style=variant['mpc_style'], cem_steps=3, use_action_image=False, time_horizon=2, actions_per_step=2)
+        mpc = MPC(m, env, logger_prefix_dir='/goal_{}'.format(goal_idx), **variant['mpc_args'])
+
         goal_image = imageio.imread(goal_file)
         mse, actions = mpc.run(goal_image)
         stats['mse'] += mse
@@ -541,21 +556,33 @@ if __name__ == "__main__":
     variant = dict(
         algorithm='MPC',
         model_file=args.modelfile,
-        cost_type='sum_goal_min_latent_function',  # 'sum_goal_min_latent' 'latent_pixel 'sum_goal_min_latent_function'
-        mpc_style='cem', # random_shooting or cem
-        model=iodine.imsize64_large_iodine_architecture, #imsize64_large_iodine_architecture
+        # cost_type='sum_goal_min_latent_function',  # 'sum_goal_min_latent' 'latent_pixel 'sum_goal_min_latent_function'
+        # mpc_style='cem', # random_shooting or cem
+        model= 'savp', #iodine.imsize64_large_iodine_architecture, #imsize64_large_iodine_architecture 'savp',
         K=4,
         schedule_kwargs=dict(
             train_T=21,  # Number of steps in single training sequence, change with dataset
             test_T=21,  # Number of steps in single testing sequence, change with dataset
             seed_steps=4,  # Number of seed steps
             schedule_type='curriculum'  # single_step_physics, curriculum
+        ),
+        mpc_args=dict(
+            n_actions=2000,
+            mpc_steps=2,
+            time_horizon=2,
+            actions_per_step=2,
+            cem_steps=3,
+            use_action_image=False,
+            mpc_style='cem',
+            n_goal_objs=2,
+            filter_goals=False,
+            true_actions=False
         )
     )
 
     run_experiment(
         main,
-        exp_prefix='mpc_stage3',
+        exp_prefix='mpc_stage3_savp',
         mode='here_no_doodad',
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

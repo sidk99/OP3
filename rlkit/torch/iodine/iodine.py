@@ -380,7 +380,7 @@ imsize64_medium_iodine_architecture = dict(
 #     schedule_type='random_alternating'
 # )
 
-
+#model, schedule_kwargs, K
 def create_model(variant, action_dim):
     # pdb.set_trace()
     # if 'K' in variant.keys(): #New version
@@ -391,10 +391,8 @@ def create_model(variant, action_dim):
     model = variant['model']
     rep_size = model['vae_kwargs']['representation_size']
 
-    decoder = BroadcastCNN(**model['deconv_args'], **model['deconv_kwargs'],
-                           hidden_activation=nn.ELU())
-    refinement_net = RefinementNetwork(**model['refine_args'],
-                                       hidden_activation=nn.ELU())
+    decoder = BroadcastCNN(**model['deconv_args'], **model['deconv_kwargs'], hidden_activation=nn.ELU())
+    refinement_net = RefinementNetwork(**model['refine_args'], hidden_activation=nn.ELU())
 
     if 'mlp' in model['physics_kwargs']:
         #Make another dictionary without the mlp key
@@ -405,15 +403,25 @@ def create_model(variant, action_dim):
     else:
         physics_net = PhysicsNetwork(K, rep_size, action_dim, **model['physics_kwargs'])
 
-    m = IodineVAE(
-        **model['vae_kwargs'],
-        **variant['schedule_kwargs'],
-        K=K,
-        decoder=decoder,
-        refinement_net=refinement_net,
-        physics_net=physics_net,
-        action_dim=action_dim,
-    )
+    if 'schedule_kwargs' not in variant:
+        m = IodineVAE(
+            **model['vae_kwargs'],
+            K=K,
+            decoder=decoder,
+            refinement_net=refinement_net,
+            physics_net=physics_net,
+            action_dim=action_dim,
+        )
+    else:
+        m = IodineVAE(
+            **model['vae_kwargs'],
+            **variant['schedule_kwargs'],
+            K=K,
+            decoder=decoder,
+            refinement_net=refinement_net,
+            physics_net=physics_net,
+            action_dim=action_dim,
+        )
     # pdb.set_trace()
     return m
 
@@ -441,6 +449,14 @@ def create_schedule(train, T, schedule_type, seed_steps, max_T=None):
             max_multi_step = int(schedule_type[-1])
             schedule = np.zeros(seed_steps + max_multi_step+1)
             schedule[seed_steps:seed_steps + max_multi_step] = 1
+    elif schedule_type == 'static_iodine':
+        schedule = np.zeros((T,))
+    elif schedule_type == 'rprp':
+        schedule = np.zeros(seed_steps + T*2)
+        schedule[seed_steps::2] = 1
+    elif schedule_type == 'next_step':
+        schedule = np.ones(T)*2
+        return schedule
     else:
         raise Exception
     if max_T is not None: #Enforces that we have at most max_T-1 physics steps
@@ -458,6 +474,12 @@ def get_loss_weight(t, schedule, schedule_type):
     elif schedule_type == 'multi_step_physics':
         return t
     elif 'curriculum' in schedule_type:
+        return t
+    elif schedule_type == 'static_iodine':
+        return t
+    elif schedule_type == 'rprp':
+        return t
+    elif schedule_type == 'next_step':
         return t
     else:
         raise Exception
@@ -597,6 +619,7 @@ class IodineVAE(GaussianLatentVAE):
         save_image(comparison.data.cpu(), logger.get_snapshot_dir() + '/goal_latents_%0.5f.png' % mse, nrow=T)
 
 
+    #(3, D, D), (K, rep_size), (K, 3, D, D), (K, D, D)
     def refine(self, input, hidden_state, plot_latents=False):
         K = self.K
         bs = 8
@@ -633,8 +656,7 @@ class IodineVAE(GaussianLatentVAE):
 
         best_lambda = lambdas[best_idx]
 
-        return recon[best_idx].data, best_lambda.data, lambda_recon[best_idx, -1].data, masks[best_idx,
-                                                                                              -1].data.squeeze()
+        return recon[best_idx].data, best_lambda.data, lambda_recon[best_idx, -1].data, masks[best_idx, -1].data.squeeze()
 
     #input: should be tensor of shape (B, 3, D, D) or (B, T1, 3, D, D),
     #actions: None or (B, T2, A)
@@ -708,6 +730,7 @@ class IodineVAE(GaussianLatentVAE):
                 actions_batch = None
 
             pred_obs, obs_latents, obs_latents_recon = self.step(inputs[start_idx:end_idx], actions_batch)
+            # pdb.set_trace()
             outputs[0].append(pred_obs)
             outputs[1].append(obs_latents)
             outputs[2].append(obs_latents_recon)
@@ -717,7 +740,7 @@ class IodineVAE(GaussianLatentVAE):
     #RV: Inputs: Information needed for IODINE refinement network (note much more information needed than RNEM)
     #RV: Outputs: Updates lambdas and hs
     def refine_lambdas(self, pixel_x_prob, pixel_likelihood, mask, m_hat_logit, loss, x_hat,
-                       lambdas1, lambdas2, inputK, latents, h1, h2, tiled_k_shape, bs):
+                       lambdas1, lambdas2, inputK, latents, h1, h2, tiled_k_shape, bs, add_fc_input=None):
         K = self.K
         lns = self.layer_norms
         posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-8)  # avoid divide by zero
@@ -741,8 +764,8 @@ class IodineVAE(GaussianLatentVAE):
                                  ], -1)
 
         lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2,
-                                                         extra_input=torch.cat(
-                                                             [extra_input, lambdas1, lambdas2, latents], -1))
+                                                         extra_input=torch.cat([extra_input, lambdas1, lambdas2, latents], -1),
+                                                         add_fc_input=add_fc_input)
         return lambdas1, lambdas2, h1, h2
 
 
@@ -777,17 +800,15 @@ class IodineVAE(GaussianLatentVAE):
 
         for t in range(1, T+1):
             if lambdas1.shape[0] % self.K != 0:
-                print("UH OH: {}".format(t))
-            # Refine
-            if schedule[t - 1] == 0:
+                raise ValueError("Incorrect lambdas1 shape: {}".format(lambdas1.shape))
+            if schedule[t - 1] == 0: # Refine
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape) #RV: (bs*K, ch, imsize, imsize)
                 lambdas1, lambdas2, h1, h2 = self.refine_lambdas(pixel_x_prob, pixel_likelihood, mask, m_hat_logit,
                                                                  loss, x_hat, lambdas1, lambdas2, inputK, latents, h1, h2,
                                                                  tiled_k_shape, bs) #RV: Update lambdas and h's using info
                 # if not applied_action: # Do physics on static scene if haven't applied action yet
                 #     lambdas1, _ = self.physics_net(lambdas1, lambdas2, None)
-            # Physics
-            else:
+            elif schedule[t-1] == 1: # Physics
                 current_step += 1
                 if actions is not None:
                     actionsK = actions[:, current_step - 1].unsqueeze(1).repeat(1, K, 1).view(bs * K, -1)
@@ -798,7 +819,24 @@ class IodineVAE(GaussianLatentVAE):
                     current_step = input.shape[1] - 1
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
                 lambdas1, _ = self.physics_net(lambdas1, lambdas2, actionsK)
-                loss_w = t #RV modification
+                # loss_w = t #RV modification
+            elif schedule[t-1] == 2: #Next step refinement
+                current_step += 1
+                if actions is not None:
+                    actionsK = actions[:, current_step - 1].unsqueeze(1).repeat(1, K, 1).view(bs * K, -1)
+                    if actionsK.shape[-1] == 6 and self.refinement_net.added_fc_input_size == 4:
+                        actionsK = actionsK[:, torch.LongTensor([0, 1, 3, 4])]
+                else:
+                    actionsK = None
+                inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
+                lambdas1, lambdas2, h1, h2 = self.refine_lambdas(pixel_x_prob, pixel_likelihood, mask, m_hat_logit,
+                                                                 loss, x_hat, lambdas1, lambdas2, inputK, latents, h1,
+                                                                 h2, tiled_k_shape, bs, add_fc_input=actionsK)  # RV: Update lambdas and h's using info
+            else:
+                raise ValueError("Invalid schedule value: {}".format(schedule[t-1]))
+
+
+
 
             loss_w = get_loss_weight(t, schedule, self.schedule_type)
 

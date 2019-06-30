@@ -9,8 +9,7 @@ import argparse
 import pathos.pools as pp
 import h5py
 
-Task = collections.namedtuple(
-    'Task', 'name, env_ctor, max_length, state_components')
+Task = collections.namedtuple('Task', 'name, env_ctor, max_length, state_components')
 
 
 def cartpole_swingup(config, params):

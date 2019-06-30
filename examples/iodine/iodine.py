@@ -21,7 +21,8 @@ from argparse import ArgumentParser
 from rlkit.util.misc import get_module_path
 import pdb
 
-def load_dataset(data_path, train=True, size=None, batchsize=8):
+
+def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
     hdf5_file = h5py.File(data_path, 'r')  # RV: Data file
     if 'clevr' in data_path:
         return np.array(hdf5_file['features']), None
@@ -52,7 +53,29 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
         T = feats.shape[1]
         print(feats.shape, np.max(feats), np.min(feats))
         return dataset, T
-    elif 'pickplace' in data_path:
+    # elif 'pickplace' in data_path:
+    #     if train:
+    #         feats = np.array(hdf5_file['training']['features'])
+    #         actions = np.array(hdf5_file['training']['actions'])
+    #     else:
+    #         feats = np.array(hdf5_file['validation']['features'])
+    #         actions = np.array(hdf5_file['validation']['actions'])
+    #
+    #     feats = np.moveaxis(feats, -1, 2) # (T, bs, ch, imsize, imsize)
+    #     feats = np.moveaxis(feats, 0, 1) # (bs, T, ch, imsize, imsize)
+    #     actions = np.moveaxis(actions, 0, 1) # (bs, T, action_dim)
+    #     torch_dataset = TensorDataset(torch.Tensor(feats[:size]), torch.Tensor(actions[:size]))
+    #     dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
+    #     T = feats.shape[1]
+    #     print(feats.shape, np.max(feats), np.min(feats))
+    #     return dataset, T
+    elif 'cloth' in data_path or 'poke' in data_path or 'solid' in data_path \
+            or 'kevin' in data_path or 'pickplace' in data_path:
+        #cloth: bs=13866, T=20, action_dim=4
+        #poke: bs=5425, T=20, action_dim=5
+        #solid: bs=7143, T=30, action_dim=4
+        #kevin: bs=1500, T=15, action_dim=2
+        #pickplace_multienv_10k: bs=10000, T=21, action_dim=6
         if train:
             feats = np.array(hdf5_file['training']['features'])
             actions = np.array(hdf5_file['training']['actions'])
@@ -60,16 +83,27 @@ def load_dataset(data_path, train=True, size=None, batchsize=8):
             feats = np.array(hdf5_file['validation']['features'])
             actions = np.array(hdf5_file['validation']['actions'])
 
-        feats = np.moveaxis(feats, -1, 2) # (T, bs, ch, imsize, imsize)
-        feats = np.moveaxis(feats, 0, 1) # (bs, T, ch, imsize, imsize)
-        #feats = (feats * 255).astype(np.uint8)
-        actions = np.moveaxis(actions, 0, 1) # (bs, T, action_dim)
-        torch_dataset = TensorDataset(torch.Tensor(feats[:size]),
-                                      torch.Tensor(actions[:size]))
+        feats = np.moveaxis(feats, -1, 2)  # (T, bs, ch, imsize, imsize)
+        feats = np.moveaxis(feats, 0, 1)  # (bs, T, ch, imsize, imsize)
+        actions = np.moveaxis(actions, 0, 1)  # (bs, T-1, action_dim) EXCEPT for pickplace envs which are (bs,T,A) instead
+        if static:
+            bs, T = feats.shape[0], feats.shape[1]
+            rand_ts = np.random.randint(0, T, size=size) #As the first timesteps could be correlated
+            # pdb.set_trace()
+            tmp = torch.Tensor(feats[range(size), rand_ts]).unsqueeze(1) #(size, 1, ch, imsize, imsize)
+            torch_dataset = TensorDataset(tmp)
+        else:
+            torch_dataset = TensorDataset(torch.Tensor(feats[:size]), torch.Tensor(actions[:size]))
         dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
+
+        if 'pickplace' in data_path:
+            dataset.action_dim = 4 #Changing it from 6
+
         T = feats.shape[1]
         print(feats.shape, np.max(feats), np.min(feats))
+        # pdb.set_trace()
         return dataset, T
+
 
 #Dataset information regarding T
 # dataset_info = {
@@ -102,7 +136,7 @@ def copy_to_save_file(dir_str):
     shutil.copy2(base+'/rlkit/torch/iodine/iodine_trainer.py', dir_str)
     shutil.copy2(base+'/rlkit/torch/iodine/physics_network.py', dir_str)
     shutil.copy2(base+'/rlkit/torch/iodine/refinement_network.py', dir_str)
-    shutil.copy2(base+'/examples/iodine/iodine.py', dir_str)
+    shutil.copy2(base+'/examples/iodine/iodine.py', dir_str+"/examples_iodine.py")
 
 def train_vae(variant):
     from rlkit.core import logger
@@ -113,24 +147,30 @@ def train_vae(variant):
     np.random.seed(seed)
     random.seed(seed)
 
-    # variant['model']['schedule_kwargs'] = variant['schedule_kwargs'] #Adding it to dictionary
-    # variant['model']['K'] = variant['K'] #Adding K to model dictionary
-
-    train_path = get_module_path() + '/ec2_data/%s.h5' % variant['dataset']
+    #Dataset loading
+    train_path = get_module_path() + '/ec2_data/{}.h5'.format(variant['dataset'])
     test_path = train_path
     bs = variant['training_kwargs']['batch_size']
-    train_size = 1000 if variant['debug'] == 1 else None
-    train_dataset, max_T = load_dataset(train_path, train=True, batchsize=bs, size=train_size)
-    test_dataset, _ = load_dataset(test_path, train=False, batchsize=bs, size=100)
+    train_size = 100 if variant['debug'] == 1 else 1500 #None
 
+    static = False
+    if variant['schedule_kwargs']['schedule_type'] == 'static_iodine':
+        static = True
+
+    train_dataset, max_T = load_dataset(train_path, train=True, batchsize=bs, size=train_size, static=static)
+    test_dataset, _ = load_dataset(test_path, train=False, batchsize=bs, size=100, static=static)
     print(logger.get_snapshot_dir())
-    # pdb.set_trace()
+
+    #Model loading
+    if 'next_step' in variant['schedule_kwargs']['schedule_type']:
+        variant['model']['refine_args']['added_fc_input_size'] = train_dataset.action_dim
 
     m = iodine.create_model(variant, train_dataset.action_dim)
     if variant['dataparallel']:
         m = torch.nn.DataParallel(m)
     m.cuda()
 
+    #Training
     t = IodineTrainer(train_dataset, test_dataset, m,
                        **variant['training_kwargs'], **variant['schedule_kwargs'], max_T=max_T)
     save_period = variant['save_period']
@@ -158,6 +198,7 @@ def train_vae(variant):
 #CUDA_VISIBLE_DEVICES=1,2 python iodine.py -da pickplace_multienv_c3_10k -de 0
 #pickplace_multienv_10k.h5, pickplace_multienv_c3_10k.h5
 #CUDA_VISIBLE_DEVICES=1 python iodine.py -da pickplace_multienv_10k -de 1
+#CUDA_VISIBLE_DEVICES=1,2 python iodine.py -da cloth -de 1
 
 
 if __name__ == "__main__":
@@ -169,18 +210,18 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     variant = dict(
-        model=iodine.imsize64_large_iodine_architecture_multistep_physics_MLP,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
+        model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
         K=4,
         training_kwargs = dict(
-            batch_size=64, #Used in IodineTrainer, change to appropriate constant based off dataset size
+            batch_size=32, #Used in IodineTrainer, change to appropriate constant based off dataset size
             lr=1e-4, #Used in IodineTrainer, sweep
             log_interval=0,
         ),
         schedule_kwargs=dict(
-            train_T=21, #Number of steps in single training sequence, change with dataset
-            test_T=21,  #Number of steps in single testing sequence, change with dataset
-            seed_steps=4, #Number of seed steps
-            schedule_type='curriculum' #single_step_physics, curriculum
+            train_T=7, #Number of steps in single training sequence, change with dataset
+            test_T=7,  #Number of steps in single testing sequence, change with dataset
+            seed_steps=0, #Number of seed steps
+            schedule_type='next_step' #single_step_physics, curriculum, static_iodine
         ),
         num_epochs=200,
         algorithm='Iodine',
@@ -194,7 +235,7 @@ if __name__ == "__main__":
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
-        exp_prefix='iodine-blocks-{}-mlp'.format(args.dataset),
+        exp_prefix='{}-{}'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
