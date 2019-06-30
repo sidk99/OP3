@@ -25,8 +25,6 @@ import random
 from examples.iodine.iodine import load_dataset
 
 
-
-
 def load_model(variant, action_size):
     if variant['model'] == 'savp':
         time_horizon = variant['mpc_args']['time_horizon']
@@ -69,7 +67,6 @@ def get_object_masks_recon(frames, actions, model, model_type, T):
             final_recons = object_recons.sum(1, keepdim=True)  # (bs, 1, 3, D, D)
             tmp = torch.cat([final_recons, object_recons], dim=1) #(bs, K+1, 3, D, D)
             all_object_recons.append(tmp)
-        # pdb.set_trace()
         all_object_recons = torch.stack(all_object_recons, dim=0) #(T, bs, K+1, 3, D, D))
         all_object_recons = all_object_recons.permute(1, 0, 2, 3, 4, 5).contiguous()
         return all_object_recons
@@ -91,7 +88,6 @@ def get_object_masks_recon(frames, actions, model, model_type, T):
         object_recons = x_hats * masks  # (bs, T-1, K, 3, D, D)
         final_recons = object_recons.sum(2, keepdim=True)  # (bs, T-1, 1, 3, D, D)
         all_object_recons = torch.cat([final_recons, object_recons], dim=2)  # (bs, T-1, K+1, 3, D, D)
-        # pdb.set_trace()
         padding = ptu.zeros([all_object_recons.shape[0], 1, *list(all_object_recons.shape[2:])]) #(bs, 1, K+1, 3, D, D)
         all_object_recons = torch.cat([padding, all_object_recons], dim=1) #(bs, T, K+1, 3, D, D)
         return all_object_recons
@@ -100,47 +96,28 @@ def get_object_masks_recon(frames, actions, model, model_type, T):
 
 
 
-#High level: Want to run multiple different methods on the frames
-def create_image(models_and_type, frames, actions, image_prefix):
+#High level: Want to run multiple different methods on the same frames and save that into a single image
+def create_image(models_and_type, frames, actions, image_prefix, T):
     frames = frames.to(ptu.device)/255
     actions = actions.to(ptu.device)
-    # frames is (bs, T1, ch, imsize, imsize), schedule is (T2,): 0 for refinement and 1 for physics
+    # frames is (bs, T1, ch, imsize, imsize)
 
     all_object_recons = []
     for model, model_type in models_and_type:
-        # pdb.set_trace()
-        object_recons = get_object_masks_recon(frames, actions, model, model_type, 5) #(bs, T, K+1, 3, D, D)
+        object_recons = get_object_masks_recon(frames, actions, model, model_type, T) #(bs, T, K+1, 3, D, D)
         all_object_recons.append(object_recons)
     all_object_recons = torch.stack(all_object_recons, dim=0) #(M, bs, T, K, 3, imsize, imsize)
-    # pdb.set_trace()
 
     all_object_recons = all_object_recons.permute(1, 2, 0, 3, 4, 5, 6).contiguous() #(bs, T, M, K, 3, D, D)
     cur_shape = all_object_recons.shape
-    # pdb.set_trace()
     all_object_recons = all_object_recons.view(list(cur_shape[:2]) + [cur_shape[2]*cur_shape[3]] + list(cur_shape[4:])) #(bs, T, K*M, 3, D, D)
 
     for i in range(cur_shape[0]):
-        # pdb.set_trace()
-        # tmp = all_object_recons[i].permute(1, 0, 2, 3, 4).contiguous() #(T, K*M, 3, D, D)
-        # # tmp = torch.cat([frames[i, :cur_shape[1]], tmp]) #(T, 1+K*M, 3, D, D)
-        # tmp2 = frames[i, :cur_shape[1]].unsqueeze(1) #(T, 1, 3, D, D)
-        # tmp = torch.cat([tmp2, tmp], dim=1) #(T, 1, 3, D, D), (T, K*M, 3, D, D) -> (T, 1+K*M, 3, D, D)
-        # tmp = tmp.view(-1, *cur_shape[-3:]) #(T*K*M, 3, D, D)
-        # tmp = torch.cat([frames[i, :cur_shape[1]], tmp]) #(T, 3, D, D), (1+T*K*M, 3, D, D)
-
-
         tmp = frames[i, :cur_shape[1]].unsqueeze(1)  # (T, 1, 3, D, D)
         tmp = torch.cat([tmp, all_object_recons[i]], dim=1) #(T, 1, 3, D, D), (T, K*M, 3, D, D) -> (T, 1+K*M, 3, D, D)
         tmp = tmp.permute(1, 0, 2, 3, 4).contiguous()  #(T, 1+K*M, 3, D, D)
-        # tmp = torch.cat([frames[i, :cur_shape[1]], tmp]) #(T, 1+K*M, 3, D, D)
-        # tmp = torch.cat([tmp2, tmp], dim=1)  # (T, 1, 3, D, D), (T, K*M, 3, D, D) -> (T, 1+K*M, 3, D, D)
         tmp = tmp.view(-1, *cur_shape[-3:])  # (T*(1+K*M), 3, D, D)
-
-
         save_image(tmp, filename=image_prefix+"_{}.png".format(i), nrow=cur_shape[1])
-    # pdb.set_trace()
-    # save_image(comparison.data.cpu(), save_dir, nrow=len(schedule))()
-    # save_image(all_object_recons, filename=image_name, nrow=cur_shape[1])
 
 
 def create_multiple_images(variant):
@@ -153,26 +130,26 @@ def create_multiple_images(variant):
         m_type = a_model['model_type']
         models_and_type.append((m, m_type))
 
-    num_images = 4
-    # all_frames, all_actions = train_dataset[:num_images] #Tuple: ((bs, T, 3, D, D), (bs, T/T-1, A))
-    # pdb.set_trace()
-    for i in range(num_images):
-        frames, actions = train_dataset[i]
+    image_indices = list(range(4))
+    for idx in image_indices:
+        frames, actions = train_dataset[idx]
         frames = frames.unsqueeze(0)
         actions = actions.unsqueeze(0)
-        create_image(models_and_type, frames, actions, logger.get_snapshot_dir()+"/image_{}".format(i))
+        create_image(models_and_type, frames, actions, logger.get_snapshot_dir()+"/image_{}".format(idx), variant['T'])
 
 
 
-#CUDA_VISIBLE_DEVICES=4,5 python visualize_datasets.py -da cloth -de 1
+#Example usage: CUDA_VISIBLE_DEVICES=4,5 python visualize_datasets.py -da cloth
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-da', '--dataset', type=str, default=None, required=True) # stack_o2p2_60k, pickplace_1env_1k
-    parser.add_argument('-de', '--debug', type=int, default=1)
     parser.add_argument('-m', '--mode', type=str,default='here_no_doodad')
 
     args = parser.parse_args()
 
+    #models: list of dictionaries containing the information of the models to be loaded/run
+    #Images will be of form: T images wide, 1st row is true images, then next rows are dictated by models, where
+    #  each model takes K+1 rows, with the 1st row is the combined reconstruction and the next K are the subimages
     variant = dict(
         models = [dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=4,
                        model_file="/nfs/kun1/users/rishiv/Research/op3_exps/06-28-cloth-rprp/06-28-cloth-rprp_2019_06_28_06_49_47_0000--s-74526/_params.pkl",
@@ -183,11 +160,9 @@ if __name__ == "__main__":
                   dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=4,
                        model_file="/nfs/kun1/users/rishiv/Research/op3_exps/06-29-cloth-next-step/06-29-cloth-next_step_2019_06_29_05_34_47_0000--s-95282/_params.pkl",
                        model_type="next_step")],
-        algorithm='Iodine',
-        dataparallel=True,
+        T=4,
         dataset=args.dataset,
-        debug=args.debug,
-        machine_type='g3.16xlarge'
+        machine_type='g3.16xlarge' #Ignore: Only a logging tool and NOT used for setting ec2 instances (do that in conf)
     )
 
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
