@@ -209,18 +209,24 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    #Step 1: Set model and K in variant, and change exp_prefix in run_experiment
     #Regular: model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=4
     #MLP: model=iodine.imsize64_large_iodine_architecture_multistep_physics_MLP, K=4
     #K=1: model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG, K=1
-    #Command to run: CUDA_VISIBLE_DEVICES=??? python iodine.py -da pickplace_1block_10k -de 0
-    #   Note: For K=4, One gpu can handle a batchsize of 16, so change batch_size accordingly!
-    #   For K=1, two gpu's should be able to handle a batchsize of 64
+
+    #Step 2: Figure out how many GPU's we are running on, and set batch_size to 16 times number of available GPU's
+
+    #Step 3: Figure out which dataset and run following in terminal: CUDA_VISIBLE_DEVICES=??? python iodine.py -da DATASET_NAME_HERE -de 0
+    #   DATASET_NAME_HERE is either pickplace_multienv_10k (2 block env) or pickplace_1block_10k (1 block env)
+    #   Note: Can first run -de 1 to briefly check if the GPU utilization is okay
+    #         Note: Due to the curriculum, the gpu usage will increase over time so gpu should NOT be fully used in the beginning
+    #               Initially, it should use around 8.4GB of the GPU
 
     variant = dict(
         model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
-        K=4,
+        K=1,
         training_kwargs = dict(
-            batch_size=48, #Used in IodineTrainer, change to appropriate constant based off dataset size
+            batch_size=64, #Used in IodineTrainer, change to appropriate constant based off dataset size
             lr=1e-4, #Used in IodineTrainer
             log_interval=0,
         ),
@@ -230,7 +236,7 @@ if __name__ == "__main__":
             seed_steps=4, #Number of seed steps
             schedule_type='curriculum' #single_step_physics, curriculum, static_iodine, rprp, next_step
         ),
-        num_epochs=200,
+        num_epochs=120, #Go up to 4 timesteps in the future
         algorithm='Iodine',
         save_period=1,
         dataparallel=True,
@@ -242,7 +248,7 @@ if __name__ == "__main__":
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
-        exp_prefix='{}-{}-reg'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
+        exp_prefix='{}-{}-k1'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
