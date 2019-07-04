@@ -452,7 +452,7 @@ def create_schedule(train, T, schedule_type, seed_steps, max_T=None):
     elif schedule_type == 'static_iodine':
         schedule = np.zeros((T,))
     elif schedule_type == 'rprp':
-        schedule = np.zeros(seed_steps + T*2)
+        schedule = np.zeros(seed_steps + (T-1)*2)
         schedule[seed_steps::2] = 1
     elif schedule_type == 'next_step':
         schedule = np.ones(T)*2

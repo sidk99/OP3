@@ -151,7 +151,7 @@ def train_vae(variant):
     train_path = get_module_path() + '/ec2_data/{}.h5'.format(variant['dataset'])
     test_path = train_path
     bs = variant['training_kwargs']['batch_size']
-    train_size = 100 if variant['debug'] == 1 else 1500 #None
+    train_size = 100 if variant['debug'] == 1 else None #None
 
     static = False
     if variant['schedule_kwargs']['schedule_type'] == 'static_iodine':
@@ -199,43 +199,56 @@ def train_vae(variant):
 #pickplace_multienv_10k.h5, pickplace_multienv_c3_10k.h5
 #CUDA_VISIBLE_DEVICES=1 python iodine.py -da pickplace_multienv_10k -de 1
 #CUDA_VISIBLE_DEVICES=1,2 python iodine.py -da cloth -de 1
-
+#CUDA_VISIBLE_DEVICES=1,2,3 python iodine.py -da pickplace_1block_10k -de 0
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument('-da', '--dataset', type=str, default=None, required=True) # stack_o2p2_60k, pickplace_1env_1k
+    parser.add_argument('-da', '--dataset', type=str, default=None, required=True) # stack_o2p2_60k, pickplace_1env_1k, pickplace_1block_10k, pickplace_multienv_10k
     parser.add_argument('-de', '--debug', type=int, default=1)
     parser.add_argument('-m', '--mode', type=str,default='here_no_doodad')
 
     args = parser.parse_args()
 
+    #Step 1: Set model and K in variant, and change exp_prefix in run_experiment
+    #Regular: model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=4
+    #MLP: model=iodine.imsize64_large_iodine_architecture_multistep_physics_MLP, K=4
+    #K=1: model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG, K=1
+
+    #Step 2: Figure out how many GPU's we are running on, and set batch_size to 16 times number of available GPU's
+
+    #Step 3: Figure out which dataset and run following in terminal: CUDA_VISIBLE_DEVICES=??? python iodine.py -da DATASET_NAME_HERE -de 0
+    #   DATASET_NAME_HERE is either pickplace_multienv_10k (2 block env) or pickplace_1block_10k (1 block env)
+    #   Note: Can first run -de 1 to briefly check if the GPU utilization is okay
+    #         Note: Due to the curriculum, the gpu usage will increase over time so gpu should NOT be fully used in the beginning
+    #               Initially, it should use around 8.4GB of the GPU
+
     variant = dict(
-        model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
-        K=4,
+        model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
+        K=1,
         training_kwargs = dict(
-            batch_size=32, #Used in IodineTrainer, change to appropriate constant based off dataset size
-            lr=1e-4, #Used in IodineTrainer, sweep
+            batch_size=64, #Used in IodineTrainer, change to appropriate constant based off dataset size
+            lr=1e-4, #Used in IodineTrainer
             log_interval=0,
         ),
         schedule_kwargs=dict(
-            train_T=7, #Number of steps in single training sequence, change with dataset
-            test_T=7,  #Number of steps in single testing sequence, change with dataset
-            seed_steps=0, #Number of seed steps
-            schedule_type='next_step' #single_step_physics, curriculum, static_iodine
+            train_T=21, #Number of steps in single training sequence, change with dataset
+            test_T=21,  #Number of steps in single testing sequence, change with dataset
+            seed_steps=4, #Number of seed steps
+            schedule_type='curriculum' #single_step_physics, curriculum, static_iodine, rprp, next_step
         ),
-        num_epochs=200,
+        num_epochs=120, #Go up to 4 timesteps in the future
         algorithm='Iodine',
         save_period=1,
         dataparallel=True,
         dataset=args.dataset,
         debug=args.debug,
-        machine_type='g3.16xlarge'
+        machine_type='g3.16xlarge' #Note: Purely for logging purposed and NOT used for setting actual machine type
     )
 
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
-        exp_prefix='{}-{}'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
+        exp_prefix='{}-{}-k1'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

@@ -115,7 +115,8 @@ class PhysicsNetwork(nn.Module):
         else:
             total_effect = ptu.zeros((bs, self.effect_size))
 
-        lambda_and_effect = torch.cat([lambda1_enc_flat, total_effect], -1)  # (bs*k,h)
+        # lambda_and_effect = torch.cat([lambda1_enc_flat, total_effect], -1)  # (bs*k,h)
+        lambda_and_effect = torch.cat([lambda1_enc.view(-1, self.rep_size), total_effect], -1)  # (bs*k,h)
         new_lambdas = self.final_merge_network(lambda_and_effect) #(bs*k,h)
 
         #Old version
