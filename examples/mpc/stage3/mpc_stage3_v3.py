@@ -501,6 +501,33 @@ def load_model(variant):
         m.set_eval_mode(True)
     return m
 
+# def load_model(variant, action_size):
+#     if variant['model'] == 'savp':
+#         time_horizon = variant['mpc_args']['time_horizon']
+#         m = SAVP_MODEL('/nfs/kun1/users/rishiv/Research/baseline/logs/pickplace_multienv_10k/ours_savp/', 'model-500000', 0,
+#                        batch_size=20, time_horizon=time_horizon)
+#     else:
+#         model_file = variant['model_file']
+#
+#         if variant['model_type'] == 'next_step':
+#             variant['model']['refine_args']['added_fc_input_size'] = action_size
+#         elif variant['model_type'] == 'static':
+#             action_size = 0
+#         m = iodine.create_model(variant, action_dim=action_size)
+#         state_dict = torch.load(model_file)
+#         # pdb.set_trace()
+#
+#         new_state_dict = OrderedDict()
+#         for k, v in state_dict.items():
+#             name = k
+#             if 'module.' in k:
+#                 name = k[7:]  # remove 'module.' of dataparallel
+#             new_state_dict[name] = v
+#         m.load_state_dict(new_state_dict)
+#         m.cuda()
+#         m.set_eval_mode(True)
+#     return m
+
 
 def main(variant):
     seed = int(variant['seed'])
@@ -516,10 +543,12 @@ def main(variant):
     actions_lst = []
     stats = {'mse': 0}
 
+    goal_folder = module_path + '/examples/mpc/stage3/goals/objects_{}/'.format(variant['number_goal_objects'])
+
     for i, goal_idx in enumerate(goal_idxs):
         #goal_file = module_path + '/examples/mpc/stage1/manual_constructions/bridge/%d_1.png' % i
-        goal_file = module_path + '/examples/mpc/stage3/goals/img_%d.png' % goal_idx
-        env_info = np.load(module_path + '/examples/mpc/stage3/goals/env_data.npy')[goal_idx]
+        goal_file = goal_folder + 'img_{}.png'.format(goal_idx)
+        env_info = np.load(goal_folder + 'env_data.npy')[goal_idx]
         env = BlockPickAndPlaceEnv(num_objects=1, num_colors=None, img_dim=64, include_z=False) #Note num_objects & num_colors do not matter
         env.set_env_info(env_info) #Places the correct blocks in the environment, blocks will also be set in the goal position
         true_actions = env.move_blocks_side()  # Moves blocks to the side for mpc, returns true optimal actions
@@ -546,19 +575,24 @@ def main(variant):
     # np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
 
-#CUDA_VISIBLE_DEVICES=7 python mpc_stage3_v3.py -f /nfs/kun1/users/rishiv/Research/op3_exps/06-10-iodine-blocks-pickplace-multienv-10k/06-10-iodine-blocks-pickplace_multienv_10k_2019_06_10_23_24_47_0000--s-18660/_params.pkl
+#CUDA_VISIBLE_DEVICES=3 python mpc_stage3_v3.py -f /nfs/kun1/users/rishiv/Research/op3_exps/06-10-iodine-blocks-pickplace-multienv-10k/06-10-iodine-blocks-pickplace_multienv_10k_2019_06_10_23_24_47_0000--s-18660/_params.pkl
+#CUDA_VISIBLE_DEVICES=3 python mpc_stage3_v3.py -f /nfs/kun1/users/rishiv/Research/op3_exps/06-26-iodine-blocks-pickplace-multienv-10k-k1/06-26-iodine-blocks-pickplace_multienv_10k-k1_2019_06_26_03_50_18_0000--s-15069/_params.pkl
+#CUDA_VISIBLE_DEVICES=3 python mpc_stage3_v3.py -f /nfs/kun1/users/rishiv/Research/op3_exps/06-26-iodine-blocks-pickplace-multienv-10k-mlp/06-26-iodine-blocks-pickplace_multienv_10k-mlp_2019_06_26_22_54_03_0000--s-16393/_params.pkl
 
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-f', '--modelfile', type=str, default=None)
     args = parser.parse_args()
 
+    num_obs = 2 #TODO: Change
+
     variant = dict(
         algorithm='MPC',
+        number_goal_objects=num_obs,
         model_file=args.modelfile,
         # cost_type='sum_goal_min_latent_function',  # 'sum_goal_min_latent' 'latent_pixel 'sum_goal_min_latent_function'
         # mpc_style='cem', # random_shooting or cem
-        model= 'savp', #iodine.imsize64_large_iodine_architecture, #imsize64_large_iodine_architecture 'savp',
+        model='savp', # iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
         K=4,
         schedule_kwargs=dict(
             train_T=21,  # Number of steps in single training sequence, change with dataset
@@ -567,14 +601,14 @@ if __name__ == "__main__":
             schedule_type='curriculum'  # single_step_physics, curriculum
         ),
         mpc_args=dict(
-            n_actions=2000,
-            mpc_steps=2,
+            n_actions=500,
+            mpc_steps=4,
             time_horizon=2,
-            actions_per_step=2,
-            cem_steps=3,
+            actions_per_step=1,
+            cem_steps=4,
             use_action_image=False,
             mpc_style='cem',
-            n_goal_objs=2,
+            n_goal_objs=num_obs,
             filter_goals=False,
             true_actions=False
         )
@@ -582,7 +616,7 @@ if __name__ == "__main__":
 
     run_experiment(
         main,
-        exp_prefix='mpc_stage3_savp',
+        exp_prefix='mpc_stage3_objects{}-reg'.format(variant['number_goal_objects']),
         mode='here_no_doodad',
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

@@ -151,7 +151,7 @@ def train_vae(variant):
     train_path = get_module_path() + '/ec2_data/{}.h5'.format(variant['dataset'])
     test_path = train_path
     bs = variant['training_kwargs']['batch_size']
-    train_size = 100 if variant['debug'] == 1 else 1500 #None
+    train_size = 100 if variant['debug'] == 1 else None #None
 
     static = False
     if variant['schedule_kwargs']['schedule_type'] == 'static_iodine':
@@ -199,29 +199,36 @@ def train_vae(variant):
 #pickplace_multienv_10k.h5, pickplace_multienv_c3_10k.h5
 #CUDA_VISIBLE_DEVICES=1 python iodine.py -da pickplace_multienv_10k -de 1
 #CUDA_VISIBLE_DEVICES=1,2 python iodine.py -da cloth -de 1
-
+#CUDA_VISIBLE_DEVICES=1,2,3 python iodine.py -da pickplace_1block_10k -de 0
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument('-da', '--dataset', type=str, default=None, required=True) # stack_o2p2_60k, pickplace_1env_1k
+    parser.add_argument('-da', '--dataset', type=str, default=None, required=True) # stack_o2p2_60k, pickplace_1env_1k, pickplace_1block_10k, pickplace_multienv_10k
     parser.add_argument('-de', '--debug', type=int, default=1)
     parser.add_argument('-m', '--mode', type=str,default='here_no_doodad')
 
     args = parser.parse_args()
 
+    #Regular: model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=4
+    #MLP: model=iodine.imsize64_large_iodine_architecture_multistep_physics_MLP, K=4
+    #K=1: model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG, K=1
+    #Command to run: CUDA_VISIBLE_DEVICES=??? python iodine.py -da pickplace_1block_10k -de 0
+    #   Note: For K=4, One gpu can handle a batchsize of 16, so change batch_size accordingly!
+    #   For K=1, two gpu's should be able to handle a batchsize of 64
+
     variant = dict(
-        model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
+        model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
         K=4,
         training_kwargs = dict(
-            batch_size=32, #Used in IodineTrainer, change to appropriate constant based off dataset size
-            lr=1e-4, #Used in IodineTrainer, sweep
+            batch_size=48, #Used in IodineTrainer, change to appropriate constant based off dataset size
+            lr=1e-4, #Used in IodineTrainer
             log_interval=0,
         ),
         schedule_kwargs=dict(
-            train_T=7, #Number of steps in single training sequence, change with dataset
-            test_T=7,  #Number of steps in single testing sequence, change with dataset
-            seed_steps=0, #Number of seed steps
-            schedule_type='next_step' #single_step_physics, curriculum, static_iodine
+            train_T=21, #Number of steps in single training sequence, change with dataset
+            test_T=21,  #Number of steps in single testing sequence, change with dataset
+            seed_steps=4, #Number of seed steps
+            schedule_type='curriculum' #single_step_physics, curriculum, static_iodine, rprp, next_step
         ),
         num_epochs=200,
         algorithm='Iodine',
@@ -229,13 +236,13 @@ if __name__ == "__main__":
         dataparallel=True,
         dataset=args.dataset,
         debug=args.debug,
-        machine_type='g3.16xlarge'
+        machine_type='g3.16xlarge' #Note: Purely for logging purposed and NOT used for setting actual machine type
     )
 
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
-        exp_prefix='{}-{}'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
+        exp_prefix='{}-{}-reg'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
