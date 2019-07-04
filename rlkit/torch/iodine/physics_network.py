@@ -155,7 +155,8 @@ class PhysicsNetworkMLP(nn.Module):
         hidden_size = representation_size
         self.interaction_size = representation_size
 
-        self.action_encoder = Mlp((hidden_size,), self.action_enc_size, action_size,
+        if action_size > 0:
+            self.action_encoder = Mlp((hidden_size,), self.action_enc_size, action_size,
                                   hidden_activation=nn.ELU(), output_activation=nn.ELU())
         self.mlp_net = Mlp([hidden_size]*5, self.rep_size*K, self.rep_size*K+self.action_enc_size,
                                              hidden_activation=nn.ELU())
@@ -167,13 +168,15 @@ class PhysicsNetworkMLP(nn.Module):
         # lambda1 = lambda1.view(-1, K, self.rep_size) #(bs, K, rep_size)
         lambda1 = lambda1.view(-1, K*self.rep_size) #(bs, K*rep_size)
 
-        # pdb.set_trace()
-        actions = actions[::K]
-        if self.action_size == 4:
-            action_enc = self.action_encoder(actions[:, torch.LongTensor([0, 1, 3, 4])])  # RV: Encode actions, why torch.longTensor?
-        else:
-            action_enc = self.action_encoder(actions)  # Encode actions
-        lambda1 = torch.cat([lambda1, action_enc], -1)  # RV: Concatonate lambdas with actions
+        if self.action_size > 0:
+            # pdb.set_trace()
+            actions = actions[::K]
+            if self.action_size == 4:
+                action_enc = self.action_encoder(actions[:, torch.LongTensor([0, 1, 3, 4])])  # RV: Encode actions, why torch.longTensor?
+            else:
+                action_enc = self.action_encoder(actions)  # Encode actions
+            lambda1 = torch.cat([lambda1, action_enc], -1)  # RV: Concatonate lambdas with actions
+
         lambda1 = self.mlp_net(lambda1)
         # lambda1 = lambda1.view(-1, K, self.rep_size)
         lambda1 = lambda1.view(-1, self.rep_size)
