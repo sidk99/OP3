@@ -15,7 +15,7 @@ def main():
 
     args = parser.parse_args()
     s3_log_dir = args.log_dir
-    os.makedirs(s3_log_dir)
+    os.makedirs(s3_log_dir, exist_ok=True)
     aws_sync(args.bucket, s3_log_dir, s3_log_dir, exclude=args.exclude)
 
 if __name__ == "__main__":

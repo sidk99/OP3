@@ -15,7 +15,7 @@ import json
 import os
 import rlkit.torch.iodine.iodine as iodine
 
-from examples.mpc.savp_wrapper import SAVP_MODEL
+#from examples.mpc.savp_wrapper import SAVP_MODEL
 
 from collections import OrderedDict
 from rlkit.util.misc import get_module_path
@@ -216,7 +216,11 @@ class Cost:
     def image_mse(self, im1, im2):
         # im1, im2 are (*, 3, D, D)
         # Note: * dimensions may not be equal between im1, im2 so automatically broadcast over them
-        return torch.pow(im1 - im2, 2).mean((-1, -2, -3)) #Takes means across the last dimensions (3, D, D)
+
+        return torch.pow(im1 - im2, 2).mean(-1).mean(-1).mean(-1) #Takes means across the last
+        # dimensions
+        # (3,
+        # D, D)
 
 class MPC:
     def __init__(self, model, env, n_actions, mpc_steps,
@@ -227,6 +231,7 @@ class MPC:
                  logger_prefix_dir=None,
                  mpc_style="random_shooting",  # options are random_shooting, cem
                  cem_steps=2,
+                 true_data=None,
                  use_action_image=True, # True for stage 1, False for stage 3
                  time_horizon=1, #How many steps into the future to do per step
                  actions_per_step=1 #How many actions to take per step. Note this needs to be <= time_horizon
@@ -251,6 +256,7 @@ class MPC:
         if actions_per_step > time_horizon:
             raise ValueError("actions_per_step ({}) should be <= time_horizon ({})".format(actions_per_step, time_horizon))
         self.actions_per_step = actions_per_step
+        self.true_data = true_data
 
     def filter_goal_latents(self, goal_latents, goal_latents_mask, goal_latents_recon):
         # Keep top goal latents with highest mask area except first
@@ -346,8 +352,9 @@ class MPC:
 
         # Compare final obs to goal obs
         mse = np.square(ptu.get_numpy(goal_image_tensor.squeeze().permute(1, 2, 0)) - obs).mean()
+        accuracy = self.env.compute_accuracy(self.true_data)
 
-        return mse, np.stack(chosen_actions)
+        return accuracy, np.stack(chosen_actions)
 
     #actions: (n_actions, T, A)
     #obs: (n_actions, 3, D, D)
@@ -446,7 +453,9 @@ class MPC:
         else:
             obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0], 1, 1, 1) #obs: (D, D, 3) -> (num_actions, 3, D, D)
 
-        pred_obs, obs_latents, obs_latents_recon = self.model.step_batched(obs_rep, ptu.from_numpy(actions), bs=20) #self.model_step_batched(obs_rep, ptu.from_numpy(actions))
+        pred_obs, obs_latents, obs_latents_recon = self.model.step_batched(obs_rep,
+                                                                           ptu.from_numpy(
+                                                                               actions), bs=10) #self.model_step_batched(obs_rep, ptu.from_numpy(actions))
         # goal_latents (5,128)
         # goal_latents_recon (5, 3, 64, 64)
         # goal_image (1, 3, 64, 64)
@@ -541,7 +550,7 @@ def main(variant):
 
     goal_idxs = list(range(0, 20))
     actions_lst = []
-    stats = {'mse': 0}
+    stats = {'accuracy': 0}
 
     goal_folder = module_path + '/examples/mpc/stage3/goals/objects_{}/'.format(variant['number_goal_objects'])
 
@@ -562,15 +571,17 @@ def main(variant):
         #           cost_type=variant['cost_type'], filter_goals=False, n_goal_objs=2,
         #           logger_prefix_dir='/goal_{}'.format(goal_idx),
         #           mpc_style=variant['mpc_style'], cem_steps=3, use_action_image=False, time_horizon=2, actions_per_step=2)
-        mpc = MPC(m, env, logger_prefix_dir='/goal_{}'.format(goal_idx), **variant['mpc_args'])
+        mpc = MPC(m, env, logger_prefix_dir='/goal_{}'.format(goal_idx),
+                  true_data=env_info, **variant[
+            'mpc_args'])
 
         goal_image = imageio.imread(goal_file)
-        mse, actions = mpc.run(goal_image)
-        stats['mse'] += mse
+        accuracy, actions = mpc.run(goal_image)
+        stats['accuracy'] += accuracy
         actions_lst.append(actions)
         np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
-    stats['mse'] /= len(goal_idxs)
+    stats['accuracy'] /= len(goal_idxs)
     json.dump(stats, open(logger.get_snapshot_dir() + '/stats.json', 'w'))
     # np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
@@ -592,7 +603,7 @@ if __name__ == "__main__":
         model_file=args.modelfile,
         # cost_type='sum_goal_min_latent_function',  # 'sum_goal_min_latent' 'latent_pixel 'sum_goal_min_latent_function'
         # mpc_style='cem', # random_shooting or cem
-        model='savp', # iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
+        model=iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
         K=4,
         schedule_kwargs=dict(
             train_T=21,  # Number of steps in single training sequence, change with dataset

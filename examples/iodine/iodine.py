@@ -20,6 +20,7 @@ import random
 from argparse import ArgumentParser
 from rlkit.util.misc import get_module_path
 import pdb
+from rlkit.launchers.conf_jd import gpu_instance_to_price
 
 
 def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
@@ -206,6 +207,7 @@ if __name__ == "__main__":
     parser.add_argument('-da', '--dataset', type=str, default=None, required=True) # stack_o2p2_60k, pickplace_1env_1k, pickplace_1block_10k, pickplace_multienv_10k
     parser.add_argument('-de', '--debug', type=int, default=1)
     parser.add_argument('-m', '--mode', type=str,default='here_no_doodad')
+    parser.add_argument('-v', '--algo', type=str)
 
     args = parser.parse_args()
 
@@ -222,38 +224,96 @@ if __name__ == "__main__":
     #         Note: Due to the curriculum, the gpu usage will increase over time so gpu should NOT be fully used in the beginning
     #               Initially, it should use around 8.4GB of the GPU
 
-    variant = dict(
-        model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
-        K=1,
-        training_kwargs = dict(
-            batch_size=64, #Used in IodineTrainer, change to appropriate constant based off dataset size
-            lr=1e-4, #Used in IodineTrainer
-            log_interval=0,
-        ),
-        schedule_kwargs=dict(
-            train_T=21, #Number of steps in single training sequence, change with dataset
-            test_T=21,  #Number of steps in single testing sequence, change with dataset
-            seed_steps=4, #Number of seed steps
-            schedule_type='curriculum' #single_step_physics, curriculum, static_iodine, rprp, next_step
-        ),
-        num_epochs=120, #Go up to 4 timesteps in the future
-        algorithm='Iodine',
-        save_period=1,
-        dataparallel=True,
-        dataset=args.dataset,
-        debug=args.debug,
-        machine_type='g3.16xlarge' #Note: Purely for logging purposed and NOT used for setting actual machine type
-    )
+
+    v = args.algo
+    if v == 'regular':
+        variant = dict(
+            model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
+            K=4,
+            training_kwargs = dict(
+                batch_size=32, #Used in IodineTrainer, change to appropriate constant based off dataset size
+                lr=1e-4, #Used in IodineTrainer
+                log_interval=0,
+            ),
+            schedule_kwargs=dict(
+                train_T=21, #Number of steps in single training sequence, change with dataset
+                test_T=21,  #Number of steps in single testing sequence, change with dataset
+                seed_steps=4, #Number of seed steps
+                schedule_type='curriculum' #single_step_physics, curriculum, static_iodine, rprp, next_step
+            ),
+            num_epochs=120, #Go up to 4 timesteps in the future
+            algorithm=v,
+            save_period=1,
+            dataparallel=True,
+            dataset=args.dataset,
+            debug=args.debug,
+            machine_type='p3.8xlarge' #Note: Purely for logging purposed and NOT used for
+            # setting actual machine type
+        )
+    elif v == 'k1':
+        variant = dict(
+            model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
+            K=1,
+            training_kwargs = dict(
+                batch_size=32, #Used in IodineTrainer, change to appropriate constant based off
+                # dataset size
+                lr=1e-4, #Used in IodineTrainer
+                log_interval=0,
+            ),
+            schedule_kwargs=dict(
+                train_T=21, #Number of steps in single training sequence, change with dataset
+                test_T=21,  #Number of steps in single testing sequence, change with dataset
+                seed_steps=4, #Number of seed steps
+                schedule_type='curriculum' #single_step_physics, curriculum, static_iodine, rprp, next_step
+            ),
+            num_epochs=120, #Go up to 4 timesteps in the future
+            algorithm=v,
+            save_period=1,
+            dataparallel=True,
+            dataset=args.dataset,
+            debug=args.debug,
+            machine_type='p3.8xlarge' #Note: Purely for logging purposed and NOT used for setting
+            #  actual machine type
+        )
+    elif v == 'mlpphysics':
+        variant = dict(
+            model=iodine.imsize64_large_iodine_architecture_multistep_physics_MLP,
+            #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
+            K=4,
+            training_kwargs = dict(
+                batch_size=64, #Used in IodineTrainer, change to appropriate constant based off
+                # dataset size
+                lr=1e-4, #Used in IodineTrainer
+                log_interval=0,
+            ),
+            schedule_kwargs=dict(
+                train_T=21, #Number of steps in single training sequence, change with dataset
+                test_T=21,  #Number of steps in single testing sequence, change with dataset
+                seed_steps=4, #Number of seed steps
+                schedule_type='curriculum' #single_step_physics, curriculum, static_iodine, rprp, next_step
+            ),
+            num_epochs=120, #Go up to 4 timesteps in the future
+            algorithm=v,
+            save_period=1,
+            dataparallel=True,
+            dataset=args.dataset,
+            debug=args.debug,
+            machine_type='p3.8xlarge' #Note: Purely for logging purposed and NOT used for setting
+            #  actual machine type
+        )
 
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
-        exp_prefix='{}-{}-k1'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
+        exp_prefix='{}-{}-{}-k1'.format(args.dataset, variant['schedule_kwargs'][
+            'schedule_type'], variant['algorithm']),
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
         seed=None,
-        region='us-west-2'
+        region='us-west-2',
+        instance_type=variant['machine_type'],
+        spot_price=gpu_instance_to_price[variant['machine_type']],
     )
 
 

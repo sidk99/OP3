@@ -383,8 +383,10 @@ imsize64_medium_iodine_architecture = dict(
 #model, schedule_kwargs, K
 def create_model(variant, action_dim):
     # pdb.set_trace()
-    # if 'K' in variant.keys(): #New version
-    K = variant['K']
+    if 'K' in variant.keys(): #New version
+        K = variant['K']
+    else:
+        K = variant['model']['vae_kwargs']['K']
     # else: #Old version
     #     K = variant['vae_kwargs']['K']
     print('K: {}'.format(K))
@@ -406,7 +408,7 @@ def create_model(variant, action_dim):
     if 'schedule_kwargs' not in variant:
         m = IodineVAE(
             **model['vae_kwargs'],
-            K=K,
+            #K=K,
             decoder=decoder,
             refinement_net=refinement_net,
             physics_net=physics_net,

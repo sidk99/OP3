@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    v = 'mlp'
+    v = 'mlpphysics'
     if v == 'k1':
         variant = dict(
             model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG,   #imsize64_small_iodine_architecture,
@@ -238,9 +238,10 @@ if __name__ == "__main__":
         variant = dict(
             model=iodine.imsize64_large_iodine_architecture_multistep_physics_MLP,   #imsize64_small_iodine_architecture,
             # #imsize64_large_iodine_architecture_multistep_physics,
-            K=7,
+            K=10,
             training_kwargs = dict(
-                batch_size=16, #Used in IodineTrainer, change to appropriate constant based off dataset size
+                batch_size=16, #Used in IodineTrainer, change to appropriate constant based off
+                # dataset size
                 lr=1e-4, #Used in IodineTrainer, sweep
                 log_interval=0,
             ),
@@ -256,12 +257,13 @@ if __name__ == "__main__":
             dataparallel=False,
             dataset=args.dataset,
             debug=args.debug,
-            machine_type='p3.2xlarge'
+            machine_type='p3.8xlarge'
         )
+
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
-        exp_prefix='{}-{}'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
+        exp_prefix='{}-{}-{}'.format(args.dataset, v, variant['schedule_kwargs']['schedule_type']),
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

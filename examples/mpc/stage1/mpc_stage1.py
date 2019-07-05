@@ -22,7 +22,6 @@ from rlkit.util.misc import get_module_path
 # from ray import tune
 import time
 import pdb
-print("Hello Sid")
 
 class Cost:
     def __init__(self, type, logger_prefix_dir):
@@ -41,6 +40,7 @@ class Cost:
                                             pred_latents, pred_latents_recon, pred_image, actions)
 
         elif self.type == 'goal_pixel':
+            self.remove_goal_latents = False
             return self.goal_pixel(goal_latents, goal_image, pred_latents, pred_image, actions)
         elif self.type == 'latent_pixel':
             return self.latent_pixel(mpc_step, goal_latents_recon, goal_image, pred_latents_recon,
@@ -167,9 +167,10 @@ class Cost:
     def goal_pixel(self, goal_latents, goal_image, pred_latents, pred_image, actions):
         mse = torch.pow(pred_image - goal_image, 2).mean(3).mean(2).mean(1)
 
-        min_cost, action_idx = mse.min(0)
 
-        return ptu.get_numpy(pred_image[action_idx]), actions[action_idx], 0
+        action_idxs = ptu.get_numpy(mse).argsort()
+
+        return ptu.get_numpy(pred_image[action_idxs[0]]), actions[action_idxs], 0
 
     def latent_pixel(self, mpc_step, goal_latents_recon, goal_image, pred_latents_recon, pred_image,
                      actions, cem_step):
@@ -353,8 +354,8 @@ class MPC:
             step_time = time.time()
             pred_obs_lst.append(pred_obs)
             obs_lst.append(np.moveaxis(obs, 2, 0))
-            if goal_latents.shape[0] == 1:
-                break
+            # if goal_latents.shape[0] == 1:
+            #     break
             # remove matching goal latent from goal latents
             if self.cost.remove_goal_latents:
                 goal_latents = self.remove_idx(goal_latents, goal_idx)
@@ -363,6 +364,7 @@ class MPC:
         # save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst)),
         #            logger.get_snapshot_dir() + '%s/mpc.png' % self.logger_prefix_dir,
         #            nrow=len(obs_lst))
+
         save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst + try_action_obs_list)),
                    logger.get_snapshot_dir() + '%s/mpc.png' % self.logger_prefix_dir,
                    nrow=len(obs_lst))
@@ -376,7 +378,7 @@ class MPC:
         stats = {'mse': mse, 'correct': int(correct), 'max_pos': max_pos, 'max_rgb': max_rgb}
         return stats, np.stack(actions)
 
-    def model_step_batched(self, obs, actions, bs=8):
+    def model_step_batched(self, obs, actions, bs=64):
 
         # Handle large obs in batches
         n_batches = int(np.ceil(obs.shape[0] / float(bs)))
@@ -488,21 +490,26 @@ def copy_to_save_file():
 
 def main(variant):
     copy_to_save_file()
-    # module_path = os.path.expanduser('~') + '/objects/rlkit'
+    module_path = os.path.expanduser('~') + '/objects/rlkit'
     # model_file = module_path + '/saved_models/iodine-blocks-stack50k/SequentialRayExperiment_0_2019-05-15_01-24-38zy_wn4_6/model_params.pkl'
     # module_path = os.path.expanduser('~') + '/Research/fun_rlkit'
-    module_path = '/nfs/kun1/users/rishiv/Research/fun_rlkit'
+   # module_path = '/nfs/kun1/users/rishiv/Research/fun_rlkit'
     # model_file = module_path + '/examples/mpc/saved_models/iodine_params_5_15.pkl'
     # model_file = '/nfs/kun1/users/rishiv/Research/op3_exps/05-29-iodine-blocks-stack-o2p2-60k/05-29-iodine-blocks-stack_o2p2_60k_2019_05_29_00_55_37_0000--s-81417/params.pkl'
-    model_file = '/nfs/kun1/users/rishiv/Research/op3_exps/05-29-iodine-blocks-stack-o2p2-60k/05-29-iodine-blocks-stack_o2p2_60k_2019_05_29_23_06_32_0000--s-93500/params.pkl'
+    # model_file = '/nfs/kun1/users/rishiv/Research/op3_exps/05-29-iodine-blocks-stack-o2p2-60k/05-29-iodine-blocks-stack_o2p2_60k_2019_05_29_23_06_32_0000--s-93500/params.pkl'
+    model_file = '/home/jcoreyes/objects/op3-s3-logs/07-03-stack-o2p2-60k-single-step-physics/07-03-stack_o2p2_60k-single_step_physics_2019_07_04_02_29_17_0000--s-24183/_params.pkl'
 
     # model_file = module_path + \
     #              '/saved_models/iodine-blocks-stack_o2p2_60k/SequentialRayExperiment_0_2019' \
     #              '-05' \
     #              '-20_16-24-523j6_e94i/model_params.pkl'
-    if variant['structure'][1] > 7:
-        variant['model']['vae_kwargs']['K'] = variant['structure'][1] + 2
-    m = iodine.create_model(variant['model'], 0)
+    #variant['model']['K'] = 1
+    #if variant['structure'][1] > 7:
+    #    variant['model']['vae_kwargs']['K'] = variant['structure'][1] + 2
+
+    #import pdb; pdb.set_trace()
+    variant['model']['vae_kwargs']['K'] = 1
+    m = iodine.create_model(variant, 0)
     state_dict = torch.load(model_file)
 
     new_state_dict = OrderedDict()
@@ -537,8 +544,8 @@ def main(variant):
             module_path + '/examples/mpc/stage1/manual_constructions/%s/%d.p' % (structure, goal_idx), allow_pickle=True)
         # pdb.set_trace()
         env = BlockEnv(n_goal_obs)
-        mpc = MPC(m, env, n_actions=1000, mpc_steps=n_goal_obs, true_actions=None,
-                  cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=n_goal_obs,
+        mpc = MPC(m, env, n_actions=1000, mpc_steps=1, true_actions=None,
+                  cost_type=variant['cost_type'], filter_goals=False, n_goal_objs=n_goal_obs,
                   logger_prefix_dir='/%s_goal_%d' % (structure, goal_idx),
                   mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True,
                   true_data=true_data)
@@ -561,6 +568,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-de', '--debug', type=int, default=0)
     parser.add_argument('-s', '--split', type=int, default=0)
+    parser.add_argument('-m', '--mode', type=str, default='here_no_doodad')
 
     args = parser.parse_args()
 
@@ -578,20 +586,19 @@ if __name__ == "__main__":
         ('double-bridge-close-topfar', 8),  #5
         ('towers', 9), #6
     ]
-    n = 2 #(11+1)//n is the number of splits
+    n = (11+1)//2 # is the number of splits
     splits = [structures[i:i + n] for i in range(0, len(structures), n)]
     structure_split = splits[args.split]
-    # pdb.set_trace()
 
 
-    for s in structure_split:
+    for s in structures[9:]:
         variant = dict(
             algorithm='MPC',
-            cost_type='latent_pixel',  # 'sum_goal_min_latent' 'latent_pixel
+            cost_type= 'goal_pixel', #'latent_pixel',  # 'sum_goal_min_latent' 'latent_pixel
             mpc_style='cem',  # random_shooting or cem
-            model=iodine.imsize64_large_iodine_architecture_multistep_physics,
+            model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG,
             structure=s,
-            debug=args.debug
+            debug=args.debug,
             # n_goal_obs=structures[s_idx][1]
         )
 
@@ -604,5 +611,6 @@ if __name__ == "__main__":
             mode='here_no_doodad',
             variant=variant,
             use_gpu=True,  # Turn on if you have a GPU
+            instance_type='p2.xlarge'
         )
 

@@ -501,6 +501,54 @@ class BlockPickAndPlaceEnv():
         self.blocks = env_info["blocks"]
         self.initialize(True)
 
+    def compute_accuracy(self, true_data, threshold=0.2):
+
+        import copy
+        mjc_data = copy.deepcopy(true_data)
+
+        max_err = -float('inf')
+        data = self.get_env_info()
+
+        for pred_datum in data['blocks']:
+            err, mjc_match, err_pos, err_rgb = self._best_obj_match(pred_datum, mjc_data['blocks'])
+            #del mjc_data[mjc_match]
+
+            # print(err)
+            if err > max_err:
+                max_err = err
+                max_pos = err_pos
+                max_rgb = err_rgb
+
+            if len(mjc_data) == 0:
+                break
+
+        correct = max_err < threshold
+        return correct
+
+    def _best_obj_match(self, pred, targs):
+        def np_mse(x1, x2):
+            return np.square(x1 - x2).mean()
+
+        pos = pred['pos']
+        rgb = pred['rgba']
+
+        best_err = float('inf')
+        for obj_data in targs:
+            obj_name = obj_data['name']
+            obj_pos = obj_data['pos']
+            obj_rgb = obj_data['rgba']
+
+            pos_err = np_mse(pos, obj_pos)
+            rgb_err = np_mse(np.array(rgb), np.array(obj_rgb))
+            err = pos_err + rgb_err
+
+            if err < best_err:
+                best_err = err
+                best_obj = obj_name
+                best_pos = pos_err
+                best_rgb = rgb_err
+
+        return best_err, best_obj, best_pos, best_rgb
 
 def createSingleSim(args):
     np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
@@ -536,6 +584,7 @@ def createSingleSim(args):
     }
     return values
     # return np.array(imgs), np.array(acs)
+
 
 
 """

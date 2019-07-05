@@ -611,7 +611,7 @@ def run_experiment(
         if instance_type is None:
             instance_type = conf.GPU_INSTANCE_TYPE
         else:
-            assert instance_type[0] == 'g'
+            assert instance_type[0] == 'g' or instance_type[0] == 'p'
         if spot_price is None:
             spot_price = conf.GPU_SPOT_PRICE
     else:
