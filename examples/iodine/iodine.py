@@ -151,7 +151,7 @@ def train_vae(variant):
     train_path = get_module_path() + '/ec2_data/{}.h5'.format(variant['dataset'])
     test_path = train_path
     bs = variant['training_kwargs']['batch_size']
-    train_size = 100 if variant['debug'] == 1 else None #None
+    train_size = 1500 if variant['debug'] == 1 else None #None
 
     static = False
     if variant['schedule_kwargs']['schedule_type'] == 'static_iodine':
@@ -223,20 +223,20 @@ if __name__ == "__main__":
     #               Initially, it should use around 8.4GB of the GPU
 
     variant = dict(
-        model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
-        K=1,
+        model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
+        K=4,
         training_kwargs = dict(
-            batch_size=64, #Used in IodineTrainer, change to appropriate constant based off dataset size
+            batch_size=16, #Used in IodineTrainer, change to appropriate constant based off dataset size
             lr=1e-4, #Used in IodineTrainer
             log_interval=0,
         ),
         schedule_kwargs=dict(
-            train_T=21, #Number of steps in single training sequence, change with dataset
-            test_T=21,  #Number of steps in single testing sequence, change with dataset
+            train_T=5, #Number of steps in single training sequence, change with dataset
+            test_T=5,  #Number of steps in single testing sequence, change with dataset
             seed_steps=4, #Number of seed steps
-            schedule_type='curriculum' #single_step_physics, curriculum, static_iodine, rprp, next_step
+            schedule_type='rprp' #single_step_physics, curriculum, static_iodine, rprp, next_step
         ),
-        num_epochs=120, #Go up to 4 timesteps in the future
+        num_epochs=200, #Go up to 4 timesteps in the future
         algorithm='Iodine',
         save_period=1,
         dataparallel=True,
@@ -248,7 +248,7 @@ if __name__ == "__main__":
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
-        exp_prefix='{}-{}-k1'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
+        exp_prefix='{}-{}-reg'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
