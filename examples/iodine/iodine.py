@@ -152,7 +152,7 @@ def train_vae(variant):
     train_path = get_module_path() + '/ec2_data/{}.h5'.format(variant['dataset'])
     test_path = train_path
     bs = variant['training_kwargs']['batch_size']
-    train_size = 100 if variant['debug'] == 1 else None #None
+    train_size = 1500 if variant['debug'] == 1 else None #None
 
     static = False
     if variant['schedule_kwargs']['schedule_type'] == 'static_iodine':
@@ -305,7 +305,7 @@ if __name__ == "__main__":
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
-        exp_prefix='{}-{}-{}-k1'.format(args.dataset, variant['schedule_kwargs'][
+        exp_prefix='{}-{}-{}'.format(args.dataset, variant['schedule_kwargs'][
             'schedule_type'], variant['algorithm']),
         mode=args.mode,
         variant=variant,

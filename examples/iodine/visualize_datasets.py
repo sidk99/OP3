@@ -155,7 +155,7 @@ def create_image(models_and_type, frames, actions, image_prefix, T):
     for i in range(cur_shape[0]):
         tmp = frames[i, :cur_shape[1]].unsqueeze(1)  # (T, 1, 3, D, D)
         tmp = torch.cat([tmp, all_object_recons[i]], dim=1) #(T, 1, 3, D, D), (T, K*M, 3, D, D) -> (T, 1+K*M, 3, D, D)
-        tmp = tmp.permute(1, 0, 2, 3, 4).contiguous()  #(T, 1+K*M, 3, D, D)
+        tmp = tmp.permute(1, 0, 2, 3, 4).contiguous()  #(1+K*M, T, 3, D, D)
         tmp = tmp.view(-1, *cur_shape[-3:])  # (T*(1+K*M), 3, D, D)
         save_image(tmp, filename=image_prefix+"_{}.png".format(i), nrow=cur_shape[1])
 
@@ -256,8 +256,24 @@ def analyze_mse(variant):
     plt.figure()
     plt.errorbar(range(1, T), np.mean(rprp_vs_next_step, axis=0)[1:], np.std(rprp_vs_next_step, axis=0)[1:], label='rprp vs next_step',capsize=5)
     plt.savefig(logger.get_snapshot_dir() + '/rprp_vs_next_step.png')
-
 ###################End analysis functions##############
+
+
+#################Create graphs#############
+def create_mse_graphs(variant):
+    T = all_mse.shape[-1] #
+    static_mse = -1 #(I, M, T)
+    next_step_mse = -1 #(I, M, T)
+    rprp = -1 #(I, M, T)
+    rprpr_next_step = -1 #(I, M, T)
+
+    plt.figure()
+    plt.errorbar(range(T), np.mean(static_mse, axis=0), np.std(static_mse, axis=0), label='Static', capsize=5, color='b--')
+    plt.errorbar(range(T), np.mean(rprp, axis=0), np.std(rprp, axis=0), label='OP3', capsize=5, color='b-')
+
+    plt.errorbar(range(1, T), np.mean(static_mse, axis=0)[1:], np.std(static_mse, axis=0)[1:], label='Sequence', capsize=5,
+                 color='g--')
+    plt.errorbar(range(1, T), np.mean(rprpr_next_step, axis=0)[1:], np.std(rprpr_next_step, axis=0)[1:], label='OP3_pred', capsize=5, color='g-')
 
 
 #Cloth models:

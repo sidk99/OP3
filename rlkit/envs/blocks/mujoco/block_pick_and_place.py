@@ -325,6 +325,9 @@ class BlockPickAndPlaceEnv():
         return aname
 
     def sample_action(self, action_type=None):
+        if len(self.names) == 1 and action_type == 'place_block':
+            action_type = None
+
         if action_type == 'pick_block': #pick block, place randomly
             # aname = np.random.choice(self.names)
             aname = self.get_rand_block_byz()
@@ -553,8 +556,7 @@ class BlockPickAndPlaceEnv():
 def createSingleSim(args):
     np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
     num_blocks = np.random.randint(args.min_num_objects, args.max_num_objects+1)
-    myenv = BlockPickAndPlaceEnv(num_blocks, args.num_colors, args.img_dim, args.include_z,
-                                 random_initialize=True, view=False)
+    myenv = BlockPickAndPlaceEnv(num_blocks, args.num_colors, args.img_dim, args.include_z, random_initialize=True, view=False)
     myenv.img_dim = args.img_dim
     # global myenv
     imgs = []
@@ -571,7 +573,7 @@ def createSingleSim(args):
             elif rand_float < args.force_pick + args.force_place:
                 ac = myenv.sample_action('place_block')
             else:
-                ac = myenv.sample_action()
+                ac = myenv.sample_action(None)
         imgs.append(myenv.step(ac))
         acs.append(ac)
 
@@ -628,58 +630,60 @@ def test_try_step():
     cur_fig.savefig("test_try_step")
 
 
-# python block_pick_and_place.py -f pickplace_multienv_10k -nmin 2 -nax 2 -nf 21 -ns 10000 -fpick 0.3 -fplace 0.4
+# python block_pick_and_place.py -f pickplace_multienv_10k -nmin 2 -nmax 2 -nf 21 -ns 10000 -fpick 0.3 -fplace 0.4
 # python block_pick_and_place.py -f pickplace_multienv_c3_10k -nmin 2 -nmax 2 -nf 21 -ns 10000 -fpick 0.3 -fplace 0.4 -c 3 -p 1
 
+# python block_pick_and_place.py -f pickplace_1and2_1k -nmin 1 -nmax 2 -nf 21 -ns 1000 -fpick 0.4 -fplace 0.3
+
 if __name__ == '__main__':
-    test_try_step()
-    # parser = ArgumentParser()
-    # parser.add_argument('-f', '--filename', type=str, default=None, required=True)
-    # parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
-    # parser.add_argument('-nmax', '--max_num_objects', type=int, default=3)
-    # parser.add_argument('-i', '--img_dim', type=int, default=64)
-    # parser.add_argument('-nf', '--num_frames', type=int, default=21)
-    # parser.add_argument('-ns', '--num_sims', type=int, default=2)
-    # parser.add_argument('-mi', '--make_images', type=bool, default=False)
-    # parser.add_argument('-c', '--num_colors', type=int, default=None)
-    # parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
-    # parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
-    # parser.add_argument('-r', '--remove_objects', type=bool, default=False)
-    # parser.add_argument('-z', '--include_z', type=bool, default=False)
-    # parser.add_argument('--output_path', default='', type=str,
-    #                     help='path to save images')
-    # parser.add_argument('-p', '--num_workers', type=int, default=1)
-    # args = parser.parse_args()
-    #
-    # if args.filename[-3:] == ".h5":
-    #     args.filename = args.filename[:-3]
-    #
-    #
-    # print(args)
-    # info = {}
-    # info["min_num_objects"] = args.min_num_objects
-    # info["max_num_objects"] = args.max_num_objects
-    # info["img_dim"] = args.img_dim
-    #
-    # if args.remove_objects:
-    #     args.num_frames = 2
-    #
-    # info["num_frames"] = args.num_frames
-    # # single_sim_func = lambda : createSingleSim(args)
-    # single_sim_func = createSingleSim
-    # #createSingleSim(args)
-    # env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
-    # ac_size = env.get_actions_size()
-    # obs_size = env.get_obs_size()
-    #
-    # # myenv = BlockPickAndPlaceEnv(2, args.num_colors, args.img_dim, args.include_z,
-    # #                              random_initialize=True, view=False)
-    # dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
-    #
-    # dgu.hdf5_to_image(args.filename+'.h5')
-    # for i in range(min(10, args.num_sims)):
-    #     tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
-    #     dgu.make_gif(tmp, "animation.gif")
+    # test_try_step()
+    parser = ArgumentParser()
+    parser.add_argument('-f', '--filename', type=str, default=None, required=True)
+    parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
+    parser.add_argument('-nmax', '--max_num_objects', type=int, default=3)
+    parser.add_argument('-i', '--img_dim', type=int, default=64)
+    parser.add_argument('-nf', '--num_frames', type=int, default=21)
+    parser.add_argument('-ns', '--num_sims', type=int, default=2)
+    parser.add_argument('-mi', '--make_images', type=bool, default=False)
+    parser.add_argument('-c', '--num_colors', type=int, default=None)
+    parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
+    parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
+    parser.add_argument('-r', '--remove_objects', type=bool, default=False)
+    parser.add_argument('-z', '--include_z', type=bool, default=False)
+    parser.add_argument('--output_path', default='', type=str,
+                        help='path to save images')
+    parser.add_argument('-p', '--num_workers', type=int, default=1)
+    args = parser.parse_args()
+
+    if args.filename[-3:] == ".h5":
+        args.filename = args.filename[:-3]
+
+
+    print(args)
+    info = {}
+    info["min_num_objects"] = args.min_num_objects
+    info["max_num_objects"] = args.max_num_objects
+    info["img_dim"] = args.img_dim
+
+    if args.remove_objects:
+        args.num_frames = 2
+
+    info["num_frames"] = args.num_frames
+    # single_sim_func = lambda : createSingleSim(args)
+    single_sim_func = createSingleSim
+    #createSingleSim(args)
+    env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
+    ac_size = env.get_actions_size()
+    obs_size = env.get_obs_size()
+
+    # myenv = BlockPickAndPlaceEnv(2, args.num_colors, args.img_dim, args.include_z,
+    #                              random_initialize=True, view=False)
+    dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
+
+    dgu.hdf5_to_image(args.filename+'.h5')
+    for i in range(min(10, args.num_sims)):
+        tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
+        dgu.make_gif(tmp, "animation.gif")
 
 
 

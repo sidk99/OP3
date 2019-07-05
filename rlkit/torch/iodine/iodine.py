@@ -773,7 +773,7 @@ class IodineVAE(GaussianLatentVAE):
 
     #RV: Input is (bs, T, ch, imsize, imsize), schedule is (T,): 0 for refinement and 1 for physics
     #    Runs refinement/dynamics on input accordingly into
-    def _forward_dynamic_actions(self, input, actions, schedule):
+    def _forward_dynamic_actions(self, input, actions, schedule, initial_lambdas=None):
         # input is (bs, T, ch, imsize, imsize)
         # schedule is (T,): 0 for refinement and 1 for physics
         K = self.K
@@ -781,8 +781,15 @@ class IodineVAE(GaussianLatentVAE):
         T = schedule.shape[0]
 
         # means and log_vars of latent
-        lambdas1 = self.lambdas1.unsqueeze(0).repeat(bs * K, 1)
-        lambdas2 = self.lambdas2.unsqueeze(0).repeat(bs * K, 1)
+        if initial_lambdas is None:
+            lambdas1 = self.lambdas1.unsqueeze(0).repeat(bs * K, 1) #(B*K, repsize)
+            lambdas2 = self.lambdas2.unsqueeze(0).repeat(bs * K, 1) #(B*K, repsize)
+        else:
+            lambdas1 = self.lambdas1.unsqueeze(0).repeat(bs * K, 1)  # (B*K, repsize)
+            lambdas1 += initial_lambdas[0].view(bs * K, -1) #(B*K, repsize)
+
+            lambdas2 = self.lambdas2.unsqueeze(0).repeat(bs * K, 1)*0  # (B*K, repsize)
+            lambdas2 += initial_lambdas[1].view(bs * K, -1) #(B*K, repsize)
         # initialize hidden state
         h1, h2 = self.initialize_hidden(bs * K) #RV: Each one is (bs, self.lstm_size)
 
@@ -838,8 +845,6 @@ class IodineVAE(GaussianLatentVAE):
                 raise ValueError("Invalid schedule value: {}".format(schedule[t-1]))
 
 
-
-
             loss_w = get_loss_weight(t, schedule, self.schedule_type)
 
             # Decode and get loss
@@ -859,3 +864,137 @@ class IodineVAE(GaussianLatentVAE):
         all_masks = torch.stack([x.view(untiled_k_shape) for x in masks], 1)  # # (bs, T, K, 1, imsize, imsize)
         return all_x_hats.data, all_masks.data, total_loss, kle_loss.data / self.beta, \
                log_likelihood.data, mse, final_recon.data, [lambdas1.data, lambdas2.data]
+
+
+    #input:tensor of shape (B, T1, 3, D, D), actions: (B, T2, A) where T2 < T1
+    # def special_forward(self, obs, actions):
+
+    #High level: Need a function that takes in a sequence of actions and images and returns hidden state (dynamic seed steps)
+    #Then using hidden state, run dynamics (action selection) multiple times and return images/lambdas accordingly
+    #Once we have choosen an action, run dynamics to get new hidden state and repeat process
+
+    #Input: Both are tensors, obs: (B, T, 3, D, D), actions: (B, T-1, A) or None
+    def get_hidden_state(self, obs, actions, plot_image_file_name=None):
+        bs, T = obs.shape[0], obs.shape[1]
+        seed_steps = 4
+        num_refine_per_phys = 4
+        schedule = np.zeros(seed_steps + (T - 1) * num_refine_per_phys)  # len(schedule) = T2
+        schedule[seed_steps::num_refine_per_phys] = 1  # [0,0,0,0,1,0,1,0,1,0] if num_refine_per_phys=2 for example
+
+        x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(obs, actions, schedule)
+
+        object_recons = x_hats * masks  # (bs, T2, K, 3, D, D)
+        # object_recons = object_recons[:, seed_steps - 1::num_refine_per_phys]  # (bs, T, K, 3, D, D)
+        # final_recons = object_recons.sum(2, keepdim=True)  # (bs, T, 1, 3, D, D)
+
+        if plot_image_file_name is not None:
+            true_obs = obs[:, np.cumsum(schedule)].unsqueeze(2) #(B, T2, 3, D, D) -> (B, T2, 1, 3, D, D)
+            final_recons = object_recons.sum(2, keepdim=True)  # (bs, T2, 1, 3, D, D)
+            all_object_recons = torch.cat([true_obs, final_recons, object_recons], dim=2)  # (bs=1, T2, K+2, 3, D, D)
+            all_object_recons = all_object_recons.squeeze(0) #(T2, K+2, 3, D, D)
+            all_object_recons = all_object_recons.permute(1, 0, 2, 3, 4).contiguous()  #(K+2, T2, 3, D, D)
+            all_object_recons = all_object_recons.view(-1, *all_object_recons.shape[-3:])
+            save_image(all_object_recons, filename=plot_image_file_name, nrow=final_recons.shape[1])
+
+        object_recons = object_recons[:, seed_steps - 1::num_refine_per_phys]  # (bs, T, K, 3, D, D)
+        final_recons = object_recons.sum(2, keepdim=True)  # (bs, T, 1, 3, D, D)
+
+        return [lambdas[0].view(bs, self.K, -1).detach(), lambdas[1].view(bs, self.K, -1).detach()], final_recons
+
+    # Input: Both are tensors, lambdas: Tuple of two, each element is (B, K, repsize), actions: (B, T, A)
+    # Output: full_image: (B, 3, D, D),  lambdas: Tuple of two (B, K, repsize),  sub_images:(B, K, 3, D, D)
+    def run_dynamics(self, lambdas, actions):
+        bs, k, rep_size = lambdas[0].shape
+        T = actions.shape[1]
+        lambdas1 = lambdas[0].view(-1, rep_size) #(B*K, rep_size)
+        lambdas2 = lambdas[1].view(-1, rep_size) #(B*K, rep_size)
+
+        for i in range(T):
+            cur_actions = actions[:, i] #(B, A)
+            cur_actions = cur_actions.unsqueeze(1).repeat(1, k, 1).view(bs*k, -1) #(B, A) -> (B, 1, A) -> (B, K, A) -> (B*K, A)
+            lambdas1, _ = self.physics_net(lambdas1, lambdas2, cur_actions)
+
+        lambdas1 = lambdas1.view(bs, k, rep_size) #(B, K, rep_size)
+        lambdas2 = lambdas2.view(bs, k, rep_size) #(B, K, rep_size)
+        x_hats, masks = self.just_decode([lambdas1, lambdas2]) #x_hats: (bs, K, 3, D, D), masks: (bs, K, D, D)
+
+        sub_images = x_hats * masks.unsqueeze(2) #(bs, K, 3, D, D)
+        full_image = sub_images.sum(1) #(bs, 3, D, D)
+
+        return full_image, [lambdas1.detach(), lambdas2.detach()], sub_images
+
+    #Input: lambdas: Tuple of two, each element is (N, K, repsize), actions: (N, T, A)
+    # Output: full_image: (N, 3, D, D),  lambdas: Tuple of two (N, K, repsize),  sub_images:(N, K, 3, D, D)
+    def batch_run_dynamics(self, lambdas, actions, bs=4):
+        # Handle large obs in batches
+        N = actions.shape[0]
+        n_batches = int(np.ceil(N / float(bs)))
+        outputs = [[], [], [], []]
+
+        for i in range(n_batches):
+            start_idx = i * bs
+            end_idx = min(start_idx + bs, N)
+            if actions is not None:
+                actions_batch = actions[start_idx:end_idx]
+            else:
+                actions_batch = None
+            lambdas_batch = [lambdas[0][start_idx:end_idx], lambdas[1][start_idx:end_idx]]
+
+            pred_obs, obs_latents, obs_latents_recon = self.run_dynamics(lambdas_batch, actions_batch)
+            # pdb.set_trace()
+            outputs[0].append(pred_obs)
+            outputs[1].append(obs_latents[0])
+            outputs[2].append(obs_latents[1])
+            outputs[3].append(obs_latents_recon)
+
+        return torch.cat(outputs[0]), [torch.cat(outputs[1]), torch.cat(outputs[2])], torch.cat(outputs[3])
+
+    #Input: lambdas: Tuple of two, each element is (B, K, repsize)
+    # By default we want to return probability mask and not depth values
+    def just_decode(self, lambdas, give_depth_instead_of_mask=False):
+        bs, k, rep_size = lambdas[0].shape
+
+        lambdas1 = lambdas[0].view(bs*k, rep_size) #(B*K, repsize)
+        lambdas2 = lambdas[1].view(bs*k, rep_size) #(B*K, repsize)
+        latents = self.rsample_softplus([lambdas1, lambdas2])  # lambdas1, lambdas2 are mu, softplus
+
+        broadcast_ones = ptu.ones((latents.shape[0], latents.shape[1], self.decoder_imsize, self.decoder_imsize)).to(
+            latents.device)  # RV: (bs, lstm_size, decoder_imsize. decoder_imsize)
+        decoded = self.decoder(latents, broadcast_ones)  # RV: Uses broadcast decoding network, output (bs*K, 4, D, D)
+        # print("decoded.shape: {}".format(decoded.shape))
+        x_hat = decoded[:, :3]  # RV: (bs*K, 3, D, D)
+        m_hat_logits = decoded[:, 3]  # RV: (bs*K, 1, D, D), raw depth values
+
+        x_hat = x_hat.view(bs, k, 3, self.imsize, self.imsize)  # (bs, K, 3, D, D)
+        m_hat_logits = m_hat_logits.view(bs, k, self.imsize, self.imsize)  # RV: (bs, K, D, D)
+
+        if not give_depth_instead_of_mask: #If false, give mask
+            mask = F.softmax(m_hat_logits, dim=1)  # (bs, K, D, D)
+        else: #Give depth values
+            mask = m_hat_logits # (bs, K, D, D)
+        return x_hat.detach(), mask.detach()
+
+    # cur_lambdas: Tuple of size two, each of (B, K, repsize), 
+    # obs: (B, T, 3, D, D), actions: (B, T, A)
+    #Note actions is (_, T, _), so we lead with a physics step
+    def update_lambdas_with_obs_action(self, cur_lambdas, obs, actions):
+        self.eval_mode = True
+        first_action = actions[:, :1] #(B, 1, A)
+        _, new_lambdas, _ = self.run_dynamics(cur_lambdas, first_action) #Predicts first image
+
+        bs, T = obs.shape[0], obs.shape[1]
+        num_refine_per_phys = 1
+        schedule = np.zeros(T * (num_refine_per_phys+1))
+        schedule[::(num_refine_per_phys+1)] = 1  # [1,0,1,0] if num_refine_per_phys=1 & T=2 for example
+        schedule = schedule[1:] #As we already did the first physics step
+
+        x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = \
+            self._forward_dynamic_actions(obs, actions[:, 1:], schedule, initial_lambdas=new_lambdas)
+
+        lambdas[0] = lambdas[0].view(bs, self.K, -1).detach()
+        lambdas[1] = lambdas[1].view(bs, self.K, -1).detach()
+        return lambdas
+
+
+
+
