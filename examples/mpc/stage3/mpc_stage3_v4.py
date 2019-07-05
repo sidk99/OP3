@@ -303,14 +303,21 @@ class MPC:
         prev_obs_torch = prev_obs_torch.unsqueeze(0)/255 #(B=1, T, 3, D, D)
         if prev_actions is not None:
             prev_actions = ptu.from_numpy(prev_actions).unsqueeze(0) #(B=1, T-1, A)
-        current_latents = self.model.get_hidden_state(prev_obs_torch, prev_actions) #Note: Tuple of two, each of size (B=1, K, repsize)
+        current_latents, final_recons = self.model.get_hidden_state(prev_obs_torch, prev_actions,
+                                    plot_image_file_name=logger.get_snapshot_dir() + '{}/seed_steps.png'.format(self.logger_prefix_dir))
+        #Note on above: current_latents: tuple of two, each of size (B=1, K, repsize), final_recons: (B=1, T, 1, 3, D, D)
 
+        current_latents = [current_latents[0].detach(), current_latents[1].detach()]
         cur_ob = prev_obs[-1]/255 #(D, D, 3)
-        obs_lst = [np.moveaxis(goal_image.astype(np.float32) / 255., 2, 0), np.moveaxis(cur_ob, 2, 0)]
+        # obs_lst = [np.moveaxis(goal_image.astype(np.float32) / 255., 2, 0), np.moveaxis(cur_ob, 2, 0)]
+        obs_lst = [np.moveaxis(goal_image.astype(np.float32) / 255., 2, 0)]
+        obs_lst.extend(np.moveaxis(prev_obs, 3, 1)/255)
 
         #####Action Selection#####
         initial_pred_obs = self.model.refine(ptu.from_numpy(np.moveaxis(cur_ob, 2, 0)), hidden_state=None, plot_latents=False)[0]
-        pred_obs_lst = [ptu.get_numpy(rec_goal_image), ptu.get_numpy(initial_pred_obs)]
+        # pred_obs_lst = [ptu.get_numpy(rec_goal_image), ptu.get_numpy(initial_pred_obs)]
+        pred_obs_lst = [ptu.get_numpy(rec_goal_image)]
+        pred_obs_lst.extend(ptu.get_numpy(final_recons[0, :, 0]))
         # full_obs_list = []
 
         complete_action_list = []
@@ -490,34 +497,50 @@ def main(variant):
 
     m = load_model(variant)
 
-    goal_idxs = list(range(0, 20))
+    goal_idxs = list(range(0, ))
     actions_lst = []
     stats = {'mse': 0}
 
     goal_folder = module_path + '/examples/mpc/stage3/goals/objects_{}/'.format(variant['number_goal_objects'])
 
     for i, goal_idx in enumerate(goal_idxs):
-        goal_file = goal_folder + 'img_{}.png'.format(goal_idx)
-        env_info = np.load(goal_folder + 'env_data.npy')[goal_idx]
-        env = BlockPickAndPlaceEnv(num_objects=1, num_colors=None, img_dim=64, include_z=False) #Note num_objects & num_colors do not matter
-        env.set_env_info(env_info) #Places the correct blocks in the environment, blocks will also be set in the goal position
-        true_actions = env.move_blocks_side()  # Moves blocks to the side for mpc, returns true optimal actions
-        if variant['mpc_args']['true_actions']:
-            variant['mpc_args']['true_actions'] = true_actions
-        else:
-            variant['mpc_args']['true_actions'] = None
+        #Old version:
+        # goal_file = goal_folder + 'img_{}.png'.format(goal_idx)
+        # env_info = np.load(goal_folder + 'env_data.npy')[goal_idx]
+        # env = BlockPickAndPlaceEnv(num_objects=1, num_colors=None, img_dim=64, include_z=False) #Note num_objects & num_colors do not matter
+        # env.set_env_info(env_info) #Places the correct blocks in the environment, blocks will also be set in the goal position
+        # true_actions = env.move_blocks_side()  # Moves blocks to the side for mpc, returns true optimal actions
+        # if variant['mpc_args']['true_actions']:
+        #     variant['mpc_args']['true_actions'] = true_actions
+        # else:
+        #     variant['mpc_args']['true_actions'] = None
+        # mpc = MPC(m, env, logger_prefix_dir='/goal_{}'.format(goal_idx), **variant['mpc_args'])
+        #
+        # goal_image = imageio.imread(goal_file)
+        # prev_obs = np.expand_dims(env.get_observation(), axis=0)  # (1, D, D, 3)
+        # prev_actions = None
+        # mse, actions = mpc.run_new(prev_obs, prev_actions, goal_image)
 
+        #New version:
+        folder = module_path + '/examples/mpc/stage3/goals/objects_seed_{}/'.format(variant['number_goal_objects'])
+        with open(folder + 'goal_data.pkl', 'rb') as f:
+            goal_dict = pickle.load(f)
+        goal_image = goal_dict["goal_image"][i]
+        frames = goal_dict["frames"][i]
+        actions = goal_dict["actions"][i]
+        goal_env_info = goal_dict["goal_env_info"][i]
+        starting_env_info = goal_dict["starting_env_info"][i]
+        env = BlockPickAndPlaceEnv(num_objects=1, num_colors=None, img_dim=64, include_z=False)  # Note num_objects & num_colors do not matter
+        env.set_env_info(starting_env_info)
+        for an_action in actions:
+            env.step(an_action)
 
         # mpc = MPC(m, env, n_actions=20, mpc_steps=3, true_actions=None,
         #           cost_type=variant['cost_type'], filter_goals=False, n_goal_objs=2,
         #           logger_prefix_dir='/goal_{}'.format(goal_idx),
         #           mpc_style=variant['mpc_style'], cem_steps=3, use_action_image=False, time_horizon=2, actions_per_step=2)
         mpc = MPC(m, env, logger_prefix_dir='/goal_{}'.format(goal_idx), **variant['mpc_args'])
-
-        goal_image = imageio.imread(goal_file)
-        prev_obs = np.expand_dims(env.get_observation(), axis=0) #(1, D, D, 3)
-        prev_actions = None
-        mse, actions = mpc.run_new(prev_obs, prev_actions, goal_image)
+        mse, actions = mpc.run_new(frames, actions, goal_image)
         stats['mse'] += mse
         actions_lst.append(actions)
         np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
@@ -527,13 +550,30 @@ def main(variant):
     # np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
 
+
+#####Example usages
 #CUDA_VISIBLE_DEVICES=3 python mpc_stage3_v4.py -f /nfs/kun1/users/rishiv/Research/op3_exps/06-10-iodine-blocks-pickplace-multienv-10k/06-10-iodine-blocks-pickplace_multienv_10k_2019_06_10_23_24_47_0000--s-18660/_params.pkl
 #CUDA_VISIBLE_DEVICES=3 python mpc_stage3_v4.py -f /nfs/kun1/users/rishiv/Research/op3_exps/06-26-iodine-blocks-pickplace-multienv-10k-k1/06-26-iodine-blocks-pickplace_multienv_10k-k1_2019_06_26_03_50_18_0000--s-15069/_params.pkl
 #CUDA_VISIBLE_DEVICES=3 python mpc_stage3_v4.py -f /nfs/kun1/users/rishiv/Research/op3_exps/06-26-iodine-blocks-pickplace-multienv-10k-mlp/06-26-iodine-blocks-pickplace_multienv_10k-mlp_2019_06_26_22_54_03_0000--s-16393/_params.pkl
-
-
-#CUDA_VISIBLE_DEVICES=0,3 python mpc_stage3_v4.py -f /nfs/kun1/users/rishiv/Research/op3_exps/07-03-pickplace-1block-10k-curriculum-mlp/07-03-pickplace_1block_10k-curriculum-mlp_2019_07_03_23_20_29_0000--s-47845/_params.pkl
+#CUDA_VISIBLE_DEVICES=3 python mpc_stage3_v4.py -f /nfs/kun1/users/rishiv/Research/op3_exps/07-03-pickplace-1block-10k-curriculum-mlp/07-03-pickplace_1block_10k-curriculum-mlp_2019_07_03_23_20_29_0000--s-47845/_params.pkl
 # /nfs/kun1/users/rishiv/Research/op3_exps/07-04-pickplace-1block-10k-curriculum-reg/07-04-pickplace_1block_10k-curriculum-reg_2019_07_04_21_49_11_0000--s-43865/_params.pkl
+
+
+###########Instructions for running################
+#Step 1: Set model and K in variant, and change exp_prefix in run_experiment
+#Regular: model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=4
+#MLP: model=iodine.imsize64_large_iodine_architecture_multistep_physics_MLP, K=4
+#K=1: model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG, K=1
+#Note: schedule_kwargs is useless in this scenario and can be safely ignored
+
+#Step 2: Get the corresponding paramater file path name
+#   This will be passed in as the argument for -f
+
+#Step 3: Figure out which dataset you want to train on (e.g. 1 block, 2 block)
+# Set num_obs to the corresponding value
+
+#Step 4: Figure out the specific args for mpc_args
+#Most likely only want to change the following: n_actions, mpc_steps, time_horizon, actions_per_step, cem_steps
 
 
 if __name__ == "__main__":
@@ -541,39 +581,38 @@ if __name__ == "__main__":
     parser.add_argument('-f', '--modelfile', type=str, default=None)
     args = parser.parse_args()
 
-    num_obs = 2 #TODO: Change
+    num_obs = 1 #TODO: Change
 
     variant = dict(
         algorithm='MPC',
         number_goal_objects=num_obs,
         model_file=args.modelfile,
-        # cost_type='sum_goal_min_latent_function',  # 'sum_goal_min_latent' 'latent_pixel 'sum_goal_min_latent_function'
-        # mpc_style='cem', # random_shooting or cem
         model= iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
         K=4,
-        schedule_kwargs=dict(
-            train_T=21,  # Number of steps in single training sequence, change with dataset
-            test_T=21,  # Number of steps in single testing sequence, change with dataset
-            seed_steps=4,  # Number of seed steps
-            schedule_type='curriculum'  # single_step_physics, curriculum
+        schedule_kwargs=dict( #Ignore
+            train_T=21,
+            test_T=21,
+            seed_steps=4,
+            schedule_type='curriculum'
         ),
+
         mpc_args=dict(
-            n_actions=10,
-            mpc_steps=4,
-            time_horizon=2,
-            actions_per_step=1,
-            cem_steps=2,
-            use_action_image=False,
-            mpc_style='cem',
+            n_actions=100, #Can change
+            mpc_steps=3,   #Can change
+            time_horizon=1, #Can change
+            actions_per_step=1, #Keep at 1
+            cem_steps=3, #Can change
+            use_action_image=False, #Keep False
+            mpc_style='cem', #Ignore
             n_goal_objs=num_obs,
-            filter_goals=False,
-            true_actions=True
+            filter_goals=False, #Most likely should be True but can possibly be false as well
+            true_actions=None #Keep None
         )
     )
 
     run_experiment(
         main,
-        exp_prefix='mpc_stage3_objects{}-reg'.format(variant['number_goal_objects']),
+        exp_prefix='mpc_stage3_objects{}-seed-reg'.format(variant['number_goal_objects']),
         mode='here_no_doodad',
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

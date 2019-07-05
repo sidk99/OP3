@@ -872,15 +872,32 @@ class IodineVAE(GaussianLatentVAE):
     #Once we have choosen an action, run dynamics to get new hidden state and repeat process
 
     #Input: Both are tensors, obs: (B, T, 3, D, D), actions: (B, T-1, A) or None
-    def get_hidden_state(self, obs, actions):
+    def get_hidden_state(self, obs, actions, plot_image_file_name=None):
         bs, T = obs.shape[0], obs.shape[1]
         seed_steps = 4
-        num_refine_per_phys = 1
+        num_refine_per_phys = 4
         schedule = np.zeros(seed_steps + (T - 1) * num_refine_per_phys)  # len(schedule) = T2
         schedule[seed_steps::num_refine_per_phys] = 1  # [0,0,0,0,1,0,1,0,1,0] if num_refine_per_phys=2 for example
 
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(obs, actions, schedule)
-        return [lambdas[0].view(bs, self.K, -1), lambdas[1].view(bs, self.K, -1)]
+
+        object_recons = x_hats * masks  # (bs, T2, K, 3, D, D)
+        # object_recons = object_recons[:, seed_steps - 1::num_refine_per_phys]  # (bs, T, K, 3, D, D)
+        # final_recons = object_recons.sum(2, keepdim=True)  # (bs, T, 1, 3, D, D)
+
+        if plot_image_file_name is not None:
+            true_obs = obs[:, np.cumsum(schedule)].unsqueeze(2) #(B, T2, 3, D, D) -> (B, T2, 1, 3, D, D)
+            final_recons = object_recons.sum(2, keepdim=True)  # (bs, T2, 1, 3, D, D)
+            all_object_recons = torch.cat([true_obs, final_recons, object_recons], dim=2)  # (bs=1, T2, K+2, 3, D, D)
+            all_object_recons = all_object_recons.squeeze(0) #(T2, K+2, 3, D, D)
+            all_object_recons = all_object_recons.permute(1, 0, 2, 3, 4).contiguous()  #(K+2, T2, 3, D, D)
+            all_object_recons = all_object_recons.view(-1, *all_object_recons.shape[-3:])
+            save_image(all_object_recons, filename=plot_image_file_name, nrow=final_recons.shape[1])
+
+        object_recons = object_recons[:, seed_steps - 1::num_refine_per_phys]  # (bs, T, K, 3, D, D)
+        final_recons = object_recons.sum(2, keepdim=True)  # (bs, T, 1, 3, D, D)
+
+        return [lambdas[0].view(bs, self.K, -1).detach(), lambdas[1].view(bs, self.K, -1).detach()], final_recons
 
     # Input: Both are tensors, lambdas: Tuple of two, each element is (B, K, repsize), actions: (B, T, A)
     # Output: full_image: (B, 3, D, D),  lambdas: Tuple of two (B, K, repsize),  sub_images:(B, K, 3, D, D)
@@ -902,7 +919,7 @@ class IodineVAE(GaussianLatentVAE):
         sub_images = x_hats * masks.unsqueeze(2) #(bs, K, 3, D, D)
         full_image = sub_images.sum(1) #(bs, 3, D, D)
 
-        return full_image, [lambdas1, lambdas2], sub_images
+        return full_image, [lambdas1.detach(), lambdas2.detach()], sub_images
 
     #Input: lambdas: Tuple of two, each element is (N, K, repsize), actions: (N, T, A)
     # Output: full_image: (N, 3, D, D),  lambdas: Tuple of two (N, K, repsize),  sub_images:(N, K, 3, D, D)
@@ -953,7 +970,7 @@ class IodineVAE(GaussianLatentVAE):
             mask = F.softmax(m_hat_logits, dim=1)  # (bs, K, D, D)
         else: #Give depth values
             mask = m_hat_logits # (bs, K, D, D)
-        return x_hat, mask
+        return x_hat.detach(), mask.detach()
 
     # cur_lambdas: Tuple of size two, each of (B, K, repsize), 
     # obs: (B, T, 3, D, D), actions: (B, T, A)
@@ -972,8 +989,8 @@ class IodineVAE(GaussianLatentVAE):
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = \
             self._forward_dynamic_actions(obs, actions[:, 1:], schedule, initial_lambdas=new_lambdas)
 
-        lambdas[0] = lambdas[0].view(bs, self.K, -1)
-        lambdas[1] = lambdas[1].view(bs, self.K, -1)
+        lambdas[0] = lambdas[0].view(bs, self.K, -1).detach()
+        lambdas[1] = lambdas[1].view(bs, self.K, -1).detach()
         return lambdas
 
 
