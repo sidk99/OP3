@@ -497,7 +497,7 @@ def main(variant):
 
     m = load_model(variant)
 
-    goal_idxs = list(range(0, ))
+    goal_idxs = list(range(0, 100))
     actions_lst = []
     stats = {'mse': 0}
 
@@ -605,7 +605,7 @@ if __name__ == "__main__":
             use_action_image=False, #Keep False
             mpc_style='cem', #Ignore
             n_goal_objs=num_obs,
-            filter_goals=False, #Most likely should be True but can possibly be false as well
+            filter_goals=True, #Most likely should be True but can possibly be false as well
             true_actions=None #Keep None
         )
     )
