@@ -584,7 +584,7 @@ if __name__ == "__main__":
     parser.add_argument('-f', '--modelfile', type=str, default=None)
     args = parser.parse_args()
 
-    num_obs = 2 #TODO: Change
+    num_obs = 1 #TODO: Change
 
     variant = dict(
         algorithm='MPC',
@@ -592,7 +592,7 @@ if __name__ == "__main__":
         model_file=args.modelfile,
         # cost_type='sum_goal_min_latent_function',  # 'sum_goal_min_latent' 'latent_pixel 'sum_goal_min_latent_function'
         # mpc_style='cem', # random_shooting or cem
-        model='savp', # iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
+        model= "savp", # iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
         K=4,
         schedule_kwargs=dict(
             train_T=21,  # Number of steps in single training sequence, change with dataset
@@ -602,10 +602,10 @@ if __name__ == "__main__":
         ),
         mpc_args=dict(
             n_actions=500,
-            mpc_steps=4,
+            mpc_steps=3,
             time_horizon=2,
             actions_per_step=1,
-            cem_steps=4,
+            cem_steps=3,
             use_action_image=False,
             mpc_style='cem',
             n_goal_objs=num_obs,
