@@ -880,7 +880,7 @@ class IodineVAE(GaussianLatentVAE):
         num_refine_per_phys = 4
         schedule = np.zeros(seed_steps + (T - 1) * num_refine_per_phys)  # len(schedule) = T2
         schedule[seed_steps::num_refine_per_phys] = 1  # [0,0,0,0,1,0,1,0,1,0] if num_refine_per_phys=2 for example
-
+        #import pdb; pdb.set_trace()
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = self._forward_dynamic_actions(obs, actions, schedule)
 
         object_recons = x_hats * masks  # (bs, T2, K, 3, D, D)

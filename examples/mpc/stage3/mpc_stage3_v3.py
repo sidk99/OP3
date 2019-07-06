@@ -342,7 +342,7 @@ class MPC:
             if self.cost.remove_goal_latents:
                 goal_latents = self.remove_idx(goal_latents, goal_idx)
                 goal_latents_recon = self.remove_idx(goal_latents_recon, goal_idx)
-                print(goal_latents.shape)
+                #print(goal_latents.shape)
 
         save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst)),
                    logger.get_snapshot_dir() + '{}/mpc.png'.format(self.logger_prefix_dir), nrow=len(obs_lst))
@@ -404,7 +404,7 @@ class MPC:
 
         actions = None
         filter_idx = int(self.n_actions * 0.1)
-        print("self.cem_steps: {}".format(self.cem_steps))
+        #print("self.cem_steps: {}".format(self.cem_steps))
         for i in range(self.cem_steps):
             best_pred_obs, best_actions, best_goal_idx = self._random_shooting_step(obs,
                                                                                     goal_latents,
@@ -447,7 +447,7 @@ class MPC:
             actions = np.concatenate((actions, [true_horizon_actions]), axis=0)  #Add the true action to list of candidate actions
             # actions = np.concatenate([self.true_actions[mpc_step].reshape((1, -1)), actions]) #Add the true action to list of candidate actions
 
-        print(actions.shape)
+        #print(actions.shape)
         if self.use_action_image:
             obs_rep = ptu.from_numpy(np.moveaxis(np.stack([self.env.try_action(action) for action in actions]), 3, 1))
         else:
@@ -548,7 +548,7 @@ def main(variant):
 
     m = load_model(variant)
 
-    goal_idxs = list(range(0, 20))
+    goal_idxs = list(range(0, 100))
     actions_lst = []
     stats = {'accuracy': 0}
 
@@ -561,6 +561,7 @@ def main(variant):
         env = BlockPickAndPlaceEnv(num_objects=1, num_colors=None, img_dim=64, include_z=False) #Note num_objects & num_colors do not matter
         env.set_env_info(env_info) #Places the correct blocks in the environment, blocks will also be set in the goal position
         true_actions = env.move_blocks_side()  # Moves blocks to the side for mpc, returns true optimal actions
+
         if variant['mpc_args']['true_actions']:
             variant['mpc_args']['true_actions'] = true_actions
         else:
@@ -579,6 +580,7 @@ def main(variant):
         accuracy, actions = mpc.run(goal_image)
         stats['accuracy'] += accuracy
         actions_lst.append(actions)
+        print("goal_idx %d accuracy: %f" % (i, stats['accuracy'] / float((i+1))))
         np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
     stats['accuracy'] /= len(goal_idxs)
@@ -616,11 +618,11 @@ if __name__ == "__main__":
             mpc_steps=4,
             time_horizon=2,
             actions_per_step=1,
-            cem_steps=4,
+            cem_steps=3,
             use_action_image=False,
             mpc_style='cem',
             n_goal_objs=num_obs,
-            filter_goals=False,
+            filter_goals=True,
             true_actions=False
         )
     )
