@@ -224,9 +224,9 @@ if __name__ == "__main__":
 
     variant = dict(
         model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
-        K=4,
+        K=5,
         training_kwargs = dict(
-            batch_size=16, #Used in IodineTrainer, change to appropriate constant based off dataset size
+            batch_size=40, #Used in IodineTrainer, change to appropriate constant based off dataset size
             lr=1e-4, #Used in IodineTrainer
             log_interval=0,
         ),
