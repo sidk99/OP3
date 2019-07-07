@@ -15,7 +15,7 @@ import json
 import os
 import rlkit.torch.iodine.iodine as iodine
 
-#from examples.mpc.savp_wrapper import SAVP_MODEL
+from examples.mpc.savp_wrapper import SAVP_MODEL
 
 from collections import OrderedDict
 from rlkit.util.misc import get_module_path
@@ -228,7 +228,7 @@ class Cost:
         union = m1.sum((-3, -2, -1)) + m2.sum((-3, -2, -1))
         #iou = intersect.sum((-3, -2, -1)) / union
 
-        threshold_intersect = (intersect * (torch.pow(im1 - im2, 2) < 0.1).float()).sum((-3,
+        threshold_intersect = (intersect * (torch.pow(im1 - im2, 2) < 0.08).float()).sum((-3,
                                                                                               -2,
                                                                                          -1))
 
@@ -347,6 +347,8 @@ class MPC:
         full_obs_list = []
 
         chosen_actions = []
+        best_accuracy = 0
+
         # print("self.mpc_steps: {}".format(self.mpc_steps))
         for mpc_step in range(self.mpc_steps):
             pred_obs, actions, goal_idx = self.step_mpc(obs, goal_latents, goal_image_tensor, mpc_step, goal_latents_recon)
@@ -373,6 +375,9 @@ class MPC:
             if self.time_horizon > 1:
                 self.time_horizon -= 1
 
+            accuracy = self.env.compute_accuracy(self.true_data, threshold=0.25)
+            best_accuracy = max(accuracy, best_accuracy)
+
         save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst)),
                    logger.get_snapshot_dir() + '{}/mpc.png'.format(self.logger_prefix_dir), nrow=len(obs_lst))
 
@@ -382,9 +387,9 @@ class MPC:
 
         # Compare final obs to goal obs
         mse = np.square(ptu.get_numpy(goal_image_tensor.squeeze().permute(1, 2, 0)) - obs).mean()
-        accuracy = self.env.compute_accuracy(self.true_data)
+        #accuracy = self.env.compute_accuracy(self.true_data)
 
-        return accuracy, np.stack(chosen_actions)
+        return best_accuracy, np.stack(chosen_actions)
 
     #actions: (n_actions, T, A)
     #obs: (n_actions, 3, D, D)
@@ -521,8 +526,10 @@ class MPC:
 def load_model(variant):
     if variant['model'] == 'savp':
         time_horizon = variant['mpc_args']['time_horizon']
-        m = SAVP_MODEL('/nfs/kun1/users/rishiv/Research/baseline/logs/pickplace_multienv_10k/ours_savp/', 'model-500000', 0,
-                       batch_size=20, time_horizon=time_horizon)
+        m = SAVP_MODEL('/home/jcoreyes/objects/baseline/logs/pickplace_multienv_10k/ours_savp'
+                       '/',
+                       'model-500000', 0,
+                       batch_size=10, time_horizon=time_horizon)
     else:
         model_file = variant['model_file']
         m = iodine.create_model(variant, action_dim=4)
@@ -577,7 +584,7 @@ def main(variant):
 
     m = load_model(variant)
 
-    goal_idxs = list(range(0, 50))
+    goal_idxs = list(range(0, 20))
     actions_lst = []
     stats = {'accuracy': 0}
 
@@ -629,12 +636,13 @@ if __name__ == "__main__":
     num_obs = 2 #TODO: Change
 
     variant = dict(
-        algorithm='MPC',
+        algorithm='SAVP',
         number_goal_objects=num_obs,
         model_file=args.modelfile,
         # cost_type='sum_goal_min_latent_function',  # 'sum_goal_min_latent' 'latent_pixel 'sum_goal_min_latent_function'
         # mpc_style='cem', # random_shooting or cem
-        model=iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
+        model='savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', ' \
+                                                                                   #'#iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
         K=4,
         schedule_kwargs=dict(
             train_T=21,  # Number of steps in single training sequence, change with dataset
@@ -658,7 +666,8 @@ if __name__ == "__main__":
 
     run_experiment(
         main,
-        exp_prefix='mpc_stage3_objects{}-reg'.format(variant['number_goal_objects']),
+        exp_prefix='mpc_stage3_objects{}-{}'.format(variant['number_goal_objects'],
+                                                    variant['model']),
         mode='here_no_doodad',
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

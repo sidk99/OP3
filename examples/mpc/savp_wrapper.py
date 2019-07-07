@@ -58,6 +58,7 @@ class SAVP_MODEL:
 
         self.input_phs = {'images': tf.placeholder(tf.float32, image_shape, 'images_ph'),
                           'actions': tf.placeholder(tf.float32, action_shape, 'actions_ph')}
+
         with tf.variable_scope(''):
             model.build_graph(self.input_phs)
 
