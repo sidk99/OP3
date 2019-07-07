@@ -504,13 +504,14 @@ class BlockPickAndPlaceEnv():
         self.blocks = env_info["blocks"]
         self.initialize(True)
 
-    def compute_accuracy(self, true_data, threshold=0.25):
 
+    def compute_accuracy(self, true_data, threshold=0.25):
         import copy
         mjc_data = copy.deepcopy(true_data)
 
         max_err = -float('inf')
         data = self.get_env_info()
+
 
         correct = 0
         for pred_datum in data['blocks']:
@@ -529,6 +530,7 @@ class BlockPickAndPlaceEnv():
                 correct += 1
 
         correct /= float(len(data['blocks']))
+
         return correct
 
     def _best_obj_match(self, pred, targs):

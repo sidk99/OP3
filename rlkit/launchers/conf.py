@@ -82,6 +82,7 @@ gpu_instance_to_price = {
     'p3dn.24xlarge': 9.5, #8 GPU, 256, 0 limit
 }
 which_gpu = 'p3.8xlarge' #g3.16xlarge, p3.8xlarge
+
 print("EC2 type: {}".format(which_gpu))
 GPU_INSTANCE_TYPE = which_gpu #g2.2xlarge, g3.4xlarge, g3.16xlarge, p3.8xlarge
 GPU_SPOT_PRICE = gpu_instance_to_price[which_gpu]

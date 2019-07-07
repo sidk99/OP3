@@ -391,6 +391,7 @@ class MPC:
 
         return best_accuracy, np.stack(chosen_actions)
 
+
     #actions: (n_actions, T, A)
     #obs: (n_actions, 3, D, D)
     # NOTE: Obs must be between range (0,1)!
@@ -524,7 +525,11 @@ class MPC:
 
 
 def load_model(variant):
-    if variant['model'] == 'savp':
+    if variant['model'] == 'savp1':
+        time_horizon = variant['mpc_args']['time_horizon']
+        m = SAVP_MODEL('/nfs/kun1/users/rishiv/Research/baseline/logs/pickplace_1block_10k_mbchang/ours_savp/', 'model-500000', 0,
+                       batch_size=20, time_horizon=time_horizon)
+    elif variant['model'] == 'savp2':
         time_horizon = variant['mpc_args']['time_horizon']
         m = SAVP_MODEL('/home/jcoreyes/objects/baseline/logs/pickplace_multienv_10k/ours_savp'
                        '/',
@@ -612,6 +617,7 @@ def main(variant):
                   true_data=env_info, **variant[
             'mpc_args'])
 
+
         goal_image = imageio.imread(goal_file)
         accuracy, actions = mpc.run(goal_image)
         stats['accuracy'] += accuracy
@@ -643,6 +649,7 @@ if __name__ == "__main__":
         # mpc_style='cem', # random_shooting or cem
         model='savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', ' \
                                                                                    #'#iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
+
         K=4,
         schedule_kwargs=dict(
             train_T=21,  # Number of steps in single training sequence, change with dataset

@@ -15,7 +15,8 @@ import json
 import os
 import rlkit.torch.iodine.iodine as iodine
 
-#from examples.mpc.savp_wrapper import SAVP_MODEL
+from examples.mpc.stage3.savp_wrapper_seed import SAVP_MODEL
+
 
 from collections import OrderedDict
 from rlkit.util.misc import get_module_path
@@ -442,7 +443,7 @@ def load_model(variant):
     if variant['model'] == 'savp':
         time_horizon = variant['mpc_args']['time_horizon']
         m = SAVP_MODEL('/nfs/kun1/users/rishiv/Research/baseline/logs/pickplace_multienv_10k/ours_savp/', 'model-500000', 0,
-                       batch_size=20, time_horizon=time_horizon)
+                       batch_size=20, time_horizon=10)
     else:
         model_file = variant['model_file']
         m = iodine.create_model(variant, action_dim=4)
@@ -587,7 +588,7 @@ if __name__ == "__main__":
         algorithm='MPC',
         number_goal_objects=num_obs,
         model_file=args.modelfile,
-        model= iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
+        model= 'savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
         K=4,
         schedule_kwargs=dict( #Ignore
             train_T=21,

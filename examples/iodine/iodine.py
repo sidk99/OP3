@@ -302,6 +302,7 @@ if __name__ == "__main__":
             #  actual machine type
         )
 
+
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
