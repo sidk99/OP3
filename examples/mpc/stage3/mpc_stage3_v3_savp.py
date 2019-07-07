@@ -24,7 +24,7 @@ import random
 
 class Cost:
     def __init__(self, logger_prefix_dir, latent_or_subimage='subimage', compare_func='intersect',
-                 post_process='raw', aggregate='sum'):
+                 post_process='raw', aggregate='pixel'):
         self.remove_goal_latents = False
         self.logger_prefix_dir = logger_prefix_dir
         self.latent_or_subimage = latent_or_subimage
@@ -50,12 +50,17 @@ class Cost:
                     pred_latents_recon, pred_image, image_suffix="", plot_actions=8):
         self.image_suffix = image_suffix
         self.plot_actions = plot_actions
-        if self.aggregate == 'sum':
-            return self.sum_aggregate(goal_latents, goal_latents_recon, goal_image, pred_latents, pred_latents_recon, pred_image)
-        elif self.aggregate == 'min':
-            return self.min_aggregate(goal_latents, goal_latents_recon, goal_image, pred_latents, pred_latents_recon, pred_image)
-        else:
-            raise KeyError
+        return self.goal_pixel( goal_latents, goal_image, pred_latents, pred_image)
+
+    def goal_pixel(self, goal_latents, goal_image, pred_latents, pred_image):
+
+        mse = torch.pow(pred_image - goal_image, 2).mean(3).mean(2).mean(1)
+
+
+        action_idxs = ptu.get_numpy(mse).argsort()
+
+        return ptu.get_numpy(pred_image[action_idxs[0]]), action_idxs, np.zeros(
+            action_idxs.shape[0])
 
     def get_single_costs(self, goal_latent, goal_latent_recon, pred_latent, pred_latent_recon):
         if self.latent_or_subimage == 'subimage':
@@ -374,8 +379,6 @@ class MPC:
                 goal_latents_recon = self.remove_idx(goal_latents_recon, goal_idx)
                 #print(goal_latents.shape)
 
-            if self.time_horizon > 1:
-                self.time_horizon -= 1
 
             accuracy = self.env.compute_accuracy(self.true_data, threshold=0.25)
             best_accuracy = max(accuracy, best_accuracy)
@@ -514,15 +517,17 @@ class MPC:
         best_obs = np.transpose(best_obs, (0, 3, 1, 2))  # (plot_actions, 3, D, D)
         best_obs = np.stack([best_obs, ptu.get_numpy(pred_obs[best_action_idxs[:plot_actions]])])  # (2, plot_actions, 3, D, D)
         caption = np.zeros((2, plot_actions+1))
-        caption[1, 1:] = sorted_costs[1:plot_actions+1]
+        #caption[1, 1:] = sorted_costs[1:plot_actions+1]
 
         # First arg should be (h, w, imsize, imsize, 3) or (h, w, 3, imsize, imsize), caption (h,w)
-        full_plot = np.concatenate([[np.expand_dims(np.moveaxis(obs, 2, 0),0)]*2, best_obs], axis=1) # (2, plot_actions+1, 3, D, D)
-        plot_multi_image(full_plot, logger.get_snapshot_dir() + '{}/mpc_best_actions_{}_{}.png'.format(self.logger_prefix_dir,
-                                                                                                 mpc_step, cem_step), caption=caption)
+        #full_plot = np.concatenate([[np.expand_dims(np.moveaxis(obs, 2, 0),0)]*2, best_obs],
+        # axis=1) # (2, plot_actions+1, 3, D, D)
+        #plot_multi_image(full_plot, logger.get_snapshot_dir() + '{}/mpc_best_actions_{}_{
+        # }.png'.format(self.logger_prefix_dir,
+        #
+        #  mpc_step, cem_step), caption=caption)
 
         # return best_pred_obs, best_actions, best_goal_idx
-        # pdb.set_trace()
         return ptu.get_numpy(pred_obs[best_action_idxs[0]]), sorted_actions, goal_latent_idxs[best_action_idxs[0]]
 
 
@@ -615,7 +620,7 @@ def main(variant):
         #           cost_type=variant['cost_type'], filter_goals=False, n_goal_objs=2,
         #           logger_prefix_dir='/goal_{}'.format(goal_idx),
         #           mpc_style=variant['mpc_style'], cem_steps=3, use_action_image=False, time_horizon=2, actions_per_step=2)
-        mpc = MPC(m, env, logger_prefix_dir='/goal_{}'.format(goal_idx),
+        mpc = MPC(m, env, logger_prefix_dir='/goal_{}'.format(goal_idx), cost_type='sum_mse',
                   true_data=env_info, **variant[
             'mpc_args'])
 
@@ -643,6 +648,35 @@ if __name__ == "__main__":
 
     num_obs = 2 #TODO: Change
 
+
+
+    if num_obs == 2:
+        mpc_args1=dict(
+            n_actions=500,
+            mpc_steps=2,
+            time_horizon=2,
+            actions_per_step=1,
+            cem_steps=1,
+            use_action_image=False,
+            mpc_style='cem',
+            n_goal_objs=num_obs,
+            filter_goals=True,
+            true_actions=False,
+        )
+    elif num_obs == 3:
+        mpc_args1=dict(
+            n_actions=500,
+            mpc_steps=3,
+            time_horizon=3,
+            actions_per_step=1,
+            cem_steps=1,
+            use_action_image=False,
+            mpc_style='cem',
+            n_goal_objs=num_obs,
+            filter_goals=True,
+            true_actions=False,
+        )
+
     variant = dict(
         algorithm='SAVP',
         number_goal_objects=num_obs,
@@ -659,20 +693,8 @@ if __name__ == "__main__":
             seed_steps=4,  # Number of seed steps
             schedule_type='curriculum'  # single_step_physics, curriculum
         ),
-        mpc_args=dict(
-            n_actions=500,
-            mpc_steps=2,
-            time_horizon=2,
-            actions_per_step=1,
-            cem_steps=1,
-            use_action_image=False,
-            mpc_style='cem',
-            n_goal_objs=num_obs,
-            filter_goals=True,
-            true_actions=False,
-        )
+        mpc_args=mpc_args1
     )
-
     run_experiment(
         main,
         exp_prefix='mpc_stage3_objects{}-{}'.format(variant['number_goal_objects'],

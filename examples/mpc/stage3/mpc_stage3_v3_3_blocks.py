@@ -15,7 +15,7 @@ import json
 import os
 import rlkit.torch.iodine.iodine as iodine
 
-from examples.mpc.savp_wrapper import SAVP_MODEL
+#from examples.mpc.savp_wrapper import SAVP_MODEL
 
 from collections import OrderedDict
 from rlkit.util.misc import get_module_path
@@ -322,9 +322,7 @@ class MPC:
         # Keep top 4 goal latents with greatest mask area excluding 1st (background)
         if self.filter_goals:
             goal_latents, goal_latents_recon = self.filter_goal_latents(goal_latents, goal_latents_mask, goal_latents_recon)
-
-        #save_image(goal_latents_recon, logger.get_snapshot_dir() + '{
-        # }/goal_latents_recon.png'.format(self.logger_prefix_dir))
+        save_image(goal_latents_recon, logger.get_snapshot_dir() + '{}/goal_latents_recon.png'.format(self.logger_prefix_dir))
 
         #true_actions = self.env.move_blocks_side()
         #self.true_actions = true_actions
@@ -349,9 +347,10 @@ class MPC:
         full_obs_list = []
 
         chosen_actions = []
+        # print("self.mpc_steps: {}".format(self.mpc_steps))
+
         best_accuracy = 0
 
-        # print("self.mpc_steps: {}".format(self.mpc_steps))
         for mpc_step in range(self.mpc_steps):
             pred_obs, actions, goal_idx = self.step_mpc(obs, goal_latents, goal_image_tensor, mpc_step, goal_latents_recon)
             # pdb.set_trace()
@@ -374,11 +373,14 @@ class MPC:
                 goal_latents_recon = self.remove_idx(goal_latents_recon, goal_idx)
                 #print(goal_latents.shape)
 
-            if self.time_horizon > 1:
-                self.time_horizon -= 1
+            #if self.time_horizon > 2:
+            #    self.time_horizon -= 1
 
-            accuracy = self.env.compute_accuracy(self.true_data, threshold=0.25)
+
+            accuracy = self.env.compute_accuracy(self.true_data)
             best_accuracy = max(accuracy, best_accuracy)
+            if accuracy == 1:
+                break
 
         save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst)),
                    logger.get_snapshot_dir() + '{}/mpc.png'.format(self.logger_prefix_dir), nrow=len(obs_lst))
@@ -392,7 +394,6 @@ class MPC:
         #accuracy = self.env.compute_accuracy(self.true_data)
 
         return best_accuracy, np.stack(chosen_actions)
-
 
     #actions: (n_actions, T, A)
     #obs: (n_actions, 3, D, D)
@@ -527,16 +528,10 @@ class MPC:
 
 
 def load_model(variant):
-    if variant['model'] == 'savp1':
+    if variant['model'] == 'savp':
         time_horizon = variant['mpc_args']['time_horizon']
-        m = SAVP_MODEL('/nfs/kun1/users/rishiv/Research/baseline/logs/pickplace_1block_10k_mbchang/ours_savp/', 'model-500000', 0,
+        m = SAVP_MODEL('/nfs/kun1/users/rishiv/Research/baseline/logs/pickplace_multienv_10k/ours_savp/', 'model-500000', 0,
                        batch_size=20, time_horizon=time_horizon)
-    elif variant['model'] == 'savp2':
-        time_horizon = variant['mpc_args']['time_horizon']
-        m = SAVP_MODEL('/home/jcoreyes/objects/baseline/logs/pickplace_multienv_10k/ours_savp'
-                       '/',
-                       'model-500000', 0,
-                       batch_size=10, time_horizon=time_horizon)
     else:
         model_file = variant['model_file']
         m = iodine.create_model(variant, action_dim=4)
@@ -591,7 +586,7 @@ def main(variant):
 
     m = load_model(variant)
 
-    goal_idxs = list(range(0, 20))
+    goal_idxs = list(range(0, 50))
     actions_lst = []
     stats = {'accuracy': 0}
 
@@ -619,13 +614,12 @@ def main(variant):
                   true_data=env_info, **variant[
             'mpc_args'])
 
-
         goal_image = imageio.imread(goal_file)
         accuracy, actions = mpc.run(goal_image)
         stats['accuracy'] += accuracy
         actions_lst.append(actions)
         print("goal_idx %d accuracy: %f" % (i, stats['accuracy'] / float((i+1))))
-        np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
+        #np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
     stats['accuracy'] /= len(goal_idxs)
     json.dump(stats, open(logger.get_snapshot_dir() + '/stats.json', 'w'))
@@ -641,18 +635,16 @@ if __name__ == "__main__":
     parser.add_argument('-f', '--modelfile', type=str, default=None)
     args = parser.parse_args()
 
-    num_obs = 2 #TODO: Change
+    num_obs = 3 #TODO: Change
 
     variant = dict(
-        algorithm='SAVP',
+        algorithm='MPC',
         number_goal_objects=num_obs,
         model_file=args.modelfile,
         # cost_type='sum_goal_min_latent_function',  # 'sum_goal_min_latent' 'latent_pixel 'sum_goal_min_latent_function'
         # mpc_style='cem', # random_shooting or cem
-        model='savp2', #iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', ' \
-                                                                                   #'#iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
-
-        K=4,
+        model=iodine.imsize64_large_iodine_architecture_multistep_physics, #'savp', #iodine.imsize64_large_iodine_architecture_multistep_physics, #imsize64_large_iodine_architecture 'savp',
+        K=5,
         schedule_kwargs=dict(
             train_T=21,  # Number of steps in single training sequence, change with dataset
             test_T=21,  # Number of steps in single testing sequence, change with dataset
@@ -661,7 +653,7 @@ if __name__ == "__main__":
         ),
         mpc_args=dict(
             n_actions=500,
-            mpc_steps=2,
+            mpc_steps=6,
             time_horizon=2,
             actions_per_step=1,
             cem_steps=1,
@@ -675,8 +667,7 @@ if __name__ == "__main__":
 
     run_experiment(
         main,
-        exp_prefix='mpc_stage3_objects{}-{}'.format(variant['number_goal_objects'],
-                                                    variant['model']),
+        exp_prefix='mpc_stage3_objects{}-reg'.format(variant['number_goal_objects']),
         mode='here_no_doodad',
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
