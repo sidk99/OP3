@@ -15,7 +15,7 @@ import json
 import os
 import rlkit.torch.iodine.iodine as iodine
 
-from examples.mpc.savp_wrapper import SAVP_MODEL
+#from examples.mpc.savp_wrapper import SAVP_MODEL
 
 from collections import OrderedDict
 from rlkit.util.misc import get_module_path
@@ -581,7 +581,7 @@ if __name__ == "__main__":
     parser.add_argument('-f', '--modelfile', type=str, default=None)
     args = parser.parse_args()
 
-    num_obs = 1 #TODO: Change
+    num_obs = 2 #TODO: Change
 
     variant = dict(
         algorithm='MPC',

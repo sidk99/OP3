@@ -192,7 +192,7 @@ class BlockPickAndPlaceEnv():
 
     def intersect(self, a_block, pos):
         #Threshold
-        THRESHHOLD = 0.2 #Originally 0.2 in dataset
+        THRESHHOLD = 0.29 #Originally 0.2 in dataset
         cur_pos = self.get_block_info(a_block)["pos"]
         return np.max(np.abs(cur_pos - pos)) < THRESHHOLD
 
@@ -504,7 +504,7 @@ class BlockPickAndPlaceEnv():
         self.blocks = env_info["blocks"]
         self.initialize(True)
 
-    def compute_accuracy(self, true_data, threshold=0.2):
+    def compute_accuracy(self, true_data, threshold=0.25):
 
         import copy
         mjc_data = copy.deepcopy(true_data)
@@ -512,20 +512,23 @@ class BlockPickAndPlaceEnv():
         max_err = -float('inf')
         data = self.get_env_info()
 
+        correct = 0
         for pred_datum in data['blocks']:
             err, mjc_match, err_pos, err_rgb = self._best_obj_match(pred_datum, mjc_data['blocks'])
             #del mjc_data[mjc_match]
 
             # print(err)
-            if err > max_err:
-                max_err = err
-                max_pos = err_pos
-                max_rgb = err_rgb
+            # if err > max_err:
+            #     max_err = err
+            #     max_pos = err_pos
+            #     max_rgb = err_rgb
 
-            if len(mjc_data) == 0:
-                break
+            # if len(mjc_data) == 0:
+            #     break
+            if err < threshold:
+                correct += 1
 
-        correct = max_err < threshold
+        correct /= float(len(data['blocks']))
         return correct
 
     def _best_obj_match(self, pred, targs):

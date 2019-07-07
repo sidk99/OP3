@@ -361,6 +361,10 @@ class MPC:
                 goal_latents = self.remove_idx(goal_latents, goal_idx)
                 goal_latents_recon = self.remove_idx(goal_latents_recon, goal_idx)
             #print(mpc_time - t0, step_time - mpc_time)
+
+            (correct, max_pos, max_rgb), state = self.env.compute_accuracy(self.true_data)
+            if not correct:
+                break
         # save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst)),
         #            logger.get_snapshot_dir() + '%s/mpc.png' % self.logger_prefix_dir,
         #            nrow=len(obs_lst))
@@ -378,7 +382,7 @@ class MPC:
         stats = {'mse': mse, 'correct': int(correct), 'max_pos': max_pos, 'max_rgb': max_rgb}
         return stats, np.stack(actions)
 
-    def model_step_batched(self, obs, actions, bs=64):
+    def model_step_batched(self, obs, actions, bs=16):
 
         # Handle large obs in batches
         n_batches = int(np.ceil(obs.shape[0] / float(bs)))
@@ -497,7 +501,8 @@ def main(variant):
     # model_file = module_path + '/examples/mpc/saved_models/iodine_params_5_15.pkl'
     # model_file = '/nfs/kun1/users/rishiv/Research/op3_exps/05-29-iodine-blocks-stack-o2p2-60k/05-29-iodine-blocks-stack_o2p2_60k_2019_05_29_00_55_37_0000--s-81417/params.pkl'
     # model_file = '/nfs/kun1/users/rishiv/Research/op3_exps/05-29-iodine-blocks-stack-o2p2-60k/05-29-iodine-blocks-stack_o2p2_60k_2019_05_29_23_06_32_0000--s-93500/params.pkl'
-    model_file = '/home/jcoreyes/objects/op3-s3-logs/07-03-stack-o2p2-60k-single-step-physics/07-03-stack_o2p2_60k-single_step_physics_2019_07_04_02_29_17_0000--s-24183/_params.pkl'
+    # model_file = '/home/jcoreyes/objects/op3-s3-logs/07-03-stack-o2p2-60k-single-step-physics/07-03-stack_o2p2_60k-single_step_physics_2019_07_04_02_29_17_0000--s-24183/_params.pkl'
+    model_file = '/home/jcoreyes/objects/op3-s3-logs/07-03-stack-o2p2-60k-single-step-physics/07-03-stack_o2p2_60k-single_step_physics_2019_07_04_02_36_24_0000--s-69613/_params.pkl'
 
     # model_file = module_path + \
     #              '/saved_models/iodine-blocks-stack_o2p2_60k/SequentialRayExperiment_0_2019' \
@@ -508,7 +513,7 @@ def main(variant):
     #    variant['model']['vae_kwargs']['K'] = variant['structure'][1] + 2
 
     #import pdb; pdb.set_trace()
-    variant['model']['vae_kwargs']['K'] = 1
+    variant['model']['vae_kwargs']['K'] = 7
     m = iodine.create_model(variant, 0)
     state_dict = torch.load(model_file)
 
@@ -544,7 +549,7 @@ def main(variant):
             module_path + '/examples/mpc/stage1/manual_constructions/%s/%d.p' % (structure, goal_idx), allow_pickle=True)
         # pdb.set_trace()
         env = BlockEnv(n_goal_obs)
-        mpc = MPC(m, env, n_actions=1000, mpc_steps=1, true_actions=None,
+        mpc = MPC(m, env, n_actions=1000, mpc_steps=n_goal_obs, true_actions=None,
                   cost_type=variant['cost_type'], filter_goals=False, n_goal_objs=n_goal_obs,
                   logger_prefix_dir='/%s_goal_%d' % (structure, goal_idx),
                   mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True,
@@ -555,7 +560,8 @@ def main(variant):
             stats[k] += v
         actions_lst.append(actions)
         goal_counter += 1
-        np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
+        #np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
+        print("Structure %s Goal idx %d Accuracy %f" % (structure, goal_idx, stats['correct'] / float(i+1)))
 
     for k, v in stats.items():
         stats[k] /= float(goal_counter)
@@ -591,19 +597,19 @@ if __name__ == "__main__":
     structure_split = splits[args.split]
 
 
-    for s in structures[9:]:
+    for s in structures:
         variant = dict(
             algorithm='MPC',
             cost_type= 'goal_pixel', #'latent_pixel',  # 'sum_goal_min_latent' 'latent_pixel
             mpc_style='cem',  # random_shooting or cem
-            model=iodine.imsize64_large_iodine_architecture_multistep_physics_BIG,
+            model=iodine.imsize64_large_iodine_architecture_multistep_physics_MLP,
             structure=s,
             debug=args.debug,
             # n_goal_obs=structures[s_idx][1]
         )
 
         n_seeds = 1
-        exp_prefix = 'iodine-mpc-stage1-%s' % 'final3'
+        exp_prefix = 'iodine-mpc-stage1-mlpphysics-%s' % 'final3'
 
         run_experiment(
             main,

@@ -23,7 +23,8 @@ import pdb
 import random
 
 class Cost:
-    def __init__(self, logger_prefix_dir, latent_or_subimage='subimage', compare_func='mse', post_process='raw', aggregate='sum'):
+    def __init__(self, logger_prefix_dir, latent_or_subimage='subimage', compare_func='intersect',
+                 post_process='raw', aggregate='sum'):
         self.remove_goal_latents = False
         self.logger_prefix_dir = logger_prefix_dir
         self.latent_or_subimage = latent_or_subimage
@@ -77,6 +78,9 @@ class Cost:
     def compare_subimages(self, goal_latent_recon, pred_latent_recon):
         if self.compare_func == 'mse':
             return self.image_mse(goal_latent_recon.view((1, 1, 3, 64, 64)), pred_latent_recon)
+        elif self.compare_func == 'intersect':
+            return self.image_intersect(goal_latent_recon.view((1, 1, 3, 64, 64)),
+                                        pred_latent_recon)
         else:
             raise KeyError
 
@@ -213,6 +217,28 @@ class Cost:
         # l1 is (..., rep_size) l2 is (..., rep_size)
         return torch.pow(l1 - l2, 2).mean(-1)
 
+    def image_intersect(self, im1, im2):
+        # im1, im2 are (*, 3, D, D)
+        # Note: * dimensions may not be equal between im1, im2 so automatically broadcast over them
+        #import pdb; pdb.set_trace()
+        m1 = (im1 > 0.01).float()
+        m2 = (im2 > 0.01).float()
+        intersect = (m1 * m2).float()
+        intersect.sum((-3, -2, -1))
+        union = m1.sum((-3, -2, -1)) + m2.sum((-3, -2, -1))
+        #iou = intersect.sum((-3, -2, -1)) / union
+
+        threshold_intersect = (intersect * (torch.pow(im1 - im2, 2) < 0.1).float()).sum((-3,
+                                                                                              -2,
+                                                                                         -1))
+
+        iou = threshold_intersect / union
+
+        #import pdb; pdb.set_trace()
+
+        return (1 - iou)
+        # the last
+
     def image_mse(self, im1, im2):
         # im1, im2 are (*, 3, D, D)
         # Note: * dimensions may not be equal between im1, im2 so automatically broadcast over them
@@ -344,11 +370,15 @@ class MPC:
                 goal_latents_recon = self.remove_idx(goal_latents_recon, goal_idx)
                 #print(goal_latents.shape)
 
+            if self.time_horizon > 1:
+                self.time_horizon -= 1
+
         save_image(ptu.from_numpy(np.stack(obs_lst + pred_obs_lst)),
                    logger.get_snapshot_dir() + '{}/mpc.png'.format(self.logger_prefix_dir), nrow=len(obs_lst))
 
-        full_obs_list = np.stack(full_obs_list) #(mpc_step, Th, 64, 64, 3)
-        plot_multi_image(full_obs_list, logger.get_snapshot_dir() + '{}/mpc_step_by_step.png'.format(self.logger_prefix_dir))
+        #full_obs_list = np.stack(full_obs_list) #(mpc_step, Th, 64, 64, 3)
+        #plot_multi_image(full_obs_list, logger.get_snapshot_dir() + '{
+        # }/mpc_step_by_step.png'.format(self.logger_prefix_dir))
 
         # Compare final obs to goal obs
         mse = np.square(ptu.get_numpy(goal_image_tensor.squeeze().permute(1, 2, 0)) - obs).mean()
@@ -479,7 +509,6 @@ class MPC:
         caption[1, 1:] = sorted_costs[1:plot_actions+1]
 
         # First arg should be (h, w, imsize, imsize, 3) or (h, w, 3, imsize, imsize), caption (h,w)
-        # pdb.set_trace()
         full_plot = np.concatenate([[np.expand_dims(np.moveaxis(obs, 2, 0),0)]*2, best_obs], axis=1) # (2, plot_actions+1, 3, D, D)
         plot_multi_image(full_plot, logger.get_snapshot_dir() + '{}/mpc_best_actions_{}_{}.png'.format(self.logger_prefix_dir,
                                                                                                  mpc_step, cem_step), caption=caption)
@@ -548,7 +577,7 @@ def main(variant):
 
     m = load_model(variant)
 
-    goal_idxs = list(range(0, 100))
+    goal_idxs = list(range(0, 50))
     actions_lst = []
     stats = {'accuracy': 0}
 
@@ -615,15 +644,15 @@ if __name__ == "__main__":
         ),
         mpc_args=dict(
             n_actions=500,
-            mpc_steps=4,
+            mpc_steps=2,
             time_horizon=2,
             actions_per_step=1,
-            cem_steps=3,
+            cem_steps=1,
             use_action_image=False,
             mpc_style='cem',
             n_goal_objs=num_obs,
             filter_goals=True,
-            true_actions=False
+            true_actions=False,
         )
     )
 

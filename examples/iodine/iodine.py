@@ -241,7 +241,7 @@ if __name__ == "__main__":
                 seed_steps=4, #Number of seed steps
                 schedule_type='curriculum' #single_step_physics, curriculum, static_iodine, rprp, next_step
             ),
-            num_epochs=120, #Go up to 4 timesteps in the future
+            num_epochs=200, #Go up to 4 timesteps in the future
             algorithm=v,
             save_period=1,
             dataparallel=True,

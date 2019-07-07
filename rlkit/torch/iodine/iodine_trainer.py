@@ -71,6 +71,7 @@ class IodineTrainer(Serializable):
     def get_schedule_type(self, epoch):
         if 'curriculum' in self.schedule_type:
             rollout_len = epoch // self.curriculum_len + 1
+            rollout_len = min(rollout_len, 4)
             return 'curriculum_{}'.format(rollout_len)
         else:
             return self.schedule_type
