@@ -377,7 +377,7 @@ class MPC:
             #    self.time_horizon -= 1
 
 
-            accuracy = self.env.compute_accuracy(self.true_data)
+            accuracy = self.env.compute_accuracy(self.true_data, threshold=0.25)
             best_accuracy = max(accuracy, best_accuracy)
             if accuracy == 1:
                 break
@@ -586,7 +586,7 @@ def main(variant):
 
     m = load_model(variant)
 
-    goal_idxs = list(range(0, 50))
+    goal_idxs = list(range(0, 20))
     actions_lst = []
     stats = {'accuracy': 0}
 

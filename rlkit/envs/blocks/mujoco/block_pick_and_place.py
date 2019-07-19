@@ -505,7 +505,7 @@ class BlockPickAndPlaceEnv():
         self.initialize(True)
 
 
-    def compute_accuracy(self, true_data, threshold=0.25):
+    def compute_accuracy(self, true_data, threshold=0.25, rgb_thresh=1):
         import copy
         mjc_data = copy.deepcopy(true_data)
 
@@ -526,7 +526,7 @@ class BlockPickAndPlaceEnv():
 
             # if len(mjc_data) == 0:
             #     break
-            if err < threshold:
+            if err < threshold and err_rgb < rgb_thresh:
                 correct += 1
 
         correct /= float(len(data['blocks']))

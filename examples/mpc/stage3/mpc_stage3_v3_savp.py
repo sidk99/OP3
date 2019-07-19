@@ -646,7 +646,7 @@ if __name__ == "__main__":
     parser.add_argument('-f', '--modelfile', type=str, default=None)
     args = parser.parse_args()
 
-    num_obs = 2 #TODO: Change
+    num_obs = 3 #TODO: Change
 
 
 
@@ -654,7 +654,7 @@ if __name__ == "__main__":
         mpc_args1=dict(
             n_actions=500,
             mpc_steps=2,
-            time_horizon=2,
+            time_horizon=1,
             actions_per_step=1,
             cem_steps=1,
             use_action_image=False,
@@ -666,8 +666,8 @@ if __name__ == "__main__":
     elif num_obs == 3:
         mpc_args1=dict(
             n_actions=500,
-            mpc_steps=3,
-            time_horizon=3,
+            mpc_steps=6,
+            time_horizon=2,
             actions_per_step=1,
             cem_steps=1,
             use_action_image=False,
