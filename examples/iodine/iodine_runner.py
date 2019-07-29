@@ -91,6 +91,8 @@ def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
         actions = np.moveaxis(actions, 0, 1)  # (bs, T-1, action_dim) EXCEPT for pickplace envs which are (bs,T,A) instead
         if static:
             bs, T = feats.shape[0], feats.shape[1]
+            if size == None:
+                size = bs
             rand_ts = np.random.randint(0, T, size=size) #As the first timesteps could be correlated
             # pdb.set_trace()
             tmp = torch.Tensor(feats[range(size), rand_ts]).unsqueeze(1) #(size, 1, ch, imsize, imsize)
@@ -155,7 +157,7 @@ def train_vae(variant):
     train_path = get_module_path() + '/ec2_data/{}.h5'.format(variant['dataset'])
     test_path = train_path
     bs = variant['training_args']['batch_size']
-    train_size = 1500 if variant['debug'] == 1 else None #None
+    train_size = 100 if variant['debug'] == 1 else None #None
 
     static = (variant['schedule_args']['schedule_type'] == 'static_iodine') #Boolean
     train_dataset, max_T = load_dataset(train_path, train=True, batchsize=bs, size=train_size, static=static)
@@ -228,12 +230,12 @@ if __name__ == "__main__":
         repsize = 128,
         K = 4,
         schedule_args = dict( #Arguments for TrainingScheduler
-            seed_steps = 4,
-            T = 5,
-            schedule_type = 'curriculum', #single_step_physics, curriculum, static_iodine, rprp, next_step
+            seed_steps = 5,
+            T = 2,
+            schedule_type = 'static_iodine', #single_step_physics, curriculum, static_iodine, rprp, next_step
         ),
         training_args = dict( #Arguments for IodineTrainer
-            batch_size=32,  #Change to appropriate constant based off dataset size
+            batch_size=10,  #Change to appropriate constant based off dataset size
             lr=1e-4,
         ),
         num_epochs = 200,  # Go up to 4 timesteps in the future

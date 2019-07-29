@@ -13,7 +13,6 @@ from rlkit.torch import pytorch_util as ptu
 from rlkit.torch.pytorch_util import from_numpy
 import os
 
-
 # from linetimer import CodeTimer
 
 class IodineTrainer(Serializable):

@@ -33,6 +33,7 @@ class PhysicsNetwork_v2(nn.Module):
             representation_size,
             action_size,
             action_enc_size,
+            output_activation=identity
     ):
         super().__init__()
         self.K = None
@@ -45,7 +46,7 @@ class PhysicsNetwork_v2(nn.Module):
         hidden_size = representation_size
         self.interaction_size = representation_size
 
-        self.lambda_encoder = Mlp((hidden_size,), self.rep_size, self.rep_size,
+        self.inertia_encoder = Mlp((hidden_size,), self.rep_size, self.rep_size,
                                   hidden_activation=nn.ELU(), output_activation=nn.ELU())
 
         #Action networks
@@ -64,34 +65,40 @@ class PhysicsNetwork_v2(nn.Module):
         self.interaction_attention_network = Mlp((hidden_size,), 1, self.interaction_size,
                                                  hidden_activation=nn.ELU(), output_activation=nn.Sigmoid())
 
-        self.final_merge_network = Mlp((hidden_size,), self.rep_size, self.effect_size+self.rep_size, hidden_activation=nn.ELU())
+        self.final_merge_network = Mlp((hidden_size,), self.rep_size, self.effect_size+self.rep_size,
+                                       hidden_activation=nn.ELU(), output_activation=nn.ELU()) #Updated to have output_activation=nn.ELU()
+
+        self.state_to_lambdas1 = Mlp((hidden_size,), self.rep_size, self.rep_size, hidden_activation=nn.ELU(),
+                                    output_activation=output_activation)
+        self.state_to_lambdas2 = Mlp((hidden_size,), self.rep_size, self.rep_size, hidden_activation=nn.ELU(),
+                                    output_activation=output_activation)
 
     def set_k(self, k):
         self.K = k
 
-    def forward(self, lambda1, lambdas2, actions):
-        # input is (bs*K, representation_size)
+    #Input: sampled_state (B*K, R), Action: (B*K, A)
+    def forward(self, sampled_state, actions):
         K = self.K
 
-        lambda1_enc_flat = self.lambda_encoder(lambda1) #Encode initial lambdas
+        state_enc_flat = self.inertia_encoder(sampled_state) #Encode sample
 
         if actions is not None:
             if self.action_size == 4 and actions.shape[-1] == 6:
                 action_enc = self.action_encoder(actions[:, torch.LongTensor([0, 1, 3, 4])]) #RV: Encode actions, why torch.longTensor?
             else:
                 action_enc = self.action_encoder(actions) #Encode actions
-            lambda1_enc_actions = torch.cat([lambda1_enc_flat, action_enc], -1) #RV: Concatonate lambdas with actions?
+            state_enc_actions = torch.cat([state_enc_flat, action_enc], -1)
             # lambda1_enc_actions = lambda1_enc_actions.view(-1, K, self.rep_size + self.action_enc_size)
             # lambda1_enc = lambda1_enc_actions.view(-1, K, self.enc_rep_size + self.action_enc_size) #bs, k, h
 
-            lambda1__action_effect = self.action_effect_network(lambda1_enc_actions) #(bs*k, h)
-            lambda1__action_attention = self.action_attention_network(lambda1_enc_actions) #(bs*k, 1)
-            lambda1_enc = (lambda1__action_effect*lambda1__action_attention).view(-1, K, self.rep_size) #(bs, k, h)
+            state_action_effect = self.action_effect_network(state_enc_actions) #(bs*k, h)
+            state_action_attention = self.action_attention_network(state_enc_actions) #(bs*k, 1)
+            state_enc = (state_action_effect*state_action_attention).view(-1, K, self.rep_size) #(bs, k, h)
         else:
-            lambda1_enc = lambda1_enc_flat.view(-1, K, self.rep_size)
+            state_enc = state_enc_flat.view(-1, K, self.rep_size)
             # lambda1_enc = lambda1_enc_flat.view(-1, K, self.enc_rep_size)  #bs, k, h
 
-        bs = lambda1_enc.shape[0]
+        bs = state_enc.shape[0]
 
         if K != 1:
             pairs = []
@@ -99,7 +106,7 @@ class PhysicsNetwork_v2(nn.Module):
                 for j in range(K):
                     if i == j:
                         continue
-                    pairs.append(torch.cat([lambda1_enc[:, i], lambda1_enc[:, j]], -1))  #Create array of all pairs
+                    pairs.append(torch.cat([state_enc[:, i], state_enc[:, j]], -1))  #Create array of all pairs
 
             all_pairs = torch.stack(pairs, 1).view(bs*K,  K-1, -1) #Create torch of all pairs
 
@@ -108,16 +115,15 @@ class PhysicsNetwork_v2(nn.Module):
             attention = self.interaction_attention_network(pairwise_interaction)  #(bs*k,k-1,1)
             total_effect = (effect*attention).sum(1)  #(bs*k,h)
         else:
-            total_effect = ptu.zeros((bs, self.effect_size))
+            total_effect = ptu.zeros((bs, self.effect_size)).to(sampled_state.device)
 
-        lambda_and_effect = torch.cat([lambda1_enc.view(-1, self.rep_size), total_effect], -1)  # (bs*k,h)
-        new_lambdas = self.final_merge_network(lambda_and_effect) #(bs*k,h)
+        state_and_effect = torch.cat([state_enc.view(-1, self.rep_size), total_effect], -1)  # (bs*k,h)
+        new_state = self.final_merge_network(state_and_effect) #(bs*k,h)
 
-        return new_lambdas, lambdas2
+        lambdas1 = self.state_to_lambdas1(new_state) #(B*K,R)
+        lambdas2 = self.state_to_lambdas2(new_state) #(B*K,R)
+        return lambdas1, lambdas2
 
-    def initialize_hidden(self, bs):
-        return (Variable(ptu.from_numpy(np.zeros((1, bs, self.lstm_size)))),
-                Variable(ptu.from_numpy(np.zeros((1, bs, self.lstm_size)))))
 
 
 class PhysicsNetworkMLP_v2(nn.Module):

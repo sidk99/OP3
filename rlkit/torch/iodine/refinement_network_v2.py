@@ -24,7 +24,7 @@ Refinement_Args = dict(
         hidden_sizes=[128, 128], #A
         output_size=repsize, #repsize
         lstm_size=256, #A+A
-        lstm_input_size=repsize*7, #repsize*7
+        lstm_input_size=repsize*6, #repsize*6
         added_fc_input_size=0,
         hidden_activation = nn.ELU())
     ),
@@ -40,7 +40,7 @@ Refinement_Args = dict(
             hidden_sizes=[128, 128], #A
             output_size=repsize, #repsize
             lstm_size=256, #A+A
-            lstm_input_size=repsize*7, #repsize*7
+            lstm_input_size=repsize*6, #repsize*6
             added_fc_input_size=added_fc_input_size,
             hidden_activation = nn.ELU())
         )
@@ -145,6 +145,7 @@ class RefinementNetwork_v2(nn.Module):
 
 
     #add_fc_input is used for next step iodine where we want to add action information
+    #Input: input (B*K,15,D,D),  hidden1 (B*K,R2),  hidden2 (B*K,R2),  extra_input (B*K, 640)
     def forward(self, input, hidden1, hidden2, extra_input=None, add_fc_input=None):
         #RV: Extra input is (bs*k, rep_size*5)
         # need to reshape from batch of flattened images into (channsls, w, h)
@@ -153,41 +154,43 @@ class RefinementNetwork_v2(nn.Module):
         #                 self.input_channels-2,
         #                 self.input_height,
         #                 self.input_width)
-        hi = input #(K, 15, D, D)
+        # pdb.set_trace()
+        hi = input #(B*K, 15, D, D)
 
-        coords = self.coords.repeat(input.shape[0], 1, 1, 1) #(K, 2, D, D)
-        hi = torch.cat([hi, coords], 1) #(K, 17, D, D)
+        coords = self.coords.repeat(input.shape[0], 1, 1, 1) #(B*K, 2, D, D)
+        hi = torch.cat([hi, coords], 1) #(B*K, 17, D, D)
 
         hi = self.apply_forward(hi, self.conv_layers, self.conv_norm_layers,
-                               use_batch_norm=self.batch_norm_conv) #(K, 64, 1, 1)
+                               use_batch_norm=self.batch_norm_conv) #(B*K, 64, 1, 1)
         # flatten channels for fc layers
-        hi = hi.view(hi.size(0), -1) #(K, 64)
+        hi = hi.view(hi.size(0), -1) #(B*K, 64)
 
         # if extra_input is not None:
         #     h = torch.cat((h, extra_input), dim=1)
 
         if self.added_fc_input_size != 0:
-            hi = torch.cat([hi, add_fc_input], dim=1) #(K, 64+added_fc_input_size)
-        output = self.apply_forward(hi, self.fc_layers, self.fc_norm_layers, use_batch_norm=self.batch_norm_fc) #(K, rep_size)
+            hi = torch.cat([hi, add_fc_input], dim=1) #(B*K, 64+added_fc_input_size)
+        output = self.apply_forward(hi, self.fc_layers, self.fc_norm_layers, use_batch_norm=self.batch_norm_fc) #(B*K, rep_size)
         # pdb.set_trace()
 
         if extra_input is not None:
-            output = torch.cat([output, extra_input], dim=1) #(K, rep_size*7)
+            output = torch.cat([output, extra_input], dim=1) #(B*K, rep_size*7)
 
         if len(hidden1.shape) == 2:
-            hidden1, hidden2 = hidden1.unsqueeze(0), hidden2.unsqueeze(0) #(1, K, lstm_size), (1, K, lstm_size)
+            hidden1, hidden2 = hidden1.unsqueeze(0), hidden2.unsqueeze(0) #(1, B*K, lstm_size), (1, B*K, lstm_size)
         self.lstm.flatten_parameters()
         output, hidden = self.lstm(output.unsqueeze(1), (hidden1, hidden2))
-        #output: (K, 1, rep_size), hidden is tuple of size 2, each of size (1, K, lstm_size)
+        #output: (B*K, 1, rep_size), hidden is tuple of size 2, each of size (1, B*K, lstm_size)
 
         #output1 = self.output_activation(self.last_fc(output.squeeze()))
 
-        output1 = self.output_activation(self.last_fc(output.squeeze(1))) #(K, rep_size)
-        output2 = self.output_activation(self.last_fc2(output.squeeze(1))) #(K, rep_size)
+        output1 = self.output_activation(self.last_fc(output.squeeze(1))) #(B*K, rep_size)
+        output2 = self.output_activation(self.last_fc2(output.squeeze(1))) #(B*K, rep_size)
         return output1, output2, hidden[0], hidden[1]
 
     def initialize_hidden(self, bs):
-        return ptu.from_numpy(np.zeros((bs, self.lstm_size))), ptu.from_numpy(np.zeros((bs, self.lstm_size)))
+        return ptu.zeros((bs, self.lstm_size)), ptu.zeros((bs, self.lstm_size))
+        # return ptu.from_numpy(np.zeros((bs, self.lstm_size))), ptu.from_numpy(np.zeros((bs, self.lstm_size)))
 
     def apply_forward(self, input, hidden_layers, norm_layers,
                       use_batch_norm=False):

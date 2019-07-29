@@ -756,14 +756,13 @@ class IodineVAE(GaussianLatentVAE):
                 posterior_mask.view(tiled_k_shape).detach(),
                 pixel_likelihood.unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach(),
                 leave_out_ll.view(tiled_k_shape).detach()], 1))
-
         ], 1)
 
         extra_input = torch.cat([lns[1](lambdas_grad_1.view(bs * K, -1).detach()),
                                  lns[2](lambdas_grad_2.view(bs * K, -1).detach())
                                  ], -1)
 
-        lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2,
+        lambdas1, lambdas2, _, _ = self.refinement_net(a, h1, h2,
                                                          extra_input=torch.cat([extra_input, lambdas1, lambdas2, latents], -1),
                                                          add_fc_input=add_fc_input)
         return lambdas1, lambdas2, h1, h2
@@ -789,7 +788,7 @@ class IodineVAE(GaussianLatentVAE):
             lambdas2 = self.lambdas2.unsqueeze(0).repeat(bs * K, 1)*0  # (B*K, repsize)
             lambdas2 += initial_lambdas[1].view(bs * K, -1) #(B*K, repsize)
         # initialize hidden state
-        h1, h2 = self.initialize_hidden(bs * K) #RV: Each one is (bs, self.lstm_size)
+        h1, h2 = self.initialize_hidden(bs * K) #RV: Each one is (bs * K, self.lstm_size)
 
         h1 = h1.to(input.device)
         h2 = h2.to(input.device)

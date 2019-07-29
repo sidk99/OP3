@@ -76,10 +76,10 @@ class DecoderNetwork_V2(nn.Module):
             output_activation)
         self.input_width = input_width #Assume images are square so don't need input_height
 
-    #Input: (B,R)
-    #Output: mask_logits: (B,1,D,D), colors: (B,3,D,D)
+    #Input: latents (B,R)
+    #Output: mask_logits (B,1,D,D),  colors (B,3,D,D)
     def forward(self, latents):
-        broadcast_ones = ptu.ones(list(latents.shape) + [self.input_width, self.input_width]) #(B,R,D,D)
+        broadcast_ones = ptu.ones(list(latents.shape) + [self.input_width, self.input_width]).to(latents.device) #(B,R,D,D)
         decoded = self.broadcast_net(latents, broadcast_ones) #(B,4,D,D)
         colors = decoded[:, :3] #(B,3,D,D)
         mask_logits = decoded[:, 3:4] #(B,1,D,D)

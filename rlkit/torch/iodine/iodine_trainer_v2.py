@@ -12,6 +12,7 @@ from rlkit.torch.pytorch_util import from_numpy
 
 from rlkit.torch.iodine.visualizer import quicksave
 import os
+import pdb
 
 
 
@@ -136,6 +137,7 @@ class IodineTrainer(Serializable):
         self.model.train()
         losses, log_probs, kles, mses = [], [], [], []
         for batch_idx, tensors in enumerate(self.train_dataset.dataloader):
+            # print(batch_idx)
             true_images, actions = self.prepare_tensors(tensors) #(B,T,3,D,D),  (B,T,A) or None
             self.optimizer.zero_grad()
 
@@ -145,6 +147,12 @@ class IodineTrainer(Serializable):
             colors, masks, final_recon, total_loss, total_kle_loss, total_clog_prob, mse = \
                 self.model.forward(true_images, actions, initial_hidden_state=None, schedule=schedule, loss_schedule=loss_schedule)
 
+            #For DataParallel
+            total_loss = total_loss.mean()
+            total_clog_prob = total_clog_prob.mean()
+            total_kle_loss = total_kle_loss.mean()
+            mse = mse.mean()
+
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()], 5.0)
             self.optimizer.step()
@@ -152,7 +160,7 @@ class IodineTrainer(Serializable):
             losses.append(total_loss.item())
             log_probs.append(total_clog_prob.item())
             kles.append(total_kle_loss.item())
-            mses.append(mse.mean().item())
+            mses.append(mse.item())
 
         stats = OrderedDict([
             ("train/epoch", epoch),
@@ -185,15 +193,24 @@ class IodineTrainer(Serializable):
                 self.model.forward(true_images, actions, initial_hidden_state=None, schedule=schedule,
                                         loss_schedule=loss_schedule)
 
+            # For DataParallel
+            total_loss = total_loss.mean()
+            total_clog_prob = total_clog_prob.mean()
+            total_kle_loss = total_kle_loss.mean()
+            mse = mse.mean()
+
             losses.append(total_loss.item())
             log_probs.append(total_clog_prob.item())
             kles.append(total_kle_loss.item())
             mses.append(mse.mean().item())
 
-
+            # if batch_idx == 0 and save_reconstruction:
+            #     quicksave(true_images[0], colors[:,0], masks[:,0], schedule=schedule,
+            #               file_name=logger.get_snapshot_dir()+"/{}_{}.png".format('train' if train else 'val', epoch), quicksave_type="full")
             if batch_idx == 0 and save_reconstruction:
-                quicksave(true_images, colors, masks, file_name="{}_{}.png".format('train' if train else 'val', epoch),
-                          quicksave_type="full")
+                quicksave(true_images[0], colors[0], masks[0], schedule=schedule,
+                          file_name=logger.get_snapshot_dir()+"/{}_{}.png".format('train' if train else 'val', epoch), quicksave_type="full")
+
 
             if batch_idx >= batches - 1:
                 break
