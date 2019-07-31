@@ -24,22 +24,41 @@ from argparse import ArgumentParser
 from rlkit.util.misc import get_module_path
 import pdb
 
+#-f twoBalls.h5 -n 2 -r 7 -c 0 -ns 1000
+
 
 def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
     hdf5_file = h5py.File(data_path, 'r')  # RV: Data file
     if 'clevr' in data_path:
-        return np.array(hdf5_file['features']), None
-    elif 'TwoBall' in data_path:
-        if train:
-            feats = np.array(hdf5_file['training']['features'])
-        else:
-            feats = np.array(hdf5_file['test']['features'])
-        feats = feats.reshape((-1, 64, 64, 3))
-        feats = (feats * 255).astype(np.uint8)
-        feats = np.swapaxes(feats, 1, 3)
+        feats = np.array(hdf5_file['features'])[:size] #(B, 3, 84, 84)
+        # pdb.set_trace()
+        feats = np.expand_dims(feats, 0) #(1,B,3,84,84)
+        torch_dataset = TensorDataset(torch.Tensor(feats))
+        dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
         T = feats.shape[1]
         print(feats.shape, np.max(feats), np.min(feats))
-        return feats, T
+        return dataset, T
+    elif 'twoBalls' in data_path:
+        # if train:
+        #     feats = np.array(hdf5_file['training']['features'])
+        # else:
+        #     feats = np.array(hdf5_file['test']['features'])
+        # feats = feats.reshape((-1, 64, 64, 3))
+        # feats = (feats * 255).astype(np.uint8)
+        # feats = np.swapaxes(feats, 1, 3)
+        # T = feats.shape[1]
+        # print(feats.shape, np.max(feats), np.min(feats))
+        if train:
+            feats = np.array(hdf5_file['training']['features']) #(51,1000,64,64,3), values btwn 0-1
+        else:
+            feats = np.array(hdf5_file['validation']['features'])
+        # pdb.set_trace()
+        feats = np.transpose(feats, (1, 0, 4, 2, 3))[:size, :8] * 255 #(B,8,3,64,46)
+        torch_dataset = TensorDataset(torch.Tensor(feats))
+        dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
+        T = feats.shape[1]
+        print(feats.shape, np.max(feats), np.min(feats))
+        return dataset, T
     elif 'stack' in data_path:
         if train:
             feats = np.array(hdf5_file['training']['features']) # (T, bs, ch, imsize, imsize)
@@ -108,6 +127,8 @@ def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
         print(feats.shape, np.max(feats), np.min(feats))
         # pdb.set_trace()
         return dataset, T
+    else:
+        raise ValueError("Invalid dataset given: {}".format(data_path))
 
 
 #Dataset information regarding T
@@ -199,7 +220,7 @@ def train_vae(variant):
 #pickplace_multienv_10k.h5, pickplace_multienv_c3_10k.h5
 #CUDA_VISIBLE_DEVICES=1 python iodine.py -da pickplace_multienv_10k -de 1
 #CUDA_VISIBLE_DEVICES=1,2 python iodine.py -da cloth -de 1
-#CUDA_VISIBLE_DEVICES=1,2,3 python iodine.py -da pickplace_1block_10k -de 0
+#CUDA_VISIBLE_DEVICES=1,2,3 python iodine.py -da pickplace_1block_10k -de 0     1:1156, 10:6948, 15: 10092  643.5, 628.8, 638
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -231,14 +252,14 @@ if __name__ == "__main__":
         K = 4,
         schedule_args = dict( #Arguments for TrainingScheduler
             seed_steps = 5,
-            T = 2,
+            T = 5,
             schedule_type = 'static_iodine', #single_step_physics, curriculum, static_iodine, rprp, next_step
         ),
         training_args = dict( #Arguments for IodineTrainer
-            batch_size=10,  #Change to appropriate constant based off dataset size
+            batch_size=15,  #Change to appropriate constant based off dataset size
             lr=1e-4,
         ),
-        num_epochs = 200,  # Go up to 4 timesteps in the future
+        num_epochs = 89,  # Go up to x//30 + 1 timesteps in the future
         save_period=1,
         dataparallel=True,
         dataset=args.dataset,

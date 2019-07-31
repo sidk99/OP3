@@ -26,13 +26,14 @@ Decoder_Args = dict(
         lambda rep_size: dict(
         hidden_sizes=[],
         output_size=64 * 64 * 3,
-        input_width=64,
-        input_height=64,
-        input_channels=rep_size + 2,
-        kernel_sizes=[3, 3, 3, 3],
+        input_width=80,
+        input_height=80,
+        input_channels=rep_size*2 + 2, #Note: *2 as input is full state and not just stochastic part
+        kernel_sizes=[5, 5, 5, 5],
         n_channels=[64, 64, 64, 4],
         strides=[1, 1, 1 ,1],
-        paddings=[1, 1, 1, 1])
+        paddings=[0, 0, 0, 0],
+        hidden_activation=nn.ELU())
     )
 )
 

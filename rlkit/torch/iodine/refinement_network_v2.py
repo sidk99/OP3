@@ -67,7 +67,7 @@ class RefinementNetwork_v2(nn.Module):
             init_w=1e-4,
             hidden_init=nn.init.xavier_uniform_,
             hidden_activation=nn.ReLU(),
-            output_activation=identity,
+            lambda_output_activation=identity,
     ):
         if hidden_sizes is None:
             hidden_sizes = []
@@ -83,7 +83,7 @@ class RefinementNetwork_v2(nn.Module):
         self.input_channels = input_channels
         self.lstm_size = lstm_size
         self.output_size = output_size
-        self.output_activation = output_activation
+        self.lambda_output_activation = lambda_output_activation
         self.hidden_activation = hidden_activation
         self.batch_norm_conv = batch_norm_conv
         self.batch_norm_fc = batch_norm_fc
@@ -184,13 +184,12 @@ class RefinementNetwork_v2(nn.Module):
 
         #output1 = self.output_activation(self.last_fc(output.squeeze()))
 
-        output1 = self.output_activation(self.last_fc(output.squeeze(1))) #(B*K, rep_size)
-        output2 = self.output_activation(self.last_fc2(output.squeeze(1))) #(B*K, rep_size)
+        output1 = self.lambda_output_activation(self.last_fc(output.squeeze(1))) #(B*K, rep_size)
+        output2 = self.lambda_output_activation(self.last_fc2(output.squeeze(1))) #(B*K, rep_size)
         return output1, output2, hidden[0], hidden[1]
 
     def initialize_hidden(self, bs):
-        return ptu.zeros((bs, self.lstm_size)), ptu.zeros((bs, self.lstm_size))
-        # return ptu.from_numpy(np.zeros((bs, self.lstm_size))), ptu.from_numpy(np.zeros((bs, self.lstm_size)))
+        return ptu.zeros((1, bs, self.lstm_size)), ptu.zeros((1, bs, self.lstm_size))
 
     def apply_forward(self, input, hidden_layers, norm_layers,
                       use_batch_norm=False):
