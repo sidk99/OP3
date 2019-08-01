@@ -148,14 +148,6 @@ class RefinementNetwork_v2(nn.Module):
     #Input: input (B*K,15,D,D),  hidden1 (B*K,R2),  hidden2 (B*K,R2),  extra_input (B*K,5*R),
     # add_fc_input is usually None except for next step refinement e.g. sequence iodine (B*K,A)
     def forward(self, input, hidden1, hidden2, extra_input=None, add_fc_input=None):
-        #RV: Extra input is (bs*k, rep_size*5)
-        # need to reshape from batch of flattened images into (channsls, w, h)
-        # import pdb; pdb.set_trace()
-        # h = input.view(input.shape[0],
-        #                 self.input_channels-2,
-        #                 self.input_height,
-        #                 self.input_width)
-        # pdb.set_trace()
         hi = input #(B*K,15,D,D)
 
         coords = self.coords.repeat(input.shape[0], 1, 1, 1) #(B*K,2,D,D)
@@ -165,9 +157,6 @@ class RefinementNetwork_v2(nn.Module):
                                use_batch_norm=self.batch_norm_conv) #(B*K,64,1,1)
         # flatten channels for fc layers
         hi = hi.view(hi.size(0), -1) #(B*K, 64)
-
-        # if extra_input is not None:
-        #     h = torch.cat((h, extra_input), dim=1)
 
         if self.added_fc_input_size != 0:
             hi = torch.cat([hi, add_fc_input], dim=1) #(B*K, 64+A)
@@ -183,7 +172,6 @@ class RefinementNetwork_v2(nn.Module):
         output, hidden = self.lstm(output.unsqueeze(1), (hidden1, hidden2)) #Note batch_first = True in lstm initialization
         #output: (B*K, 1, R), hidden is tuple of size 2, each of size (1, B*K, lstm_size)
 
-        #output1 = self.output_activation(self.last_fc(output.squeeze()))
 
         output1 = self.lambda_output_activation(self.last_fc(output.squeeze(1))) #(B*K, R)
         output2 = self.lambda_output_activation(self.last_fc2(output.squeeze(1))) #(B*K, R)

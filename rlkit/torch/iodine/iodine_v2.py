@@ -26,7 +26,6 @@ import pdb
 
 
 
-#########New cleaned version#########
 #Variant must contain the following keywords: refinement_model_type, decoder_model_type, dynamics_model_type
 #Note: repsize represents the size of the deterministic & stochastic each, so the full state size is repsize*2
 def create_model_v2(variant, repsize, action_dim):
@@ -64,6 +63,10 @@ def create_model_v2(variant, repsize, action_dim):
     return model
 
 
+#Probably should rename to OP3
+#Notation: R denotes size of deterministic & stochastic state (each), R2 denotes dize of lstm hidden state for iodine
+#  D denotes image size, A denotes action dimension, B denotes batch size
+#  (Sc) denotes a scalar while (X,Y,Z) represent the shape
 class IodineVAE_v2(torch.nn.Module):
     def __init__(self, refine_net, dynamics_net, decode_net, repsize):
         super().__init__()
@@ -133,8 +136,6 @@ class IodineVAE_v2(torch.nn.Module):
 
         stds1 = torch.sqrt(torch.log(1 + softplus1.exp()))
         stds2 = torch.sqrt(torch.log(1 + softplus2.exp()))
-        # print(mu1.device, softplus1.device, stds1.device, mu2.device, softplus2.device, stds2.device)
-        # print(mu1.shape, softplus1.shape, stds1.shape, mu2.shape, softplus2.shape, stds2.shape)
         q1 = MultivariateNormal(loc=mu1, scale_tril=torch.diag_embed(stds1))
         q2 = MultivariateNormal(loc=mu2, scale_tril=torch.diag_embed(stds2))
         return torch.distributions.kl.kl_divergence(q2, q1) #KL(post||prior), note ordering matters!
@@ -310,7 +311,7 @@ class IodineVAE_v2(torch.nn.Module):
         return color_probs, pixel_complete_log_likelihood, kle_loss, complete_log_likelihood, total_loss
 
 
-    #Inputs: images: (B, T_obs, 3, D, D),  actions: (B, T_acs, A),  initial_hidden_state: Tuples of (B, K, repsize)
+    #Inputs: images: (B, T_obs, 3, D, D),  actions: (B, T_acs, A),  initial_hidden_state
     #   schedule: (T1),   loss_schedule:(T1)
     #Output: colors_list (T1,B,K,3,D,D), masks_list (T1,B,K,1,D,D), final_recon (B,3,D,D),
     # total_loss, total_kle_loss, total_clog_prob, mse are all (Sc)
