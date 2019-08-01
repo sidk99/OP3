@@ -110,20 +110,20 @@ class IodineVAE_v2(torch.nn.Module):
 
     #Inputs: latent_distribution_params: [mu, softplus], each (B,R)
     #Outputs: A random sample of the same size based off mu and softplus (B,R)
-    def rsample_softplus(self, latent_distribution_params):
-        mu, softplus = latent_distribution_params
-        stds = torch.sqrt(torch.log(1 + softplus.exp()))
-
-        # stds = (0.5 * logvar).exp()
-        epsilon = ptu.randn(*mu.size()).to(stds.device)  # RV: Is the star necessary?
-        latents = epsilon * stds + mu
-        return latents
-
-    def kl_divergence_softplus(self, latent_distribution_params):
-        mu, softplus = latent_distribution_params
-        stds = torch.sqrt(torch.log(1 + softplus.exp()))
-        logvar = torch.log(torch.log(1 + softplus.exp()))
-        return - 0.5 * torch.sum(1 + logvar - mu.pow(2) - stds, dim=1).mean()
+    # def rsample_softplus(self, latent_distribution_params):
+    #     mu, softplus = latent_distribution_params
+    #     stds = torch.sqrt(torch.log(1 + softplus.exp()))
+    #
+    #     # stds = (0.5 * logvar).exp()
+    #     epsilon = ptu.randn(*mu.size()).to(stds.device)  # RV: Is the star necessary?
+    #     latents = epsilon * stds + mu
+    #     return latents
+    #
+    # def kl_divergence_softplus(self, latent_distribution_params):
+    #     mu, softplus = latent_distribution_params
+    #     stds = torch.sqrt(torch.log(1 + softplus.exp()))
+    #     logvar = torch.log(torch.log(1 + softplus.exp()))
+    #     return - 0.5 * torch.sum(1 + logvar - mu.pow(2) - stds.pow(2), dim=1).mean()
 
 
     #Compute the kl loss between prior and posterior
@@ -141,7 +141,7 @@ class IodineVAE_v2(torch.nn.Module):
 
     def get_samples(self, means, softplusses):
         stds = torch.sqrt(torch.log(1 + softplusses.exp()))
-        epsilon = ptu.randn(*means.size()).to(stds.device)  # RV: Is the star necessary?
+        epsilon = ptu.randn(*means.size()).to(stds.device)
         latents = epsilon * stds + means
         return latents
 
@@ -157,6 +157,7 @@ class IodineVAE_v2(torch.nn.Module):
         lambdas1 = self.initial_lambdas1.unsqueeze(0).repeat(n*k, 1) #(n*k,repsize)
         lambdas2 = self.initial_lambdas2.unsqueeze(0).repeat(n*k, 1) #(n*k,repsize)
         samples = self._unflatten_first(self.get_samples(lambdas1, lambdas2), k) #(n,k,repsize)
+        # deter_state = ptu.zeros_like(lambdas1).to(device) #(n*k,R) #For debugging purposes
         h1, h2 = self.refinement_net.initialize_hidden(n * k)  # Each (1,n*k,lstm_size)
         h1, h2 = h1.to(device), h2.to(device)
 
@@ -176,7 +177,7 @@ class IodineVAE_v2(torch.nn.Module):
         return hidden_state
 
 
-    #Inputs: images: (B, 3, D, D),  hidden_states: Tuples of (B, K, R),  action: None or (B, A)
+    #Inputs: hidden_states, images (B,3,D,D), action (B,A) or None, previous_decode_loss_info
     #Outputs: new_hidden_states
     #  Updates posterior lambda but not prior or posterior deter_state
     def refine(self, hidden_states, images, action=None, previous_decode_loss_info=None):
@@ -205,18 +206,18 @@ class IodineVAE_v2(torch.nn.Module):
 
         lns = self.layer_norms
         a = torch.cat([
-            torch.cat([k_images.view(tiled_k_shape), colors.view(tiled_k_shape), mask.view(tiled_k_shape), mask_logits.view(tiled_k_shape)], 1),
+            torch.cat([k_images.view(tiled_k_shape), colors.view(tiled_k_shape), mask.view(tiled_k_shape), mask_logits.view(tiled_k_shape)], 1), #(B*K,3,D,D), (B*K,3,D,D), (B*K,1,D,D), (B*K,1,D,D) -> (B*K,8,D,D)
             lns[0](torch.cat([
-                x_hat_grad.view(tiled_k_shape).detach(),
-                mask_grad.view(tiled_k_shape).detach(),
-                posterior_mask.view(tiled_k_shape).detach(),
-                pixel_complete_log_likelihood.unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach(),
-                leave_out_ll.view(tiled_k_shape).detach()], 1))
-        ], 1)
+                x_hat_grad.view(tiled_k_shape).detach(), #(B*K,3,D,D)
+                mask_grad.view(tiled_k_shape).detach(),  #(B*K,1,D,D)
+                posterior_mask.view(tiled_k_shape).detach(), #(B*K,1,D,D)
+                pixel_complete_log_likelihood.unsqueeze(1).repeat(1, K, 1, 1).view(tiled_k_shape).detach(), #(B*K,1,D,D)
+                leave_out_ll.view(tiled_k_shape).detach()], 1)) #(B*K,1,D,D)
+        ], 1) #(B*K,8,D,D), (B*K,7,D,D) -> (B*K,15,D,D)
 
         extra_input = torch.cat([lns[1](lambdas_grad_1.view(bs * K, -1).detach()),
                                  lns[2](lambdas_grad_2.view(bs * K, -1).detach())
-                                 ], -1)
+                                 ], -1) #(B*K,2*R)
 
         if action is not None: #Use action as extra input into refinement: This is only for next step refinement (sequence iodine)
             action = self._flatten_first_two(action.unsqueeze(1).repeat(1,K,1)) #(B,A)->(B,K,A)->(B*K,A)
@@ -225,6 +226,7 @@ class IodineVAE_v2(torch.nn.Module):
         # h1, h2 = self._flatten_first_two(hidden_states["post"]["extra_info"][0]), \
         #          self._flatten_first_two(hidden_states["post"]["extra_info"][1])  # (B*K, R2)
         h1, h2 = hidden_states["post"]["extra_info"][0], hidden_states["post"]["extra_info"][1] #Each (1,B*K,R2)
+        # pdb.set_trace()
         lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2,
                                                          extra_input=torch.cat(
                                                              [extra_input, self._flatten_first_two(hidden_states["post"]["lambdas1"]),

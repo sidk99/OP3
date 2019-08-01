@@ -21,27 +21,27 @@ Refinement_Args = dict(
         kernel_sizes=[5, 5, 5, 5],
         n_channels=[64, 64, 64, 64],
         strides=[2, 2, 2, 2],
-        hidden_sizes=[128, 128], #A
+        hidden_sizes=[128, 128],
         output_size=repsize, #repsize
-        lstm_size=256, #A+A
-        lstm_input_size=repsize*6, #repsize*6
+        lstm_size=256,
+        lstm_input_size=repsize*5 + 128, #repsize*5 + hidden_sizes[-1]
         added_fc_input_size=0,
         hidden_activation = nn.ELU())
     ),
     large_sequence = ("sequence_iodine",
-            lambda repsize, added_fc_input_size: dict(
-            input_width = 64,
+        lambda repsize, action_size: dict(
+            input_width=64,
             input_height = 64,
             input_channels=17,
             paddings=[0, 0, 0, 0],
             kernel_sizes=[5, 5, 5, 5],
             n_channels=[64, 64, 64, 64],
             strides=[2, 2, 2, 2],
-            hidden_sizes=[128, 128], #A
+            hidden_sizes=[128, 128],
             output_size=repsize, #repsize
-            lstm_size=256, #A+A
-            lstm_input_size=repsize*6, #repsize*6
-            added_fc_input_size=added_fc_input_size,
+            lstm_size=256,
+            lstm_input_size=repsize*5 + 128, #repsize*5 + hidden_sizes[-1]
+            added_fc_input_size=action_size,
             hidden_activation = nn.ELU())
         )
 )
@@ -145,7 +145,8 @@ class RefinementNetwork_v2(nn.Module):
 
 
     #add_fc_input is used for next step iodine where we want to add action information
-    #Input: input (B*K,15,D,D),  hidden1 (B*K,R2),  hidden2 (B*K,R2),  extra_input (B*K, 640)
+    #Input: input (B*K,15,D,D),  hidden1 (B*K,R2),  hidden2 (B*K,R2),  extra_input (B*K,5*R),
+    # add_fc_input is usually None except for next step refinement e.g. sequence iodine (B*K,A)
     def forward(self, input, hidden1, hidden2, extra_input=None, add_fc_input=None):
         #RV: Extra input is (bs*k, rep_size*5)
         # need to reshape from batch of flattened images into (channsls, w, h)
@@ -155,13 +156,13 @@ class RefinementNetwork_v2(nn.Module):
         #                 self.input_height,
         #                 self.input_width)
         # pdb.set_trace()
-        hi = input #(B*K, 15, D, D)
+        hi = input #(B*K,15,D,D)
 
-        coords = self.coords.repeat(input.shape[0], 1, 1, 1) #(B*K, 2, D, D)
-        hi = torch.cat([hi, coords], 1) #(B*K, 17, D, D)
+        coords = self.coords.repeat(input.shape[0], 1, 1, 1) #(B*K,2,D,D)
+        hi = torch.cat([hi, coords], 1) #(B*K,17,D,D)
 
         hi = self.apply_forward(hi, self.conv_layers, self.conv_norm_layers,
-                               use_batch_norm=self.batch_norm_conv) #(B*K, 64, 1, 1)
+                               use_batch_norm=self.batch_norm_conv) #(B*K,64,1,1)
         # flatten channels for fc layers
         hi = hi.view(hi.size(0), -1) #(B*K, 64)
 
@@ -169,30 +170,29 @@ class RefinementNetwork_v2(nn.Module):
         #     h = torch.cat((h, extra_input), dim=1)
 
         if self.added_fc_input_size != 0:
-            hi = torch.cat([hi, add_fc_input], dim=1) #(B*K, 64+added_fc_input_size)
-        output = self.apply_forward(hi, self.fc_layers, self.fc_norm_layers, use_batch_norm=self.batch_norm_fc) #(B*K, rep_size)
+            hi = torch.cat([hi, add_fc_input], dim=1) #(B*K, 64+A)
+        output = self.apply_forward(hi, self.fc_layers, self.fc_norm_layers, use_batch_norm=self.batch_norm_fc) #(B*K, last_hidden_size)
         # pdb.set_trace()
 
         if extra_input is not None:
-            output = torch.cat([output, extra_input], dim=1) #(B*K, rep_size*7)
+            output = torch.cat([output, extra_input], dim=1) #(B*K, last_hidden_size+R*5)
 
         if len(hidden1.shape) == 2:
             hidden1, hidden2 = hidden1.unsqueeze(0), hidden2.unsqueeze(0) #(1, B*K, lstm_size), (1, B*K, lstm_size)
-        self.lstm.flatten_parameters()
-        output, hidden = self.lstm(output.unsqueeze(1), (hidden1, hidden2))
-        #output: (B*K, 1, rep_size), hidden is tuple of size 2, each of size (1, B*K, lstm_size)
+        self.lstm.flatten_parameters() #For performance / multi-gpu reasons
+        output, hidden = self.lstm(output.unsqueeze(1), (hidden1, hidden2)) #Note batch_first = True in lstm initialization
+        #output: (B*K, 1, R), hidden is tuple of size 2, each of size (1, B*K, lstm_size)
 
         #output1 = self.output_activation(self.last_fc(output.squeeze()))
 
-        output1 = self.lambda_output_activation(self.last_fc(output.squeeze(1))) #(B*K, rep_size)
-        output2 = self.lambda_output_activation(self.last_fc2(output.squeeze(1))) #(B*K, rep_size)
+        output1 = self.lambda_output_activation(self.last_fc(output.squeeze(1))) #(B*K, R)
+        output2 = self.lambda_output_activation(self.last_fc2(output.squeeze(1))) #(B*K, R)
         return output1, output2, hidden[0], hidden[1]
 
     def initialize_hidden(self, bs):
         return ptu.zeros((1, bs, self.lstm_size)), ptu.zeros((1, bs, self.lstm_size))
 
-    def apply_forward(self, input, hidden_layers, norm_layers,
-                      use_batch_norm=False):
+    def apply_forward(self, input, hidden_layers, norm_layers, use_batch_norm=False):
         h = input
         for layer in hidden_layers:
             h = layer(h)
