@@ -13,7 +13,9 @@ from rlkit.torch import pytorch_util as ptu
 from rlkit.torch.pytorch_util import from_numpy
 import os
 
-# from linetimer import CodeTimer
+import time
+import pdb
+
 
 class IodineTrainer(Serializable):
     def __init__(
@@ -76,7 +78,7 @@ class IodineTrainer(Serializable):
 
 
     def train_epoch(self, epoch):
-        timing_dict = defaultdict(list)
+        timings = []
         # ct = CodeTimer(silent=True)
         if self.schedule_type == "curriculum" and epoch % self.curriculum_len == 0:
             self.save_model("{}_physics_steps".format(epoch//self.curriculum_len))
@@ -94,7 +96,10 @@ class IodineTrainer(Serializable):
             schedule = create_schedule(True, self.train_T, schedule_type, self.seed_steps, self.max_T)
             # print("obs: {}".format(obs.shape))
             # with ct:
+            t0 = time.time()
+
             x_hat, mask, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(input=obs, actions=actions, schedule=schedule)
+            t1 = time.time()
             # timing_dict['forward_pass'].append(ct.took)
             # if (loss.mean().item() > 1e8):
             #     print("MASSIVE LOSS!")
@@ -102,10 +107,13 @@ class IodineTrainer(Serializable):
             #     continue
             # with ct:
             loss.mean().backward()
+            t2 = time.time()
             # timing_dict['backward'].append(ct.took)
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()], 5.0)
             # with ct:
             self.optimizer.step()
+            t3 = time.time()
+            timings.append([t0, t1, t2, t3])
             # timing_dict['optimizer_step'].append(ct.took)
 
             losses.append(loss.mean().item())
@@ -115,6 +123,11 @@ class IodineTrainer(Serializable):
 
             if self.log_interval and batch_idx % self.log_interval == 0:
                 print(x_prob_loss.item(), kle_loss.item())
+
+        timings = np.array(timings)
+        difs = timings[:, 1:] - timings[:, :-1]
+        difs = np.sum(difs, axis=0)
+        print(difs)
 
         stats = OrderedDict([
             ("train/epoch", epoch),

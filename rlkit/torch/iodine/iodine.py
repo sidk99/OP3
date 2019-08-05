@@ -560,6 +560,12 @@ class IodineVAE(GaussianLatentVAE):
     def set_eval_mode(self, eval):
         self.eval_mode = eval
 
+    def kl_divergence_softplus(self, latent_distribution_params):
+        mu, softplus = latent_distribution_params
+        stds = torch.sqrt(torch.log(1 + softplus.exp()))
+        logvar = torch.log(torch.log(1 + softplus.exp()))
+        return - 0.5 * torch.sum(1 + logvar - mu.pow(2) - stds.pow(2), dim=1).sum()
+
     def decode(self, lambdas1, lambdas2, inputK, bs):
         #RV: inputK: (bs*K, ch, imsize, imsize)
         #RV: lambdas1, lambdas2: (bs*K, lstm_size)
@@ -762,7 +768,7 @@ class IodineVAE(GaussianLatentVAE):
                                  lns[2](lambdas_grad_2.view(bs * K, -1).detach())
                                  ], -1)
 
-        lambdas1, lambdas2, _, _ = self.refinement_net(a, h1, h2,
+        lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2,
                                                          extra_input=torch.cat([extra_input, lambdas1, lambdas2, latents], -1),
                                                          add_fc_input=add_fc_input)
         return lambdas1, lambdas2, h1, h2
@@ -793,7 +799,7 @@ class IodineVAE(GaussianLatentVAE):
         h1 = h1.to(input.device)
         h2 = h2.to(input.device)
 
-        losses, x_hats, masks = [], [], []
+        losses, x_hats, masks, kle_losses, log_prob_losses = [], [], [], [], []
         untiled_k_shape = (bs, K, -1, self.imsize, self.imsize)
         tiled_k_shape = (bs * K, -1, self.imsize, self.imsize)
 
@@ -803,10 +809,12 @@ class IodineVAE(GaussianLatentVAE):
         x_hat, mask, m_hat_logit, latents, pixel_x_prob, pixel_likelihood, kle_loss, loss, log_likelihood = self.decode(
             lambdas1, lambdas2, inputK, bs) #RV: Returns sampled latents, decoded outputs, and computes the likelihood/loss
         losses.append(loss)
+        kle_losses.append(kle_loss)
+        log_prob_losses.append(log_likelihood)
 
         for t in range(1, T+1):
-            if lambdas1.shape[0] % self.K != 0:
-                raise ValueError("Incorrect lambdas1 shape: {}".format(lambdas1.shape))
+            # if lambdas1.shape[0] % self.K != 0:
+            #     raise ValueError("Incorrect lambdas1 shape: {}".format(lambdas1.shape))
             if schedule[t - 1] == 0: # Refine
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape) #RV: (bs*K, ch, imsize, imsize)
                 lambdas1, lambdas2, h1, h2 = self.refine_lambdas(pixel_x_prob, pixel_likelihood, mask, m_hat_logit,
@@ -842,7 +850,7 @@ class IodineVAE(GaussianLatentVAE):
                 raise ValueError("Invalid schedule value: {}".format(schedule[t-1]))
 
 
-            loss_w = get_loss_weight(t, schedule, self.schedule_type)
+            loss_w = get_loss_weight(t, schedule, self.schedule_type) + 1
 
             # Decode and get loss
             x_hat, mask, m_hat_logit, latents, pixel_x_prob, pixel_likelihood, kle_loss, loss, log_likelihood = \
@@ -851,15 +859,24 @@ class IodineVAE(GaussianLatentVAE):
             x_hats.append(x_hat.data)
             masks.append(mask.data)
             losses.append(loss * loss_w)
+
+            # pdb.set_trace()
+            kle_losses.append(kle_loss * loss_w)
+            log_prob_losses.append(log_likelihood * loss_w)
             # pdb.set_trace()
 
-        total_loss = sum(losses) / T
+        pdb.set_trace()
+
+        total_loss = sum(losses) / ((T+1)*(T+2)/2)
+        kle_loss = sum(kle_losses) / ((T+1)*(T+2)/2)
+        log_likelihood = sum(log_prob_losses) / ((T+1)*(T+2)/2)
+
         final_recon = (mask.unsqueeze(2) * x_hat.view(untiled_k_shape)).sum(1)
         mse = torch.pow(final_recon - input[:, -1], 2).mean()
 
         all_x_hats = torch.stack([x.view(untiled_k_shape) for x in x_hats], 1)  # (bs, T, K, 3, imsize, imsize)
         all_masks = torch.stack([x.view(untiled_k_shape) for x in masks], 1)  # # (bs, T, K, 1, imsize, imsize)
-        return all_x_hats.data, all_masks.data, total_loss, kle_loss.data / self.beta, \
+        return all_x_hats.data, all_masks.data, total_loss, kle_loss.data, \
                log_likelihood.data, mse, final_recon.data, [lambdas1.data, lambdas2.data]
 
 

@@ -13,8 +13,9 @@ import pdb
 ###Maps name to a tuple (class type, lambda function defining model architecture)
 Physics_Args = dict(
     reg_ac32 = ("reg",
-        lambda repsize, action_size: dict(
-        representation_size = repsize,
+        lambda det_size, sto_size, action_size: dict(
+        det_size = det_size,
+        sto_size = sto_size,
         action_size = action_size,
         action_enc_size = 32,
         hidden_activation=nn.ELU())
@@ -32,7 +33,8 @@ Physics_Args = dict(
 class PhysicsNetwork_v2(nn.Module):
     def __init__(
             self,
-            representation_size,
+            det_size,
+            sto_size,
             action_size,
             action_enc_size,
             hidden_activation=nn.ELU(),
@@ -41,8 +43,11 @@ class PhysicsNetwork_v2(nn.Module):
     ):
         super().__init__()
         self.K = None
-        self.rep_size = representation_size #Note: This is the dimension of just one half of the state
-        self.full_rep_size = 2*representation_size
+        self.det_size = det_size
+        self.sto_size = sto_size
+        self.full_rep_size = det_size + sto_size
+        # self.rep_size = representation_size #Note: This is the dimension of just one half of the state
+        # self.full_rep_size = 2*representation_size
         self.action_size = action_size
 
         self.action_enc_size = action_enc_size if action_size > 0 else 0
@@ -70,13 +75,20 @@ class PhysicsNetwork_v2(nn.Module):
         self.interaction_attention_network = Mlp((hidden_size,), 1, self.interaction_size,
                                                  hidden_activation=hidden_activation, output_activation=nn.Sigmoid())
 
-        self.final_merge_network = Mlp((hidden_size,), self.rep_size, self.effect_size+self.full_rep_size,
-                                       hidden_activation=nn.ELU(), output_activation=deterministic_state_activation)
-        #Note: final_merge_network consolidates all the information into the new deterministic state
+        if self.det_size != 0:
+            # Note: final_merge_network consolidates all the information into the new deterministic state
+            self.final_merge_network = Mlp((hidden_size,), self.det_size, self.effect_size+self.full_rep_size,
+                                           hidden_activation=hidden_activation, output_activation=deterministic_state_activation)
+            output_size = self.det_size
+        else:
+            self.final_merge_network = Mlp((hidden_size,), self.sto_size, self.effect_size + self.full_rep_size,
+                                           hidden_activation=hidden_activation, output_activation=hidden_activation)
+            output_size = self.sto_size
 
-        self.state_to_lambdas1 = Mlp((hidden_size,), self.rep_size, self.rep_size, hidden_activation=hidden_activation,
+
+        self.state_to_lambdas1 = Mlp((hidden_size,), self.sto_size, output_size, hidden_activation=hidden_activation,
                                     output_activation=lambda_output_activation)
-        self.state_to_lambdas2 = Mlp((hidden_size,), self.rep_size, self.rep_size, hidden_activation=hidden_activation,
+        self.state_to_lambdas2 = Mlp((hidden_size,), self.sto_size, output_size, hidden_activation=hidden_activation,
                                     output_activation=lambda_output_activation)
 
     def set_k(self, k):
@@ -126,6 +138,9 @@ class PhysicsNetwork_v2(nn.Module):
 
         lambdas1 = self.state_to_lambdas1(deter_state) #Initial lambda parameters (B*K,R)
         lambdas2 = self.state_to_lambdas2(deter_state) #(B*K,R)
+
+        if self.det_size == 0:
+            deter_state = None
         return deter_state, lambdas1, lambdas2
 
 

@@ -13,7 +13,7 @@ from rlkit.torch.pytorch_util import from_numpy
 from rlkit.torch.iodine.visualizer import quicksave
 import os
 import pdb
-
+import time
 
 
 #######
@@ -76,9 +76,9 @@ class TrainingScheduler:
         return schedule
 
     #Input: schedule (T1)
-    #Output: loss_schedule (T1) with loss weights
+    #Output: loss_schedule (T1+1) with loss weights
     def get_loss_schedule(self, schedule):
-        return np.arange(1, len(schedule)+1)
+        return np.arange(1, len(schedule)+2)
 
     #Input: epoch (Sc)
     #Output: If we should not save the model, output is None
@@ -131,6 +131,7 @@ class IodineTrainer(Serializable):
             return imgs, None #Action is none
 
     def train_epoch(self, epoch):
+        timings = []
         if self.scheduler_class.should_save_model(epoch): #We can save the model at intermediate steps
             self.save_model(self.scheduler_class.should_save_model(epoch))
 
@@ -144,8 +145,12 @@ class IodineTrainer(Serializable):
             schedule = self.scheduler_class.get_schedule(epoch, is_train=True)
             loss_schedule = self.scheduler_class.get_loss_schedule(schedule)
 
-            colors, masks, final_recon, total_loss, total_kle_loss, total_clog_prob, mse = \
+            # pdb.set_trace()
+
+            t0 = time.time()
+            colors, masks, final_recon, total_loss, total_kle_loss, total_clog_prob, mse, cur_hidden_state = \
                 self.model.forward(true_images, actions, initial_hidden_state=None, schedule=schedule, loss_schedule=loss_schedule)
+            t1 = time.time()
 
             #For DataParallel
             total_loss = total_loss.mean()
@@ -154,13 +159,22 @@ class IodineTrainer(Serializable):
             mse = mse.mean()
 
             total_loss.backward()
+            t2 = time.time()
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()], 5.0)
             self.optimizer.step()
+            t3 = time.time()
+            timings.append([t0, t1, t2, t3])
 
             losses.append(total_loss.item())
             log_probs.append(total_clog_prob.item())
             kles.append(total_kle_loss.item())
             mses.append(mse.item())
+
+        timings = np.array(timings)
+        difs = timings[:, 1:] - timings[:, :-1]
+        difs = np.sum(difs, axis=0)
+        print(difs)
+
 
         stats = OrderedDict([
             ("train/epoch", epoch),
@@ -189,7 +203,7 @@ class IodineTrainer(Serializable):
         for batch_idx, tensors in enumerate(dataloader):
             true_images, actions = self.prepare_tensors(tensors) #(B,T,3,D,D),  (B,T,A) or None
 
-            colors, masks, final_recon, total_loss, total_kle_loss, total_clog_prob, mse = \
+            colors, masks, final_recon, total_loss, total_kle_loss, total_clog_prob, mse, cur_hidden_state = \
                 self.model.forward(true_images, actions, initial_hidden_state=None, schedule=schedule,
                                         loss_schedule=loss_schedule)
 

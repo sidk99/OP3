@@ -186,7 +186,7 @@ def train_vae(variant):
     print(logger.get_snapshot_dir())
 
     ######Model loading######
-    m = iodine_v2.create_model_v2(variant, repsize=variant['repsize'], action_dim=train_dataset.action_dim)
+    m = iodine_v2.create_model_v2(variant, variant['det_repsize'], variant['sto_repsize'], action_dim=train_dataset.action_dim)
     if variant['dataparallel']:
         m = torch.nn.DataParallel(m)
     m.cuda()
@@ -213,11 +213,11 @@ def train_vae(variant):
         # torch.save(m.state_dict(), open(logger.get_snapshot_dir() + '/params.pkl', "wb"))
     # logger.save_extra_data(m, 'vae.pkl', mode='pickle')
 
-#Datasets: pickplace_1env_1k, pickplace_multienv_10k, stack_o2p2_60k, cloth, poke, solid, twoBalls
+#Datasets: pickplace_1env_1k, pickplace_multienv_10k, stack_o2p2_60k, cloth, poke, solid, twoBalls, twoBalls_10k
 #Generic run: CUDA_VISIBLE_DEVICES=[A,B,C...] python iodine_runner.py -de [0/1] -da [DATASET_NAME_HERE]
 #  -da options: look at above list of Datasets
 #  -de options: 0 for training on full dataset, 1 for training on first 100 sequences
-#Example run: CUDA_VISIBLE_DEVICES=1,2 python iodine_runner.py -de 1 -da pickplace_multienv_10k
+#Example run: CUDA_VISIBLE_DEVICES=1,2 python iodine_runner.py -de 1 -da twoBalls_10k
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -231,7 +231,9 @@ if __name__ == "__main__":
         refinement_model_type = "large_reg",
         decoder_model_type = "reg",
         dynamics_model_type = "reg_ac32",
-        repsize = 64, #This will be the size of the stochastic part and the deterministic part EACH (so full state size is *2)
+        # repsize = 64, #This will be the size of the stochastic part and the deterministic part EACH (so full state size is *2)
+        sto_repsize = 128,
+        det_repsize = 0,
         K = 4,
         schedule_args = dict( #Arguments for TrainingScheduler
             seed_steps = 5,
@@ -239,12 +241,12 @@ if __name__ == "__main__":
             schedule_type = 'static_iodine', #single_step_physics, curriculum, static_iodine, rprp, next_step
         ),
         training_args = dict( #Arguments for IodineTrainer
-            batch_size=90,  #Change to appropriate constant based off dataset size
+            batch_size=10,  #Change to appropriate constant based off dataset size
             lr=1e-4,
         ),
-        num_epochs = 500,
+        num_epochs = 400,
         save_period=1,
-        dataparallel=True,
+        dataparallel=False,
         dataset=args.dataset,
         debug=args.debug,
         machine_type='g3.16xlarge'  # Note: Purely for logging purposed and NOT used for setting actual machine type
@@ -257,7 +259,7 @@ if __name__ == "__main__":
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
-        seed=None,
+        seed=746,
         region='us-west-2'
     )
 

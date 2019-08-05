@@ -26,17 +26,38 @@ def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
     hdf5_file = h5py.File(data_path, 'r')  # RV: Data file
     if 'clevr' in data_path:
         return np.array(hdf5_file['features']), None
-    elif 'TwoBall' in data_path:
+    # elif 'TwoBall' in data_path:
+    #     if train:
+    #         feats = np.array(hdf5_file['training']['features'])
+    #     else:
+    #         feats = np.array(hdf5_file['test']['features'])
+    #     feats = feats.reshape((-1, 64, 64, 3))
+    #     feats = (feats * 255).astype(np.uint8)
+    #     feats = np.swapaxes(feats, 1, 3)
+    #     T = feats.shape[1]
+    #     print(feats.shape, np.max(feats), np.min(feats))
+    #     return feats, T
+    elif 'twoBalls' in data_path:
+        # if train:
+        #     feats = np.array(hdf5_file['training']['features'])
+        # else:
+        #     feats = np.array(hdf5_file['test']['features'])
+        # feats = feats.reshape((-1, 64, 64, 3))
+        # feats = (feats * 255).astype(np.uint8)
+        # feats = np.swapaxes(feats, 1, 3)
+        # T = feats.shape[1]
+        # print(feats.shape, np.max(feats), np.min(feats))
         if train:
-            feats = np.array(hdf5_file['training']['features'])
+            feats = np.array(hdf5_file['training']['features']) #(51,1000,64,64,3), values btwn 0-1
         else:
-            feats = np.array(hdf5_file['test']['features'])
-        feats = feats.reshape((-1, 64, 64, 3))
-        feats = (feats * 255).astype(np.uint8)
-        feats = np.swapaxes(feats, 1, 3)
+            feats = np.array(hdf5_file['validation']['features'])
+        # pdb.set_trace()
+        feats = np.transpose(feats, (1, 0, 4, 2, 3))[:size, :8] * 255 #(B,8,3,64,46)
+        torch_dataset = TensorDataset(torch.Tensor(feats))
+        dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
         T = feats.shape[1]
         print(feats.shape, np.max(feats), np.min(feats))
-        return feats, T
+        return dataset, T
     elif 'stack' in data_path:
         if train:
             feats = np.array(hdf5_file['training']['features']) # (T, bs, ch, imsize, imsize)
@@ -224,19 +245,19 @@ if __name__ == "__main__":
 
     variant = dict(
         model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
-        K=5,
+        K=4,
         training_kwargs = dict(
-            batch_size=40, #Used in IodineTrainer, change to appropriate constant based off dataset size
+            batch_size=10, #Used in IodineTrainer, change to appropriate constant based off dataset size
             lr=1e-4, #Used in IodineTrainer
             log_interval=0,
         ),
         schedule_kwargs=dict(
             train_T=5, #Number of steps in single training sequence, change with dataset
             test_T=5,  #Number of steps in single testing sequence, change with dataset
-            seed_steps=4, #Number of seed steps
-            schedule_type='rprp' #single_step_physics, curriculum, static_iodine, rprp, next_step
+            seed_steps=5, #Number of seed steps
+            schedule_type='static_iodine' #single_step_physics, curriculum, static_iodine, rprp, next_step
         ),
-        num_epochs=200, #Go up to 4 timesteps in the future
+        num_epochs=250, #Go up to 4 timesteps in the future
         algorithm='Iodine',
         save_period=1,
         dataparallel=True,

@@ -23,12 +23,12 @@ import copy
 ###Maps name to a tuple (class type, lambda function defining model architecture)
 Decoder_Args = dict(
     reg = ("reg",
-        lambda rep_size: dict(
+        lambda full_rep_size: dict(
         hidden_sizes=[],
         output_size=64 * 64 * 3,
         input_width=80,
         input_height=80,
-        input_channels=rep_size*2 + 2, #Note: *2 as input is full state and not just stochastic part
+        input_channels=full_rep_size + 2,
         kernel_sizes=[5, 5, 5, 5],
         n_channels=[64, 64, 64, 4],
         strides=[1, 1, 1 ,1],
