@@ -76,9 +76,9 @@ class TrainingScheduler:
         return schedule
 
     #Input: schedule (T1)
-    #Output: loss_schedule (T1+1) with loss weights
+    #Output: loss_schedule (T1) with loss weights
     def get_loss_schedule(self, schedule):
-        return np.arange(1, len(schedule)+2)
+        return np.arange(1, len(schedule)+1)
 
     #Input: epoch (Sc)
     #Output: If we should not save the model, output is None

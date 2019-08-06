@@ -160,7 +160,7 @@ imsize64_large_iodine_architecture_multistep_physics = dict(
         input_channels=REPSIZE_128 + 2,
 
         kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 64],
+        n_channels=[64, 64, 64, 4], #Was 64
         strides=[1, 1, 1, 1],
         paddings=[0, 0, 0, 0]
     ),
@@ -382,7 +382,6 @@ imsize64_medium_iodine_architecture = dict(
 
 #model, schedule_kwargs, K
 def create_model(variant, action_dim):
-    # pdb.set_trace()
     # if 'K' in variant.keys(): #New version
     K = variant['K']
     # else: #Old version
@@ -422,7 +421,6 @@ def create_model(variant, action_dim):
             physics_net=physics_net,
             action_dim=action_dim,
         )
-    # pdb.set_trace()
     return m
 
 def create_schedule(train, T, schedule_type, seed_steps, max_T=None):
@@ -569,7 +567,7 @@ class IodineVAE(GaussianLatentVAE):
     def decode(self, lambdas1, lambdas2, inputK, bs):
         #RV: inputK: (bs*K, ch, imsize, imsize)
         #RV: lambdas1, lambdas2: (bs*K, lstm_size)
-
+        torch.manual_seed(747)
         latents = self.rsample_softplus([lambdas1, lambdas2]) #lambdas1, lambdas2 are mu, softplus
 
         broadcast_ones = ptu.ones((latents.shape[0], latents.shape[1], self.decoder_imsize, self.decoder_imsize)).to(
@@ -577,7 +575,7 @@ class IodineVAE(GaussianLatentVAE):
         decoded = self.decoder(latents, broadcast_ones) #RV: Uses broadcast decoding network, output (bs*K, 4, D, D)
         # print("decoded.shape: {}".format(decoded.shape))
         x_hat = decoded[:, :3] #RV: (bs*K, 3, D, D)
-        m_hat_logits = decoded[:, 3] #RV: (bs*K, 1, D, D), raw depth values
+        m_hat_logits = decoded[:, 3] #RV: (bs*K, D, D), raw depth values
 
         m_hat_logit = m_hat_logits.view(bs, self.K, self.imsize, self.imsize) #RV: (bs, K, D, D)
         mask = F.softmax(m_hat_logit, dim=1)  # (bs, K, D, D)
@@ -589,6 +587,7 @@ class IodineVAE(GaussianLatentVAE):
         kle = self.kl_divergence_softplus([lambdas1, lambdas2])
         kle_loss = self.beta * kle.sum() / bs #RV: KL loss
         loss = log_likelihood + kle_loss #RV: Total loss
+        # pdb.set_trace()
 
         return x_hat, mask, m_hat_logits, latents, pixel_x_prob, pixel_likelihood, kle_loss, loss, log_likelihood
 
@@ -669,13 +668,10 @@ class IodineVAE(GaussianLatentVAE):
     def step(self, input, actions, plot_latents=False):
         if len(input.shape) == 4:
             input = input.unsqueeze(1) # RV: TODO: CHECK IF THIS WORKS
-        # from linetimer import CodeTimer
-        # pdb.set_trace()
 
         K = self.K
         bs = input.shape[0]
         # imsize = self.imsize
-        # pdb.set_trace()
         # input = input.unsqueeze(1).repeat(1, 9, 1, 1, 1) #RV: Why 9?
 
         # schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps) #RV: Returns schedule of 1's and 0's
@@ -704,7 +700,6 @@ class IodineVAE(GaussianLatentVAE):
             rec = (m * x)
             full_rec = rec.sum(0, keepdim=True) #(1, 6, 3, imsize, imsize)
 
-            # pdb.set_trace()
             input = input[:1].repeat(1, self.test_T, 1, 1, 1)
 
             comparison = torch.cat([input[0, :self.test_T].unsqueeze(0), full_rec, m, rec], 0).view(-1, 3, imsize, imsize)
@@ -736,7 +731,6 @@ class IodineVAE(GaussianLatentVAE):
                 actions_batch = None
 
             pred_obs, obs_latents, obs_latents_recon = self.step(inputs[start_idx:end_idx], actions_batch)
-            # pdb.set_trace()
             outputs[0].append(pred_obs)
             outputs[1].append(obs_latents)
             outputs[2].append(obs_latents_recon)
@@ -767,6 +761,8 @@ class IodineVAE(GaussianLatentVAE):
         extra_input = torch.cat([lns[1](lambdas_grad_1.view(bs * K, -1).detach()),
                                  lns[2](lambdas_grad_2.view(bs * K, -1).detach())
                                  ], -1)
+
+        # pdb.set_trace()
 
         lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2,
                                                          extra_input=torch.cat([extra_input, lambdas1, lambdas2, latents], -1),
@@ -860,12 +856,9 @@ class IodineVAE(GaussianLatentVAE):
             masks.append(mask.data)
             losses.append(loss * loss_w)
 
-            # pdb.set_trace()
             kle_losses.append(kle_loss * loss_w)
             log_prob_losses.append(log_likelihood * loss_w)
-            # pdb.set_trace()
 
-        pdb.set_trace()
 
         total_loss = sum(losses) / ((T+1)*(T+2)/2)
         kle_loss = sum(kle_losses) / ((T+1)*(T+2)/2)
@@ -955,7 +948,6 @@ class IodineVAE(GaussianLatentVAE):
             lambdas_batch = [lambdas[0][start_idx:end_idx], lambdas[1][start_idx:end_idx]]
 
             pred_obs, obs_latents, obs_latents_recon = self.run_dynamics(lambdas_batch, actions_batch)
-            # pdb.set_trace()
             outputs[0].append(pred_obs)
             outputs[1].append(obs_latents[0])
             outputs[2].append(obs_latents[1])

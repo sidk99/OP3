@@ -80,6 +80,7 @@ class IodineTrainer(Serializable):
     def train_epoch(self, epoch):
         timings = []
         # ct = CodeTimer(silent=True)
+        self.save_model("test_save")
         if self.schedule_type == "curriculum" and epoch % self.curriculum_len == 0:
             self.save_model("{}_physics_steps".format(epoch//self.curriculum_len))
         self.model.train()
