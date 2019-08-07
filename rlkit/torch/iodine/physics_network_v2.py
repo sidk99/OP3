@@ -46,8 +46,6 @@ class PhysicsNetwork_v2(nn.Module):
         self.det_size = det_size
         self.sto_size = sto_size
         self.full_rep_size = det_size + sto_size
-        # self.rep_size = representation_size #Note: This is the dimension of just one half of the state
-        # self.full_rep_size = 2*representation_size
         self.action_size = action_size
 
         self.action_enc_size = action_enc_size if action_size > 0 else 0
@@ -57,7 +55,7 @@ class PhysicsNetwork_v2(nn.Module):
 
         self.inertia_encoder = Mlp((hidden_size,), self.full_rep_size, self.full_rep_size,
                                   hidden_activation=hidden_activation, output_activation=hidden_activation)
-        #Note: Input to inertia_encoder is (B,2R) as we take in the full state and not just the stochastic part
+        #Note: Input to inertia_encoder is (B,Rd+Rs) as we take in the full state and not just the stochastic part
 
         #Action networks
         if action_size > 0:
@@ -75,29 +73,41 @@ class PhysicsNetwork_v2(nn.Module):
         self.interaction_attention_network = Mlp((hidden_size,), 1, self.interaction_size,
                                                  hidden_activation=hidden_activation, output_activation=nn.Sigmoid())
 
+
+        ###If deterministic state directly produces lambdas
+        # if self.det_size != 0:
+        #     # Note: final_merge_network consolidates all the information into the new deterministic state
+        #     self.final_merge_network = Mlp((hidden_size,), self.det_size, self.effect_size+self.full_rep_size,
+        #                                    hidden_activation=hidden_activation, output_activation=deterministic_state_activation)
+        #     output_size = self.det_size
+        # else:
+        #     self.final_merge_network = Mlp((hidden_size,), self.sto_size, self.effect_size + self.full_rep_size,
+        #                                    hidden_activation=hidden_activation, output_activation=hidden_activation)
+        #     output_size = self.sto_size
+        # self.state_to_lambdas1 = Mlp((hidden_size,), self.sto_size, output_size, hidden_activation=hidden_activation,
+        #                             output_activation=lambda_output_activation)
+        # self.state_to_lambdas2 = Mlp((hidden_size,), self.sto_size, output_size, hidden_activation=hidden_activation,
+        #                             output_activation=lambda_output_activation)
+
+        ###If deterministic state has a separate output branch
+        self.final_merge_network = Mlp((hidden_size,), self.full_rep_size, self.effect_size + self.full_rep_size,
+                                       hidden_activation=hidden_activation, output_activation=hidden_activation)
         if self.det_size != 0:
-            # Note: final_merge_network consolidates all the information into the new deterministic state
-            self.final_merge_network = Mlp((hidden_size,), self.det_size, self.effect_size+self.full_rep_size,
-                                           hidden_activation=hidden_activation, output_activation=deterministic_state_activation)
-            output_size = self.det_size
-        else:
-            self.final_merge_network = Mlp((hidden_size,), self.sto_size, self.effect_size + self.full_rep_size,
-                                           hidden_activation=hidden_activation, output_activation=hidden_activation)
-            output_size = self.sto_size
-
-
-        self.state_to_lambdas1 = Mlp((hidden_size,), self.sto_size, output_size, hidden_activation=hidden_activation,
-                                    output_activation=lambda_output_activation)
-        self.state_to_lambdas2 = Mlp((hidden_size,), self.sto_size, output_size, hidden_activation=hidden_activation,
-                                    output_activation=lambda_output_activation)
+            self.det_output = Mlp((hidden_size,), self.det_size, self.full_rep_size,
+                                  hidden_activation=hidden_activation, output_activation=deterministic_state_activation)
+        self.lambdas1_output = Mlp((hidden_size,), self.sto_size, self.full_rep_size,
+                                  hidden_activation=hidden_activation, output_activation=lambda_output_activation)
+        self.lambdas2_output = Mlp((hidden_size,), self.sto_size, self.full_rep_size,
+                                  hidden_activation=hidden_activation, output_activation=lambda_output_activation)
 
     def set_k(self, k):
         self.K = k
 
-    #Inputs: sampled_state (B*K, R*2), Action: (B*K, A)
-    # Note: sampled_state is R*2 as we take in the full state and not just the stochastic part
+    #Inputs: sampled_state (B*K, Rd+Rs), Action: (B*K, A)
+    # Note: sampled_state is Rd+Rs as we take in the full state and not just the stochastic part (Rs)
     def forward(self, sampled_state, actions):
         K = self.K
+        bs = sampled_state.shape[0]//K
 
         state_enc_flat = self.inertia_encoder(sampled_state) #Encode sample
 
@@ -110,11 +120,9 @@ class PhysicsNetwork_v2(nn.Module):
 
             state_action_effect = self.action_effect_network(state_enc_actions) #(bs*k, h)
             state_action_attention = self.action_attention_network(state_enc_actions) #(bs*k, 1)
-            state_enc = (state_action_effect*state_action_attention).view(-1, K, self.rep_size) #(bs, k, h)
+            state_enc = (state_action_effect*state_action_attention).view(bs, K, self.full_rep_size) #(bs, k, h)
         else:
-            state_enc = state_enc_flat.view(-1, K, self.rep_size)
-
-        bs = state_enc.shape[0]
+            state_enc = state_enc_flat.view(bs, K, self.full_rep_size) #(bs, k, h)
 
         if K != 1:
             pairs = []
@@ -133,14 +141,23 @@ class PhysicsNetwork_v2(nn.Module):
         else:
             total_effect = ptu.zeros((bs, self.effect_size)).to(sampled_state.device)
 
-        state_and_effect = torch.cat([state_enc.view(-1, self.rep_size), total_effect], -1)  # (bs*k,h)
-        deter_state = self.final_merge_network(state_and_effect) #Deterministic state (bs*k,h)
+        state_and_effect = torch.cat([state_enc.view(bs*K, self.full_rep_size), total_effect], -1)  # (bs*k,h)
 
-        lambdas1 = self.state_to_lambdas1(deter_state) #Initial lambda parameters (B*K,R)
-        lambdas2 = self.state_to_lambdas2(deter_state) #(B*K,R)
+        ###If deterministic state directly produces lambdas
+        # deter_state = self.final_merge_network(state_and_effect) #Deterministic state (bs*k,h)
+        # lambdas1 = self.state_to_lambdas1(deter_state) #Initial lambda parameters (B*K,R)
+        # lambdas2 = self.state_to_lambdas2(deter_state) #(B*K,R)
+        # if self.det_size == 0:
+        #     deter_state = None
 
+        aggregate_state = self.final_merge_network(state_and_effect)
         if self.det_size == 0:
             deter_state = None
+        else:
+            deter_state = self.det_output(aggregate_state)
+        lambdas1 = self.lambdas1_output(aggregate_state)
+        lambdas2 = self.lambdas2_output(aggregate_state)
+
         return deter_state, lambdas1, lambdas2
 
 

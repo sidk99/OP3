@@ -166,15 +166,15 @@ class RefinementNetwork_v2(nn.Module):
         if extra_input is not None:
             output = torch.cat([output, extra_input], dim=1) #(B*K, last_hidden_size+R*5)
 
-        if len(hidden1.shape) == 2:
-            hidden1, hidden2 = hidden1.unsqueeze(0), hidden2.unsqueeze(0) #(1, B*K, lstm_size), (1, B*K, lstm_size)
+        if len(hidden1.shape) == 2: #(B*K,lstm_size)
+            hidden1, hidden2 = hidden1.unsqueeze(0), hidden2.unsqueeze(0) #(1,B*K,lstm_size), (1,B*K,lstm_size)
         self.lstm.flatten_parameters() #For performance / multi-gpu reasons
         output, hidden = self.lstm(output.unsqueeze(1), (hidden1, hidden2)) #Note batch_first = True in lstm initialization
-        #output: (B*K, 1, R), hidden is tuple of size 2, each of size (1, B*K, lstm_size)
+        #output: (B*K,1,R), hidden is tuple of size 2, each of size (B*K,1,lstm_size)
 
 
-        output1 = self.lambda_output_activation(self.last_fc(output.squeeze(1))) #(B*K, R)
-        output2 = self.lambda_output_activation(self.last_fc2(output.squeeze(1))) #(B*K, R)
+        output1 = self.lambda_output_activation(self.last_fc(output.squeeze(1))) #(B*K,R)
+        output2 = self.lambda_output_activation(self.last_fc2(output.squeeze(1))) #(B*K,R)
         return output1, output2, hidden[0], hidden[1]
 
     def initialize_hidden(self, bs):
