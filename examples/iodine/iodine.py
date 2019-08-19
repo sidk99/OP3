@@ -51,7 +51,6 @@ def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
             feats = np.array(hdf5_file['training']['features']) #(51,1000,64,64,3), values btwn 0-1
         else:
             feats = np.array(hdf5_file['validation']['features'])
-        # pdb.set_trace()
         feats = np.transpose(feats, (1, 0, 4, 2, 3))[:size, :8] * 255 #(B,8,3,64,46)
         torch_dataset = TensorDataset(torch.Tensor(feats))
         dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
@@ -110,7 +109,6 @@ def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
         if static:
             bs, T = feats.shape[0], feats.shape[1]
             rand_ts = np.random.randint(0, T, size=size) #As the first timesteps could be correlated
-            # pdb.set_trace()
             tmp = torch.Tensor(feats[range(size), rand_ts]).unsqueeze(1) #(size, 1, ch, imsize, imsize)
             torch_dataset = TensorDataset(tmp)
         else:
@@ -122,7 +120,6 @@ def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
 
         T = feats.shape[1]
         print(feats.shape, np.max(feats), np.min(feats))
-        # pdb.set_trace()
         return dataset, T
 
 
@@ -172,7 +169,7 @@ def train_vae(variant):
     train_path = get_module_path() + '/ec2_data/{}.h5'.format(variant['dataset'])
     test_path = train_path
     bs = variant['training_kwargs']['batch_size']
-    train_size = 1500 if variant['debug'] == 1 else None #None
+    train_size = 100 if variant['debug'] == 1 else None
 
     static = False
     if variant['schedule_kwargs']['schedule_type'] == 'static_iodine':
@@ -220,7 +217,7 @@ def train_vae(variant):
 #pickplace_multienv_10k.h5, pickplace_multienv_c3_10k.h5
 #CUDA_VISIBLE_DEVICES=1 python iodine.py -da pickplace_multienv_10k -de 1
 #CUDA_VISIBLE_DEVICES=1,2 python iodine.py -da cloth -de 1
-#CUDA_VISIBLE_DEVICES=1,2,3 python iodine.py -da pickplace_1block_10k -de 0
+#CUDA_VISIBLE_DEVICES=1,2,3 python iodine.py -da pickplace_1block_10k -de 0    10:9013  15:10523MiB
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -245,25 +242,25 @@ if __name__ == "__main__":
 
     variant = dict(
         model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
-        K=4,
+        K=7,
         training_kwargs = dict(
-            batch_size=10, #Used in IodineTrainer, change to appropriate constant based off dataset size
+            batch_size=80, #Used in IodineTrainer, change to appropriate constant based off dataset size
             lr=1e-4, #Used in IodineTrainer
             log_interval=0,
         ),
         schedule_kwargs=dict(
             train_T=5, #Number of steps in single training sequence, change with dataset
             test_T=5,  #Number of steps in single testing sequence, change with dataset
-            seed_steps=5, #Number of seed steps
-            schedule_type='static_iodine' #single_step_physics, curriculum, static_iodine, rprp, next_step
+            seed_steps=4, #Number of seed steps
+            schedule_type='single_step_physics' #single_step_physics, curriculum, static_iodine, rprp, next_step
         ),
-        num_epochs=250, #Go up to 4 timesteps in the future
+        num_epochs=200, #Go up to 4 timesteps in the future
         algorithm='Iodine',
         save_period=1,
         dataparallel=True,
         dataset=args.dataset,
         debug=args.debug,
-        machine_type='g3.16xlarge' #Note: Purely for logging purposed and NOT used for setting actual machine type
+        machine_type='p3.8xlarge' #Note: Purely for logging purposed and NOT used for setting actual machine type
     )
 
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'

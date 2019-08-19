@@ -17,17 +17,33 @@ Refinement_Args = dict(
         input_width = 64,
         input_height = 64,
         input_channels=17,
-        paddings=[0, 0, 0, 0],
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 64],
-        strides=[2, 2, 2, 2],
-        hidden_sizes=[128, 128],
+        paddings=[0, 0, 0],
+        kernel_sizes=[5, 5, 5],
+        n_channels=[32, 32, 32],
+        strides=[1, 1, 1],
+        hidden_sizes=[128],
         output_size=repsize, #repsize
-        lstm_size=256,
+        lstm_size=128,
         lstm_input_size=repsize*5 + 128, #repsize*5 + hidden_sizes[-1]
         added_fc_input_size=0,
         hidden_activation = nn.ELU())
     ),
+    size_dependent_conv = ("reg",
+            lambda repsize: dict(
+            input_width = 64,
+            input_height = 64,
+            input_channels=17,
+            paddings=[2, 2, 2],
+            kernel_sizes=[5, 5, 5],
+            n_channels=[32, 32, repsize],
+            strides=[1, 1, 1],
+            hidden_sizes=[128],
+            output_size=repsize, #repsize
+            lstm_size=128,
+            lstm_input_size=repsize*5 + 128, #repsize*5 + hidden_sizes[-1]
+            added_fc_input_size=0,
+            hidden_activation = nn.ELU())
+        ),
     large_sequence = ("sequence_iodine",
         lambda repsize, action_size: dict(
             input_width=64,
@@ -94,6 +110,7 @@ class RefinementNetwork_v2(nn.Module):
         self.conv_norm_layers = nn.ModuleList()
         self.fc_layers = nn.ModuleList()
         self.fc_norm_layers = nn.ModuleList()
+        self.avg_pooling = torch.nn.AvgPool2d(kernel_size=input_width)
 
         self.lstm = nn.LSTM(lstm_input_size, lstm_size, num_layers=1, batch_first=True)
 
@@ -117,6 +134,8 @@ class RefinementNetwork_v2(nn.Module):
         for conv_layer in self.conv_layers:
             test_mat = conv_layer(test_mat)
             #self.conv_norm_layers.append(nn.BatchNorm2d(test_mat.shape[1]))
+
+        test_mat = self.avg_pooling(test_mat) #Avg pooling layer
 
         fc_input_size = int(np.prod(test_mat.shape))
         # used only for injecting input directly into fc layers
@@ -155,13 +174,14 @@ class RefinementNetwork_v2(nn.Module):
 
         hi = self.apply_forward(hi, self.conv_layers, self.conv_norm_layers,
                                use_batch_norm=self.batch_norm_conv) #(B*K,64,1,1)
+        # pdb.set_trace()
+        hi = self.avg_pooling(hi) #Avg pooling layer
         # flatten channels for fc layers
         hi = hi.view(hi.size(0), -1) #(B*K, 64)
 
         if self.added_fc_input_size != 0:
             hi = torch.cat([hi, add_fc_input], dim=1) #(B*K, 64+A)
         output = self.apply_forward(hi, self.fc_layers, self.fc_norm_layers, use_batch_norm=self.batch_norm_fc) #(B*K, last_hidden_size)
-        # pdb.set_trace()
 
         if extra_input is not None:
             output = torch.cat([output, extra_input], dim=1) #(B*K, last_hidden_size+R*5)

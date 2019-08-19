@@ -1,6 +1,6 @@
 import torch
 import torch.utils.data
-from rlkit.torch.iodine.physics_network import PhysicsNetwork, PhysicsNetworkMLP
+from rlkit.torch.iodine.physics_network import PhysicsNetwork, PhysicsNetworkMLP, PhysicsNetworkNoAttention, PhysicsNetworkAllAtOnce
 from rlkit.torch.iodine.refinement_network import RefinementNetwork
 from rlkit.torch.networks import Mlp
 from torch import nn
@@ -240,6 +240,100 @@ imsize64_large_iodine_architecture_multistep_physics_BIG = dict(
     )
 )
 
+imsize64_large_iodine_architecture_multistep_physics_NoAttention = dict(
+    vae_kwargs=dict(
+        imsize=64,
+        representation_size=128,
+        input_channels=3,
+        # decoder_distribution='gaussian_identity_variance',
+        beta=1,
+        # K=7, #7
+        sigma=0.1,
+    ),
+    deconv_args=dict(
+        hidden_sizes=[],
+        output_size=64 * 64 * 3,
+        input_width=80,
+        input_height=80,
+        input_channels=128 + 2,
+
+        kernel_sizes=[5, 5, 5, 5],
+        n_channels=[64, 64, 64, 64],
+        strides=[1, 1, 1, 1],
+        paddings=[0, 0, 0, 0]
+    ),
+    deconv_kwargs=dict(
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    ),
+    refine_args=dict(
+        input_width=64,
+        input_height=64,
+        input_channels=17,
+        paddings=[0, 0, 0, 0],
+        kernel_sizes=[5, 5, 5, 5],
+        n_channels=[64, 64, 64, 64],
+        strides=[2, 2, 2, 2],
+        hidden_sizes=[128, 128],
+        output_size=128,
+        lstm_size=256,
+        lstm_input_size=128*6,
+        added_fc_input_size=0
+
+    ),
+    physics_kwargs=dict(
+        noattention=True,
+        action_enc_size=32,
+    )
+)
+
+imsize64_large_iodine_architecture_multistep_physics_AllAtOnce = dict(
+    vae_kwargs=dict(
+        imsize=64,
+        representation_size=128,
+        input_channels=3,
+        # decoder_distribution='gaussian_identity_variance',
+        beta=1,
+        # K=7, #7
+        sigma=0.1,
+    ),
+    deconv_args=dict(
+        hidden_sizes=[],
+        output_size=64 * 64 * 3,
+        input_width=80,
+        input_height=80,
+        input_channels=128 + 2,
+
+        kernel_sizes=[5, 5, 5, 5],
+        n_channels=[64, 64, 64, 64],
+        strides=[1, 1, 1, 1],
+        paddings=[0, 0, 0, 0]
+    ),
+    deconv_kwargs=dict(
+        batch_norm_conv=False,
+        batch_norm_fc=False,
+    ),
+    refine_args=dict(
+        input_width=64,
+        input_height=64,
+        input_channels=17,
+        paddings=[0, 0, 0, 0],
+        kernel_sizes=[5, 5, 5, 5],
+        n_channels=[64, 64, 64, 64],
+        strides=[2, 2, 2, 2],
+        hidden_sizes=[128, 128],
+        output_size=128,
+        lstm_size=256,
+        lstm_input_size=128*6,
+        added_fc_input_size=0
+
+    ),
+    physics_kwargs=dict(
+        allatonce=True,
+        action_enc_size=32,
+    )
+)
+
 imsize64_large_iodine_architecture_multistep_physics_MLP = dict(
     vae_kwargs=dict(
         imsize=64,
@@ -397,8 +491,15 @@ def create_model(variant, action_dim):
         #Make another dictionary without the mlp key
         tmp = copy.deepcopy(model['physics_kwargs'])
         del tmp['mlp']
-
         physics_net = PhysicsNetworkMLP(K, rep_size, action_dim, **tmp)
+    elif 'noattention' in model['physics_kwargs']:
+        tmp = copy.deepcopy(model['physics_kwargs'])
+        del tmp['noattention']
+        physics_net = PhysicsNetworkNoAttention(K, rep_size, action_dim, **tmp)
+    elif 'allatonce' in model['physics_kwargs']:
+        tmp = copy.deepcopy(model['physics_kwargs'])
+        del tmp['allatonce']
+        physics_net = PhysicsNetworkNoAttention(K, rep_size, action_dim, **tmp)
     else:
         physics_net = PhysicsNetwork(K, rep_size, action_dim, **model['physics_kwargs'])
 
@@ -567,7 +668,6 @@ class IodineVAE(GaussianLatentVAE):
     def decode(self, lambdas1, lambdas2, inputK, bs):
         #RV: inputK: (bs*K, ch, imsize, imsize)
         #RV: lambdas1, lambdas2: (bs*K, lstm_size)
-        torch.manual_seed(747)
         latents = self.rsample_softplus([lambdas1, lambdas2]) #lambdas1, lambdas2 are mu, softplus
 
         broadcast_ones = ptu.ones((latents.shape[0], latents.shape[1], self.decoder_imsize, self.decoder_imsize)).to(

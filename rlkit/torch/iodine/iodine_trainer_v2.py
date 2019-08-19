@@ -28,7 +28,8 @@ class TrainingScheduler:
         self.max_T = max_T
         self.T = T
 
-        self.curriculum_len = 30 #Used for "curriculum" schedules
+        self.curriculum_len = 30 #Used for "curriculum" schedule
+        self.rprp_curriculum_len = 50 #Used for "rprp_curriculum" schedule
 
     #Input: epoch (Sc),  is_train (bool)
     #Output: schedule (T1) consisting of 0's, 1's, and 2's
@@ -49,16 +50,28 @@ class TrainingScheduler:
         elif schedule_type == 'multi_step_physics':
             schedule = np.ones((T,))
             schedule[:seed_steps] = 0
-        elif 'curriculum' in schedule_type:
+        elif schedule_type == 'curriculum':
             if is_train:
                 max_multi_step = epoch//self.curriculum_len + 1
                 rollout_len = np.random.randint(max_multi_step) + 1 #Enforces at least 1 physics step
                 schedule = np.zeros(seed_steps + rollout_len + 1)
                 schedule[seed_steps:seed_steps + rollout_len] = 1  # schedule looks like [0,0,0,0,1,1,1,0]
             else:
-                max_multi_step = epoch // self.curriculum_len
+                max_multi_step = epoch // self.curriculum_len + 1
                 schedule = np.zeros(seed_steps + max_multi_step + 1)
                 schedule[seed_steps:seed_steps + max_multi_step] = 1
+        elif schedule_type == 'rprp_curriculum':
+            if is_train:
+                max_multi_step = epoch // self.curriculum_len + 1
+                rollout_len = np.random.randint(max_multi_step) + 1
+                schedule = np.zeros(seed_steps + rollout_len + 1 + rollout_len + 1) #rrrrprpr
+                schedule[seed_steps:] = 1
+                schedule[seed_steps - 1::rollout_len + 1] = 0
+            else:
+                rollout_len = epoch // self.curriculum_len + 1
+                schedule = np.zeros(seed_steps + rollout_len + 1 + rollout_len + 1)  # rrrrprpr
+                schedule[seed_steps:] = 1
+                schedule[seed_steps - 1::rollout_len + 1] = 0
         elif schedule_type == 'static_iodine':
             schedule = np.zeros((T,))
         elif schedule_type == 'rprp':
@@ -98,7 +111,7 @@ class IodineTrainer(Serializable):
             test_dataset,
             model,
             scheduler_class,
-            batch_size=128, #Training args
+            batch_size, #Training args
             lr=1e-3,
     ):
         self.quick_init(locals())
@@ -131,12 +144,14 @@ class IodineTrainer(Serializable):
             return imgs, None #Action is none
 
     def train_epoch(self, epoch):
+        t_start = time.time()
         timings = []
         if self.scheduler_class.should_save_model(epoch): #We can save the model at intermediate steps
             self.save_model(self.scheduler_class.should_save_model(epoch))
 
         self.model.train()
         losses, log_probs, kles, mses = [], [], [], []
+        # with torch.autograd.detect_anomaly():
         for batch_idx, tensors in enumerate(self.train_dataset.dataloader):
             # print(batch_idx)
             true_images, actions = self.prepare_tensors(tensors) #(B,T,3,D,D),  (B,T,A) or None
@@ -144,8 +159,6 @@ class IodineTrainer(Serializable):
 
             schedule = self.scheduler_class.get_schedule(epoch, is_train=True)
             loss_schedule = self.scheduler_class.get_loss_schedule(schedule)
-
-            # pdb.set_trace()
 
             t0 = time.time()
             colors, masks, final_recon, total_loss, total_kle_loss, total_clog_prob, mse, cur_hidden_state = \
@@ -158,10 +171,14 @@ class IodineTrainer(Serializable):
             total_kle_loss = total_kle_loss.mean()
             mse = mse.mean()
 
+            # ptu.check_nan([total_loss])
             total_loss.backward()
+#             # ptu.check_nan([x.data for x in self.model.parameters()])
+
             t2 = time.time()
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()], 5.0)
             self.optimizer.step()
+            # ptu.check_nan([x.data for x in self.model.parameters()])
             t3 = time.time()
             timings.append([t0, t1, t2, t3])
 
@@ -175,6 +192,7 @@ class IodineTrainer(Serializable):
         difs = np.sum(difs, axis=0)
         print(difs)
 
+        t_end = time.time()
 
         stats = OrderedDict([
             ("train/epoch", epoch),
@@ -182,6 +200,10 @@ class IodineTrainer(Serializable):
             ("train/KL", np.mean(kles)),
             ("train/loss", np.mean(losses)),
             ("train/mse", np.mean(mses)),
+            ("train/time_forward", difs[0]),
+            ("train/time_backwards", difs[1]),
+            ("train/time_opt_step", difs[2]),
+            ("train/time_total", t_end-t_start)
         ])
         return stats
 

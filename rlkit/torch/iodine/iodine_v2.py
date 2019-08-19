@@ -19,7 +19,7 @@ import numpy as np
 from rlkit.torch.pytorch_util import from_numpy
 from rlkit.torch.conv_networks import CNN, DCNN, BroadcastCNN
 from rlkit.torch.vae.vae_base import GaussianLatentVAE
-from rlkit.torch.modules import LayerNorm2D
+from rlkit.torch.modules import LayerNorm2D, LayerNorm
 from rlkit.core import logger
 import os
 import pdb
@@ -86,7 +86,7 @@ def create_model_v2(variant, det_size, sto_size, action_dim):
 #  D denotes image size, A denotes action dimension, B denotes batch size
 #  (Sc) denotes a scalar while (X,Y,Z) represent the shape
 class IodineVAE_v2(torch.nn.Module):
-    def __init__(self, refine_net, dynamics_net, decode_net, det_size, sto_size):
+    def __init__(self, refine_net, dynamics_net, decode_net, det_size, sto_size, deterministic_sampling=False):
         super().__init__()
         self.refinement_net = refine_net
         self.dynamics_net = dynamics_net
@@ -94,20 +94,33 @@ class IodineVAE_v2(torch.nn.Module):
         self.K = None
         self.det_size = det_size
         self.sto_size = sto_size
+        self.full_rep_size = det_size + sto_size
 
         #Loss hyper-parameters
-        self.sigma = 0.1 #ptu.from_numpy(np.array([0.1]))
+        self.sigma = 0.1
         self.beta = 1
 
+        #Deterministic sampling changes
+        self.deterministic_sampling = deterministic_sampling
+        if deterministic_sampling:
+            self.beta = 0
+
         #Refinement variables
-        l_norm_sizes = [7, 1, 1]
-        self.layer_norms = nn.ModuleList([LayerNorm2D(l) for l in l_norm_sizes])
-        self.eval_mode = False
+        l_norm_sizes_2d = [1, 1, 1, 3]
+        self.layer_norms_2d = nn.ModuleList([LayerNorm2D(l) for l in l_norm_sizes_2d])
+        l_norm_sizes_1d = [self.sto_size, self.sto_size]
+        self.layer_norms_1d = nn.ModuleList([LayerNorm(l, center=True, scale=True) for l in l_norm_sizes_1d])
+
+        self.eval_mode = False #Should set to true when testing
 
         #Initial state parameters
-        self.inital_deter_state = Parameter(ptu.zeros((self.det_size)))
-        self.initial_lambdas1 = Parameter(ptu.zeros((self.sto_size)))
-        self.initial_lambdas2 = Parameter(ptu.ones((self.sto_size)) * 0.6)
+        if det_size != 0:
+            self.inital_deter_state = ptu.zeros(det_size)
+            # self.inital_deter_state = Parameter(ptu.randn((det_size))/np.sqrt(det_size))
+        self.initial_lambdas1 = Parameter(ptu.randn((sto_size))/np.sqrt(sto_size))
+        self.initial_lambdas2 = Parameter(ptu.randn((sto_size))/np.sqrt(sto_size))
+
+        self.debug = {}
 
     def set_k(self, k):
         self.K = k
@@ -134,45 +147,27 @@ class IodineVAE_v2(torch.nn.Module):
         # (2pi) ^ ch = 248.05
         return torch.exp((-torch.pow(inputs - targets, 2).sum(1) / (ch * 2 * sigma ** 2))) / (np.sqrt(sigma ** (2 * ch)) * 248.05)
 
-    # def gaussian_prob(self, inputs, targets, sigma):
-    #     ch = 3
-    #     # (2pi) ^ ch = 248.05
-    #     sigma = sigma.to(inputs.device)
-    #     return torch.exp((-torch.pow(inputs - targets, 2).sum(1) / (ch * 2 * sigma ** 2))) / (
-    #             torch.sqrt(sigma ** (2 * ch)) * 248.05)
-
-    #Inputs: latent_distribution_params: [mu, softplus], each (B,R)
-    #Outputs: A random sample of the same size based off mu and softplus (B,R)
-    # def rsample_softplus(self, latent_distribution_params):
-    #     mu, softplus = latent_distribution_params
-    #     stds = torch.sqrt(torch.log(1 + softplus.exp()))
-    #
-    #     # stds = (0.5 * logvar).exp()
-    #     epsilon = ptu.randn(*mu.size()).to(stds.device)  # RV: Is the star necessary?
-    #     latents = epsilon * stds + mu
-    #     return latents
-
-    # def kl_divergence_softplus(self, latent_distribution_params):
-    #     mu, softplus = latent_distribution_params
-    #     stds = torch.sqrt(torch.log(1 + softplus.exp()))
-    #     logvar = torch.log(torch.log(1 + softplus.exp()))
-    #     return - 0.5 * torch.sum(1 + logvar - mu.pow(2) - stds.pow(2), dim=1).sum() #Note: Incorrect!
-
-
     #Compute the kl loss between prior and posterior
     #Note: This is NOT normalized
     def kl_divergence_prior_post(self, prior, post):
         mu1, softplus1 = prior["lambdas1"], prior["lambdas2"]
         mu2, softplus2 = post["lambdas1"], post["lambdas2"]
 
-        stds1 = torch.sqrt(torch.log(1 + softplus1.exp()))
-        stds2 = torch.sqrt(torch.log(1 + softplus2.exp()))
+        # if torch.sum(mu1-mu2).pow(2) + (softplus1-softplus2).pow(2) < 1e-5:
+        #     return torch.zeros(mu1.shape[:-1]).to(mu1.device)
+        # if torch.equal(mu1, mu2) and torch.equal(softplus1, softplus2):
+        #     return torch.zeros((1)).to(mu1.device)
+
+        stds1 = torch.sqrt(torch.log(1 + softplus1.exp()) + 1e-5)
+        stds2 = torch.sqrt(torch.log(1 + softplus2.exp()) + 1e-5)
         q1 = MultivariateNormal(loc=mu1, scale_tril=torch.diag_embed(stds1))
         q2 = MultivariateNormal(loc=mu2, scale_tril=torch.diag_embed(stds2))
         return torch.distributions.kl.kl_divergence(q2, q1) #KL(post||prior), note ordering matters!
 
     def get_samples(self, means, softplusses):
-        stds = torch.sqrt(torch.log(1 + softplusses.exp()))
+        if self.deterministic_sampling:
+            return means
+        stds = torch.sqrt(torch.log(1 + softplusses.exp()) + 1e-5)
         epsilon = ptu.randn(*means.size()).to(stds.device)
         latents = epsilon * stds + means
         return latents
@@ -194,7 +189,7 @@ class IodineVAE_v2(torch.nn.Module):
 
         lambdas1 = self._unflatten_first(self.initial_lambdas1.unsqueeze(0).repeat(n*k, 1), k) #(n,k,Rs)
         lambdas2 = self._unflatten_first(self.initial_lambdas2.unsqueeze(0).repeat(n*k, 1), k) #(n,k,Rs)
-        samples = self.get_samples(lambdas1, lambdas2) #(n,k,R=Rd+Rs)
+        samples = self.get_samples(lambdas1, lambdas2) #(n,k,Rd+Rs)
         h1, h2 = self.refinement_net.initialize_hidden(n * k)  # Each (1,n*k,lstm_size)
         h1, h2 = h1.to(device), h2.to(device)
 
@@ -208,9 +203,10 @@ class IodineVAE_v2(torch.nn.Module):
                 "lambdas1" : lambdas1, #self._unflatten_first(lambdas1, k),   #(n*k,Rs)
                 "lambdas2" : lambdas2, #self._unflatten_first(lambdas2, k),   #(n*k,Rs)
                 "extra_info" : [h1, h2], # Each (1,n*k,lstm_size)
-                "samples" : samples      #(n,k,R=Rd+Rs)
+                "samples" : samples      #(n,k,Rd+Rs)
             }
         }
+        # ptu.check_nan([lambdas1, lambdas2, samples])
         return hidden_state
 
 
@@ -240,32 +236,33 @@ class IodineVAE_v2(torch.nn.Module):
 
         k_images = images.unsqueeze(1).repeat(1, K, 1, 1, 1) #(B,K,3,D,D)
 
-        lns = self.layer_norms
-        a = torch.cat([
-            torch.cat([k_images.view(tiled_k_shape), colors.view(tiled_k_shape), mask.view(tiled_k_shape), mask_logits.view(tiled_k_shape)], 1), #(B*K,3,D,D), (B*K,3,D,D), (B*K,1,D,D), (B*K,1,D,D) -> (B*K,8,D,D)
-            lns[0](torch.cat([
-                x_hat_grad.view(tiled_k_shape).detach(), #(B*K,3,D,D)
-                mask_grad.view(tiled_k_shape).detach(),  #(B*K,1,D,D)
-                posterior_mask.view(tiled_k_shape).detach(), #(B*K,1,D,D)
-                pixel_complete_log_likelihood.unsqueeze(1).repeat(1, K, 1, 1).view(tiled_k_shape).detach(), #(B*K,1,D,D)
-                leave_out_ll.view(tiled_k_shape).detach()], 1)) #(B*K,1,D,D)
-        ], 1) #(B*K,8,D,D), (B*K,7,D,D) -> (B*K,15,D,D)
         # a = torch.cat([
-        #     torch.cat([k_images.view(tiled_k_shape), colors.view(tiled_k_shape), mask.view(tiled_k_shape),
-        #                mask_logits.view(tiled_k_shape), posterior_mask.view(tiled_k_shape)], 1),
-        #     # (B*K,3,D,D), (B*K,3,D,D), (B*K,1,D,D), (B*K,1,D,D), (B*K,1,D,D) -> (B*K,9,D,D)
+        #     torch.cat([k_images.view(tiled_k_shape), colors.view(tiled_k_shape), mask.view(tiled_k_shape), mask_logits.view(tiled_k_shape)], 1), #(B*K,3,D,D), (B*K,3,D,D), (B*K,1,D,D), (B*K,1,D,D) -> (B*K,8,D,D)
         #     lns[0](torch.cat([
-        #         x_hat_grad.view(tiled_k_shape).detach(),  # (B*K,3,D,D)
-        #         mask_grad.view(tiled_k_shape).detach(),  # (B*K,1,D,D)
-        #         # posterior_mask.view(tiled_k_shape).detach(),  # (B*K,1,D,D)
-        #         pixel_complete_log_likelihood.unsqueeze(1).repeat(1, K, 1, 1).view(tiled_k_shape).detach(),
-        #         # (B*K,1,D,D)
-        #         leave_out_ll.view(tiled_k_shape).detach()], 1))  # (B*K,1,D,D)
-        # ], 1)  # (B*K,9,D,D), (B*K,6,D,D) -> (B*K,15,D,D)
+        #         x_hat_grad.view(tiled_k_shape).detach(), #(B*K,3,D,D)
+        #         mask_grad.view(tiled_k_shape).detach(),  #(B*K,1,D,D)
+        #         posterior_mask.view(tiled_k_shape).detach(), #(B*K,1,D,D)
+        #         pixel_complete_log_likelihood.unsqueeze(1).repeat(1, K, 1, 1).view(tiled_k_shape).detach(), #(B*K,1,D,D)
+        #         leave_out_ll.view(tiled_k_shape).detach()], 1)) #(B*K,1,D,D)
+        # ], 1) #(B*K,8,D,D), (B*K,7,D,D) -> (B*K,15,D,D)
+        lns_2d = self.layer_norms_2d
+        a = (torch.cat([
+                k_images.view(tiled_k_shape), # (B*K,3,D,D)
+                colors.view(tiled_k_shape), # (B*K,3,D,D)
+                mask.view(tiled_k_shape),  # (B*K,1,D,D)
+                mask_logits.view(tiled_k_shape), # (B*K,1,D,D)
+                posterior_mask.view(tiled_k_shape), #(B*K,1,D,D)
+                lns_2d[0](mask_grad.view(tiled_k_shape).detach()),  # (B*K,1,D,D)
+                lns_2d[1](pixel_complete_log_likelihood.unsqueeze(1).repeat(1, K, 1, 1).view(tiled_k_shape).detach()), # (B*K,1,D,D)
+                lns_2d[2](leave_out_ll.view(tiled_k_shape).detach()), # (B*K,1,D,D)
+                lns_2d[3](x_hat_grad.view(tiled_k_shape).detach())], # (B*K,3,D,D)
+            1))  # (B*K,3+3+1+1+1+1+1+1+3,D,D) -> (B*K,15,D,D)
 
-        extra_input = torch.cat([lns[1](lambdas_grad_1.view(bs * K, -1).detach()),
-                                 lns[2](lambdas_grad_2.view(bs * K, -1).detach())
-                                 ], -1) #(B*K,2*R)
+
+        lns_1d = self.layer_norms_1d
+        extra_input = torch.cat([lns_1d[0](lambdas_grad_1.view(bs * K, -1).detach()), #(B*K,Rs)
+                                 lns_1d[1](lambdas_grad_2.view(bs * K, -1).detach()) #(B*K,Rs)
+                                 ], -1) #(B*K,2*Rs)
 
         if action is not None: #Use action as extra input into refinement: This is only for next step refinement (sequence iodine)
             action = self._flatten_first_two(action.unsqueeze(1).repeat(1,K,1)) #(B,A)->(B,K,A)->(B*K,A)
@@ -298,6 +295,7 @@ class IodineVAE_v2(torch.nn.Module):
                 "samples": samples #Update samples (B,K,R)
             }
         }
+        # ptu.check_nan([lambdas1, lambdas2, samples])
         return new_hidden_states
 
     #Inputs: hidden_states, actions (B,A) or None
@@ -309,35 +307,37 @@ class IodineVAE_v2(torch.nn.Module):
             actions = actions.unsqueeze(1).repeat(1, K, 1)  # (B,K,A)
             actions = self._flatten_first_two(actions)  # (B*K,A)
         # samples = self._flatten_first_two(hidden_states["post"]["samples"]) #(B*K,R)
-        full_states = self._flatten_first_two(self.get_full_tensor_state(hidden_states)) #(B*K,2R)
+        full_states = self._flatten_first_two(self.get_full_tensor_state(hidden_states)) #(B*K,Rs+Rd)
 
-        deter_states, lambdas1, lambdas2 = self.dynamics_net(full_states, actions) #Each (B*K,R)
+        # ptu.check_nan([full_states, actions])
+        deter_states, lambdas1, lambdas2 = self.dynamics_net(full_states, actions) #(B*K,Rd), (B*K,Rs), (B*K,Rs)
         h1, h2 = ptu.zeros_like(hidden_states["post"]["extra_info"][0]).to(hidden_states["post"]["extra_info"][0].device), \
                  ptu.zeros_like(hidden_states["post"]["extra_info"][1]).to(hidden_states["post"]["extra_info"][1].device) #Set the h's to zero as the next refinement should start from scratch (B,K,R2)
 
-        lambdas1 = self._unflatten_first(lambdas1, K)  # (B,K,R)
-        lambdas2 = self._unflatten_first(lambdas2, K)  # (B,K,R)
-        samples = self.get_samples(lambdas1, lambdas2)  # (B,K,R)
+        lambdas1 = self._unflatten_first(lambdas1, K)  # (B,K,Rs)
+        lambdas2 = self._unflatten_first(lambdas2, K)  # (B,K,Rs)
+        samples = self.get_samples(lambdas1, lambdas2)  # (B,K,Rs)
         new_hidden_states = {
             "prior": { #Update prior
-                "lambdas1": lambdas1,  # (B,K,R)
-                "lambdas2": lambdas2,  # (B,K,R)
+                "lambdas1": lambdas1,  # (B,K,Rs) ##NOTE: TRY Detaching or not
+                "lambdas2": lambdas2,  # (B,K,Rs)
             },
             "post": { #Update posterior
-                "deter_state": self._unflatten_first(deter_states, K), #(B,K,R)
-                "lambdas1": lambdas1,  # (B,K,R)
-                "lambdas2": lambdas2,  # (B,K,R)
+                "deter_state": self._unflatten_first(deter_states, K), #(B,K,Rd)
+                "lambdas1": lambdas1,  # (B,K,Rs)
+                "lambdas2": lambdas2,  # (B,K,Rs)
                 "extra_info": [h1, h2],  # Each (B,K,R2)
-                "samples": samples # (B,K,R)
+                "samples": samples # (B,K,Rs)
             }
         }
+        # ptu.check_nan([lambdas1, lambdas2, deter_states, samples])
         return new_hidden_states
 
     #Input: hidden_states
     #Output: colors (B,K,3,D,D),  mask (B,K,1,D,D),  mask_logits (B,K,1,D,D)
     def decode(self, hidden_states):
         bs, k = hidden_states["post"]["samples"].shape[:2]
-        full_states = self._flatten_first_two(self.get_full_tensor_state(hidden_states)) #(B*K,2R)
+        full_states = self._flatten_first_two(self.get_full_tensor_state(hidden_states)) #(B*K,Rs+Rd)
         mask_logits, colors = self.decode_net(full_states) #mask_logits: (B*K,1,D,D),  colors: (B*K,3,D,D)
 
         mask_logits = self._unflatten_first(mask_logits, k) #(B,K,1,D,D)
@@ -345,6 +345,7 @@ class IodineVAE_v2(torch.nn.Module):
         colors = self._unflatten_first(colors, k) #(B,K,3,D,D)
         # final_recon = (mask * colors).sum(1) #(B,3,D,D)
         # pdb.set_trace()
+        # ptu.check_nan([mask_logits, mask, colors])
         return colors, mask, mask_logits
 
 
@@ -361,12 +362,17 @@ class IodineVAE_v2(torch.nn.Module):
         pixel_complete_log_likelihood = (mask.squeeze(2) * color_probs).sum(1)  # Sum over K, pixelwise complete log likelihood (B,D,D)
         complete_log_likelihood = -torch.log(pixel_complete_log_likelihood + 1e-12).sum() / b  # (Scalar)
 
+        # if not torch.equal(hidden_states["prior"]["lambdas1"], hidden_states["post"]["lambdas1"]) \
+        #         or not torch.equal(hidden_states["prior"]["lambdas2"], hidden_states["post"]["lambdas2"]):
+        #     kle = self.kl_divergence_prior_post(hidden_states["prior"], hidden_states["post"])
+        #     kle_loss = self.beta * kle.sum() / b  # KL loss, (Sc)
+        # else:
+        #     kle_loss = torch.zeros_like(complete_log_likelihood).to(complete_log_likelihood.device)
         kle = self.kl_divergence_prior_post(hidden_states["prior"], hidden_states["post"])
-        # kle = self.kl_divergence_softplus([hidden_states["post"]["lambdas1"], hidden_states["post"]["lambdas2"]])
         kle_loss = self.beta * kle.sum() / b  # KL loss, (Sc)
 
         total_loss = complete_log_likelihood + kle_loss  # Total loss, (Sc)
-        # pdb.set_trace()
+        # ptu.check_nan([total_loss])
         return color_probs, pixel_complete_log_likelihood, kle_loss, complete_log_likelihood, total_loss
 
 
@@ -375,6 +381,8 @@ class IodineVAE_v2(torch.nn.Module):
     #Output: colors_list (T1,B,K,3,D,D), masks_list (T1,B,K,1,D,D), final_recon (B,3,D,D),
     # total_loss, total_kle_loss, total_clog_prob, mse are all (Sc), end_hidden_state
     def run_schedule(self, images, actions, initial_hidden_state, schedule, loss_schedule):
+        self.debug["schedule"] = schedule
+        self.debug["at"] = -1
         b = images.shape[0]
         if initial_hidden_state is None: #Initialize initial_hidden_state if it is not passed in
             initial_hidden_state = self._get_initial_hidden_states(b, images.device)
@@ -399,6 +407,7 @@ class IodineVAE_v2(torch.nn.Module):
 
         ###Loss based on schedule
         for i in range(len(schedule)):
+            self.debug["at"] = i
             # print(i)
             if schedule[i] == 0: #Refinement step
                 # print("Refinement")
@@ -462,8 +471,9 @@ class IodineVAE_v2(torch.nn.Module):
 
 
         #This part is needed for dataparallel as all tensors need to be (B,*)
-        tmp = [cur_hidden_state["post"]["extra_info"][0].squeeze(0), cur_hidden_state["post"]["extra_info"][1].squeeze(0)]
+        tmp = [cur_hidden_state["post"]["extra_info"][0].view(b, self.K, -1), cur_hidden_state["post"]["extra_info"][1].view(b, self.K, -1)]
         cur_hidden_state["post"]["extra_info"] = tmp
+        # pdb.set_trace()
 
         # cur_hidden_state = {
         #     "prior": {
@@ -485,12 +495,16 @@ class IodineVAE_v2(torch.nn.Module):
     def forward(self, images, actions, initial_hidden_state, schedule, loss_schedule):
         return self.run_schedule(images, actions, initial_hidden_state, schedule, loss_schedule)
 
-
+    #######Extra functions not needed for training but useful for testing/mpc########
+    #Inputs: seed_steps, num_images, num_refine_per_physics all (Sc)
+    #Outputs: schedule (T) numpy array
     def get_rprp_schedule(self, seed_steps, num_images, num_refine_per_physics):
         schedule = np.zeros(seed_steps + (num_images-1) * (num_refine_per_physics+1))
         schedule[seed_steps::(num_refine_per_physics+1)] = 1
         return schedule
 
+    #Input: Hidden state
+    #Output: Hidden state with everything detached
     def detach_state_info(self, cur_hidden_state):
         tmp = [cur_hidden_state["post"]["extra_info"][0].detach(),
                cur_hidden_state["post"]["extra_info"][1].detach()]
@@ -511,6 +525,33 @@ class IodineVAE_v2(torch.nn.Module):
         }
         return detached_hidden_state
 
+
+    #Inputs: cur_hidden_state with B=1, n
+    #Outputs: cur_hidden_state with B=n
+    def replicate_state(self, cur_hidden_state, n):
+        tmp = [cur_hidden_state["post"]["extra_info"][0].repeat(n,1,1),
+               cur_hidden_state["post"]["extra_info"][1].repeat(n,1,1)]
+
+        new_hidden_state = {
+            "prior": {
+                "lambdas1": cur_hidden_state["prior"]["lambdas1"].repeat(n,1,1),  # (n,K,R)
+                "lambdas2": cur_hidden_state["prior"]["lambdas1"].repeat(n,1,1),  # (n,K,R)
+            },
+            "post": {  # Update posterior
+                "deter_state": cur_hidden_state["post"]["deter_state"].repeat(n,1,1) if cur_hidden_state["post"]["deter_state"] is not None else None, # (B,K,R)
+                "lambdas1": cur_hidden_state["post"]["lambdas1"].repeat(n,1,1),  # (b,K,R)
+                "lambdas2": cur_hidden_state["post"]["lambdas2"].repeat(n,1,1),  # (b,K,R)
+                "extra_info": tmp,  # Each (B*K,R2)
+                "samples": cur_hidden_state["post"]["samples"]  # (B,K,R)
+            }
+        }
+
+
+
+    #Inputs: cur_hidden_state with B=1, actions (B,T,A)
+    #Outputs:
+    # def run_actions(self, cur_hidden_state, actions, batch_size):
+    #     for i in range(0, actions.shape[0], batch_size):
 
 
 

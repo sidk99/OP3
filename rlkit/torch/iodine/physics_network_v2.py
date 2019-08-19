@@ -38,7 +38,7 @@ class PhysicsNetwork_v2(nn.Module):
             action_size,
             action_enc_size,
             hidden_activation=nn.ELU(),
-            deterministic_state_activation=nn.ELU(),
+            deterministic_state_activation=identity,
             lambda_output_activation=identity
     ):
         super().__init__()

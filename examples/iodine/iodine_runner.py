@@ -67,6 +67,7 @@ def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
             feats = np.array(hdf5_file['validation']['features'])
             actions = np.array(hdf5_file['validation']['actions'])
         #t_sample = [0, 2, 4, 6, 9]
+        # pdb.set_trace()
         feats = np.moveaxis(feats, -1, 2) #[t_sample] # (T, bs, ch, imsize, imsize)
         feats = np.moveaxis(feats, 0, 1) # (bs, T, ch, imsize, imsize)
         #actions = np.moveaxis(actions, 0, 1) # (bs, T, action_dim)
@@ -199,10 +200,10 @@ def train_vae(variant):
     for epoch in range(variant['num_epochs']):
         should_save_imgs = (epoch % save_period == 0)
 
-        t0 = time.time()
+        # t0 = time.time()
         train_stats = t.train_epoch(epoch)
-        t1 = time.time()
-        print(t1-t0)
+        # t1 = time.time()
+        # print(t1-t0)
         test_stats = t.test_epoch(epoch, train=False, batches=1, save_reconstruction=should_save_imgs)
         t.test_epoch(epoch, train=True, batches=1, save_reconstruction=should_save_imgs)
         for k, v in {**train_stats, **test_stats}.items():
@@ -213,7 +214,7 @@ def train_vae(variant):
         # torch.save(m.state_dict(), open(logger.get_snapshot_dir() + '/params.pkl', "wb"))
     # logger.save_extra_data(m, 'vae.pkl', mode='pickle')
 
-#Datasets: pickplace_1env_1k, pickplace_multienv_10k, stack_o2p2_60k, cloth, poke, solid, twoBalls, twoBalls_10k
+#Datasets: pickplace_1env_1k, pickplace_multienv_10k, stack_o2p2_60k, cloth, poke, solid, twoBalls, twoBalls_10k, pickplace_1block_10k
 #Generic run: CUDA_VISIBLE_DEVICES=[A,B,C...] python iodine_runner.py -de [0/1] -da [DATASET_NAME_HERE]
 #  -da options: look at above list of Datasets
 #  -de options: 0 for training on full dataset, 1 for training on first 100 sequences
@@ -228,25 +229,24 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     variant = dict(
-        refinement_model_type = "large_reg",
+        refinement_model_type = "size_dependent_conv",
         decoder_model_type = "reg",
         dynamics_model_type = "reg_ac32",
-        # repsize = 64, #This will be the size of the stochastic part and the deterministic part EACH (so full state size is *2)
-        sto_repsize = 128,
-        det_repsize = 0,
+        sto_repsize = 32,
+        det_repsize = 32,
         K = 4,
         schedule_args = dict( #Arguments for TrainingScheduler
-            seed_steps = 5,
-            T = 5, #Max number of steps into the future we want to go
-            schedule_type = 'static_iodine', #single_step_physics, curriculum, static_iodine, rprp, next_step
+            seed_steps = 4,
+            T = 5, #Max number of steps into the future we want to go or max length of a schedule
+            schedule_type = 'curriculum', #single_step_physics, curriculum, static_iodine, rprp, next_step, random_alternating
         ),
         training_args = dict( #Arguments for IodineTrainer
-            batch_size=10,  #Change to appropriate constant based off dataset size
-            lr=1e-4,
+            batch_size=30,  #Change to appropriate constant based off dataset size
+            lr=3e-4,
         ),
-        num_epochs = 400,
+        num_epochs = 200,
         save_period=1,
-        dataparallel=False,
+        dataparallel=True,
         dataset=args.dataset,
         debug=args.debug,
         machine_type='g3.16xlarge'  # Note: Purely for logging purposed and NOT used for setting actual machine type
@@ -259,7 +259,7 @@ if __name__ == "__main__":
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU
-        seed=746,
+        seed=None,
         region='us-west-2'
     )
 
