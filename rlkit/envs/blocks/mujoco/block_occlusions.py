@@ -30,6 +30,7 @@ MODEL_XML_BASE = """
         <light diffuse='1.5 1.5 1.5' pos='0 -7 6' dir='0 1 1'/>  
         <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' 
         condim='3' friction='1 1 1'/>
+        <geom name='occluding_wall' type='box' pos='2 0 0' euler='0 0 0' size='2 0.1 6' material='wall_visible' />
         {}
     </worldbody>
 </mujoco>
@@ -76,6 +77,7 @@ class BlockPickAndPlaceEnv():
 
         self.names = []
         self.blocks = []
+        self._blank_observation = None
 
         if random_initialize:
             self.reset()
@@ -145,6 +147,7 @@ class BlockPickAndPlaceEnv():
         tmp = MODEL_XML_BASE.format(self.get_asset_mesh_str(), self.get_asset_material_str(), self.get_body_str())
         model = load_model_from_xml(tmp)
         self.sim = MjSim(model)
+        self._blank_observation = self.get_observation()
         if self.view:
             self.viewer = MjViewer(self.sim)
         else:
@@ -296,7 +299,8 @@ class BlockPickAndPlaceEnv():
         for i in range(self.num_objects):
             poly = np.random.choice(self.polygons)
             pos = self.get_random_pos()
-            pos[-2] += -2 * (i + 1)
+            pos[2] += -2 * (i + 1)
+            pos[1] += -2 * (i + 1)
             self.add_mesh(poly, pos, quat, self.get_random_rbga(self.num_colors))
         self.initialize(False)
         return self.get_observation()
@@ -305,6 +309,13 @@ class BlockPickAndPlaceEnv():
         img = self.sim.render(self.img_dim, self.img_dim, camera_name="fixed")  # img is upside down, values btwn 0-255 (D,D,3)
         img = img[::-1, :, :]  # flips image right side up (D,D,3)
         return np.ascontiguousarray(img)  # values btwn 0-255 (D,D,3)
+
+    def get_segmentation_masks(self):
+        cur_obs = self.get_observation()
+        tmp = np.abs(cur_obs - self._blank_observation).sum(2) #(D,D,3) -> (D,D)
+        dif = np.where(tmp > 5, 1.0, 0.0)
+        return dif
+
 
     def get_obs_size(self):
         return [self.img_dim, self.img_dim]
@@ -688,7 +699,11 @@ def test_env_infos():
     #The loaded environment is nearly identical but not completely
 
 def test_occlusion():
-    env = BlockPickAndPlaceEnv(num_objects=3, num_colors=None, img_dim=64, include_z=False, random_initialize=True, view=True)
+    env = BlockPickAndPlaceEnv(num_objects=1, num_colors=None, img_dim=64, include_z=False, random_initialize=True, view=False)
+    tmp = env.get_segmentation_masks() #(D,D)
+    tmp = np.tile(np.expand_dims(tmp, 2), (1,1,3)) #(D,D)->(D,D,1)->(D,D,3)
+    # pdb.set_trace()
+    plot_numpy(np.array([[tmp, env.get_observation()], [tmp, env._blank_observation]]), "test_occlusion.png")
 
 
 #Inputs: numpy_array (H,W,D,D,3)

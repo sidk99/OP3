@@ -108,6 +108,11 @@ class BlockEnv():
         pos = utils.uniform(*self.drop_bounds['pos'])
         # pos[-1] = 2.5
 
+        # if 'horizontal' in ply:
+        #     axis = [1, 0, 0]
+        # else:
+        #     axis = [0, 0, 1]
+        # axangle = utils.random_axangle(axis=axis)
         if 'horizontal' in ply:
             axis = [1, 0, 0]
         else:
@@ -151,10 +156,9 @@ class BlockEnv():
             axis = [1, 0, 0]
         else:
             axis = [0, 0, 1]
-        # axangle = utils.random_axangle(axis=axis)
-        #axangle[-1] = random_a[9]
-        # axangle[-1] = 0 #Uncomment to remove actions
-        axangle = random_a[6:10] #Adding in rotation into action space
+        axangle = utils.random_axangle(axis=axis)
+        axangle[-1] = random_a[9]
+        # axangle[-1] = 0 #Uncomment to remove angle from action space
 
         if 'horizontal' in ply:
             axangle[-1] = 0

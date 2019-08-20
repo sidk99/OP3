@@ -562,7 +562,7 @@ def main(variant):
     # np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
 #CUDA_VISIBLE_DEVICES=7 python mpc_stage1.py -de 1 -s
-#CUDA_VISIBLE_DEVICES=3 python mpc_stage1.py -de 0 -s 3 -m /nfs/kun1/users/rishiv/Research/fun_rlkit/data/models/noattention_params.pkl
+#CUDA_VISIBLE_DEVICES=0 python mpc_stage1.py -de 0 -s 1 -m /nfs/kun1/users/rishiv/Research/op3_exps/08-17-stack-o2p2-60k-single-step-physics-reg/08-17-stack_o2p2_60k-single_step_physics-reg-k5_2019_08_17_12_24_19_0000--s-36145/_params.pkl
 
 
 if __name__ == "__main__":
@@ -598,7 +598,7 @@ if __name__ == "__main__":
             algorithm='MPC',
             cost_type='latent_pixel',  # 'sum_goal_min_latent' 'latent_pixel
             mpc_style='cem',  # random_shooting or cem
-            model=iodine.imsize64_large_iodine_architecture_multistep_physics_NoAttention,
+            model=iodine.imsize64_large_iodine_architecture_multistep_physics,
             structure=s,
             debug=args.debug,
             model_file=args.model_file,
@@ -606,7 +606,7 @@ if __name__ == "__main__":
         )
 
         n_seeds = 1
-        exp_prefix = 'iodine-mpc-stage1-noattention'
+        exp_prefix = 'iodine-mpc-stage1-k5-final'
 
         run_experiment(
             main,
