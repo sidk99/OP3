@@ -20,181 +20,11 @@ import os
 import pdb
 import copy
 
-imsize84_iodine_architecture = dict(
-    deconv_args=dict(
-        hidden_sizes=[],
-
-        input_width=92,
-        input_height=92,
-        input_channels=130,
-
-        kernel_sizes=[3, 3, 3, 3],
-        n_channels=[64, 64, 64, 64],
-        paddings=[0, 0, 0, 0],
-        strides=[1, 1, 1, 1],
-    ),
-    deconv_kwargs=dict(
-        batch_norm_conv=False,
-        batch_norm_fc=False,
-    ),
-    refine_args=dict(
-        input_width=84,
-        input_height=84,
-        input_channels=17,
-        paddings=[0, 0, 0, 0],
-        kernel_sizes=[3, 3, 3, 3],
-        n_channels=[64, 64, 64, 64],
-        strides=[2, 2, 2, 2],
-        hidden_sizes=[128, 128],
-        output_size=128,
-        lstm_size=256,
-        lstm_input_size=768,
-        added_fc_input_size=0
-
-    )
-)
-
-imsize64_iodine_architecture = dict(
-    deconv_args=dict(
-        hidden_sizes=[],
-
-        input_width=80,
-        input_height=80,
-        input_channels=34,
-
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[32, 32, 32, 32],
-        strides=[1, 1, 1, 1],
-        paddings=[0, 0, 0, 0]
-    ),
-    deconv_kwargs=dict(
-        batch_norm_conv=False,
-        batch_norm_fc=False,
-    ),
-    refine_args=dict(
-        input_width=64,
-        input_height=64,
-        input_channels=17,
-        paddings=[0, 0, 0, 0],
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[32, 32, 32, 32],
-        strides=[2, 2, 2, 2],
-        hidden_sizes=[128, 128],
-        output_size=32,
-        lstm_size=128,
-        lstm_input_size=288,
-        added_fc_input_size=0
-
-    )
-)
-
 REPSIZE_128 = 128
 
-imsize64_large_iodine_architecture = dict(
-    vae_kwargs=dict(
-        imsize=64,
-        representation_size=REPSIZE_128,
-        input_channels=3,
-        # decoder_distribution='gaussian_identity_variance',
-        beta=1,
-        # K=7,
-        sigma=0.1,
-    ),
-    deconv_args=dict(
-        hidden_sizes=[],
-        output_size=64 * 64 * 3,
-        input_width=80,
-        input_height=80,
-        input_channels=REPSIZE_128 + 2,
 
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 64],
-        strides=[1, 1, 1, 1],
-        paddings=[0, 0, 0, 0]
-    ),
-    deconv_kwargs=dict(
-        batch_norm_conv=False,
-        batch_norm_fc=False,
-    ),
-    refine_args=dict(
-        input_width=64,
-        input_height=64,
-        input_channels=17,
-        paddings=[0, 0, 0, 0],
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 64],
-        strides=[2, 2, 2, 2],
-        hidden_sizes=[128, 128],
-        output_size=REPSIZE_128,
-        lstm_size=256,
-        lstm_input_size=768,
-        added_fc_input_size=0
 
-    ),
-    physics_kwargs=dict(
-        action_enc_size=32,
-    ),
-    schedule_kwargs=dict(
-        train_T=5,
-        test_T=5,
-        seed_steps=4,
-        schedule_type='single_step_physics'
-    )
-)
-
-imsize64_large_iodine_architecture_multistep_physics = dict(
-    vae_kwargs=dict(
-        imsize=64,
-        representation_size=REPSIZE_128,
-        input_channels=3,
-        # decoder_distribution='gaussian_identity_variance',
-        beta=1,
-        # K=7, #7
-        sigma=0.1,
-    ),
-    deconv_args=dict(
-        hidden_sizes=[],
-        output_size=64 * 64 * 3,
-        input_width=80,
-        input_height=80,
-        input_channels=REPSIZE_128 + 2,
-
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 4], #Was 64
-        strides=[1, 1, 1, 1],
-        paddings=[0, 0, 0, 0]
-    ),
-    deconv_kwargs=dict(
-        batch_norm_conv=False,
-        batch_norm_fc=False,
-    ),
-    refine_args=dict(
-        input_width=64,
-        input_height=64,
-        input_channels=17,
-        paddings=[0, 0, 0, 0],
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 64],
-        strides=[2, 2, 2, 2],
-        hidden_sizes=[128, 128],
-        output_size=REPSIZE_128,
-        lstm_size=256,
-        lstm_input_size=768,
-        added_fc_input_size=0
-
-    ),
-    physics_kwargs=dict(
-        action_enc_size=32,
-    ) #,
-    # schedule_kwargs=dict(
-    #     train_T=10,
-    #     test_T=10,
-    #     seed_steps=5,
-    #     schedule_type='random_alternating'
-    # )
-)
-
-imsize64_large_iodine_architecture_multistep_physics_BIG = dict(
+imsize64_large_iodine_segmentation_architecture_multistep_physics_BIG = dict(
     vae_kwargs=dict(
         imsize=64,
         representation_size=128*4,
@@ -223,12 +53,12 @@ imsize64_large_iodine_architecture_multistep_physics_BIG = dict(
     refine_args=dict(
         input_width=64,
         input_height=64,
-        input_channels=17,
+        input_channels=5,
         paddings=[0, 0, 0, 0],
         kernel_sizes=[5, 5, 5, 5],
         n_channels=[64, 64, 64, 64],
         strides=[2, 2, 2, 2],
-        hidden_sizes=[128*4, 128*4],
+        hidden_sizes=[512],
         output_size=128*4,
         lstm_size=256*4,
         lstm_input_size=128*6*4,
@@ -240,239 +70,7 @@ imsize64_large_iodine_architecture_multistep_physics_BIG = dict(
     )
 )
 
-imsize64_large_iodine_architecture_multistep_physics_NoAttention = dict(
-    vae_kwargs=dict(
-        imsize=64,
-        representation_size=128,
-        input_channels=3,
-        # decoder_distribution='gaussian_identity_variance',
-        beta=1,
-        # K=7, #7
-        sigma=0.1,
-    ),
-    deconv_args=dict(
-        hidden_sizes=[],
-        output_size=64 * 64 * 3,
-        input_width=80,
-        input_height=80,
-        input_channels=128 + 2,
 
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 64],
-        strides=[1, 1, 1, 1],
-        paddings=[0, 0, 0, 0]
-    ),
-    deconv_kwargs=dict(
-        batch_norm_conv=False,
-        batch_norm_fc=False,
-    ),
-    refine_args=dict(
-        input_width=64,
-        input_height=64,
-        input_channels=17,
-        paddings=[0, 0, 0, 0],
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 64],
-        strides=[2, 2, 2, 2],
-        hidden_sizes=[128, 128],
-        output_size=128,
-        lstm_size=256,
-        lstm_input_size=128*6,
-        added_fc_input_size=0
-
-    ),
-    physics_kwargs=dict(
-        noattention=True,
-        action_enc_size=32,
-    )
-)
-
-imsize64_large_iodine_architecture_multistep_physics_AllAtOnce = dict(
-    vae_kwargs=dict(
-        imsize=64,
-        representation_size=128,
-        input_channels=3,
-        # decoder_distribution='gaussian_identity_variance',
-        beta=1,
-        # K=7, #7
-        sigma=0.1,
-    ),
-    deconv_args=dict(
-        hidden_sizes=[],
-        output_size=64 * 64 * 3,
-        input_width=80,
-        input_height=80,
-        input_channels=128 + 2,
-
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 64],
-        strides=[1, 1, 1, 1],
-        paddings=[0, 0, 0, 0]
-    ),
-    deconv_kwargs=dict(
-        batch_norm_conv=False,
-        batch_norm_fc=False,
-    ),
-    refine_args=dict(
-        input_width=64,
-        input_height=64,
-        input_channels=17,
-        paddings=[0, 0, 0, 0],
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 64],
-        strides=[2, 2, 2, 2],
-        hidden_sizes=[128, 128],
-        output_size=128,
-        lstm_size=256,
-        lstm_input_size=128*6,
-        added_fc_input_size=0
-
-    ),
-    physics_kwargs=dict(
-        allatonce=True,
-        action_enc_size=32,
-    )
-)
-
-imsize64_large_iodine_architecture_multistep_physics_MLP = dict(
-    vae_kwargs=dict(
-        imsize=64,
-        representation_size=128,
-        input_channels=3,
-        # decoder_distribution='gaussian_identity_variance',
-        beta=1,
-        # K=7, #7
-        sigma=0.1,
-    ),
-    deconv_args=dict(
-        hidden_sizes=[],
-        output_size=64 * 64 * 3,
-        input_width=80,
-        input_height=80,
-        input_channels=128 + 2,
-
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 64],
-        strides=[1, 1, 1, 1],
-        paddings=[0, 0, 0, 0]
-    ),
-    deconv_kwargs=dict(
-        batch_norm_conv=False,
-        batch_norm_fc=False,
-    ),
-    refine_args=dict(
-        input_width=64,
-        input_height=64,
-        input_channels=17,
-        paddings=[0, 0, 0, 0],
-        kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 64],
-        strides=[2, 2, 2, 2],
-        hidden_sizes=[128, 128],
-        output_size=128,
-        lstm_size=256,
-        lstm_input_size=128*6,
-        added_fc_input_size=0
-
-    ),
-    physics_kwargs=dict(
-        mlp=True,
-        action_enc_size=32,
-    )
-)
-
-imsize64_small_iodine_architecture = dict(
-    vae_kwargs=dict(
-        imsize=64,
-        representation_size=REPSIZE_128,
-        input_channels=3,
-        beta=1,
-        sigma=0.1,
-    ),
-    deconv_args=dict(
-        hidden_sizes=[],
-        output_size=64 * 64 * 4, #Note: This does not seem to be used in Broadcast
-        input_width=64,
-        input_height=64,
-        input_channels=REPSIZE_128 + 2,
-
-        kernel_sizes=[5, 5],
-        n_channels=[64, 4],
-        strides=[1, 1],
-        paddings=[2, 2]
-    ),
-    deconv_kwargs=dict(
-        batch_norm_conv=False,
-        batch_norm_fc=False,
-    ),
-    refine_args=dict(
-        input_width=64,
-        input_height=64,
-        input_channels=17,
-        paddings=[0, 0],
-        kernel_sizes=[5, 5],
-        n_channels=[64, 64],
-        strides=[2, 2],
-        hidden_sizes=[128, 128],
-        output_size=REPSIZE_128,
-        lstm_size=256,
-        lstm_input_size=768,
-        added_fc_input_size=0
-    ),
-    physics_kwargs=dict(
-        action_enc_size=32,
-    )
-)
-
-imsize64_medium_iodine_architecture = dict(
-    vae_kwargs=dict(
-        imsize=64,
-        representation_size=REPSIZE_128,
-        input_channels=3,
-        beta=1,
-        sigma=0.1,
-    ),
-    deconv_args=dict(
-        hidden_sizes=[],
-        output_size=64 * 64 * 3,
-        input_width=64,
-        input_height=64,
-        input_channels=REPSIZE_128 + 2,
-
-        kernel_sizes=[3, 3, 3, 3],
-        n_channels=[64, 64, 64, 4],
-        strides=[1, 1, 1 ,1],
-        paddings=[1, 1, 1, 1]
-    ),
-    deconv_kwargs=dict(
-        batch_norm_conv=False,
-        batch_norm_fc=False,
-    ),
-    refine_args=dict(
-        input_width=64,
-        input_height=64,
-        input_channels=17,
-        paddings=[0, 0, 0],
-        kernel_sizes=[3, 3, 3],
-        n_channels=[64, 64, 64],
-        strides=[1, 1, 1],
-        hidden_sizes=[128, 128],
-        output_size=REPSIZE_128,
-        lstm_size=256,
-        lstm_input_size=768,
-        added_fc_input_size=0
-    ),
-    physics_kwargs=dict(
-        action_enc_size=32,
-    )
-)
-
-# schedule_parameters=dict(
-#     train_T = 21,
-#     test_T = 21,
-#     seed_steps = 5,
-#     schedule_type='random_alternating'
-# )
 
 #model, schedule_kwargs, K
 def create_model(variant, action_dim):
@@ -837,39 +435,7 @@ class IodineVAE(GaussianLatentVAE):
 
         return torch.cat(outputs[0]), torch.cat(outputs[1]), torch.cat(outputs[2])
 
-    #RV: Inputs: Information needed for IODINE refinement network (note much more information needed than RNEM)
-    #RV: Outputs: Updates lambdas and hs
-    def refine_lambdas(self, pixel_x_prob, pixel_likelihood, mask, m_hat_logit, loss, x_hat,
-                       lambdas1, lambdas2, inputK, latents, h1, h2, tiled_k_shape, bs, add_fc_input=None):
-        K = self.K
-        lns = self.layer_norms
-        posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-8)  # avoid divide by zero
-        leave_out_ll = pixel_likelihood.unsqueeze(1) - mask * pixel_x_prob
-        x_hat_grad, mask_grad, lambdas_grad_1, lambdas_grad_2 = \
-            torch.autograd.grad(loss, [x_hat, mask] + [lambdas1, lambdas2],create_graph=not self.eval_mode, retain_graph=not self.eval_mode)
-
-        a = torch.cat([
-            torch.cat([inputK, x_hat, mask.view(tiled_k_shape), m_hat_logit.view(tiled_k_shape)], 1),
-            lns[0](torch.cat([
-                x_hat_grad.detach(),
-                mask_grad.view(tiled_k_shape).detach(),
-                posterior_mask.view(tiled_k_shape).detach(),
-                pixel_likelihood.unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape).detach(),
-                leave_out_ll.view(tiled_k_shape).detach()], 1))
-        ], 1)
-
-        extra_input = torch.cat([lns[1](lambdas_grad_1.view(bs * K, -1).detach()),
-                                 lns[2](lambdas_grad_2.view(bs * K, -1).detach())
-                                 ], -1)
-
-        # pdb.set_trace()
-
-        lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2,
-                                                         extra_input=torch.cat([extra_input, lambdas1, lambdas2, latents], -1),
-                                                         add_fc_input=add_fc_input)
-        return lambdas1, lambdas2, h1, h2
-
-    def refine_lambdas2(self, x, segmentations):
+    def refine_lambdas2(self, x, segmentations, tiled_k_shape):
         K = self.K
         # lns = self.layer_norms
         # posterior_mask = pixel_x_prob / (pixel_x_prob.sum(1, keepdim=True) + 1e-8)  # avoid divide by zero
@@ -895,7 +461,7 @@ class IodineVAE(GaussianLatentVAE):
 
         a = torch.cat([
             x,
-            segmentations
+            segmentations.view(tiled_k_shape)
         ], 1)
         lambdas1, lambdas2 = self.refinement_net(a)
 
@@ -944,7 +510,7 @@ class IodineVAE(GaussianLatentVAE):
             #     raise ValueError("Incorrect lambdas1 shape: {}".format(lambdas1.shape))
             if schedule[t - 1] == 0: # Refine
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape) #RV: (bs*K, ch, imsize, imsize)
-                lambdas1, lambdas2, h1, h2 = self.refine_lambdas2(inputK, segmentations) #RV: Update lambdas and h's using info
+                lambdas1, lambdas2, h1, h2 = self.refine_lambdas2(inputK, segmentations, tiled_k_shape) #RV: Update lambdas and h's using info
                 # if not applied_action: # Do physics on static scene if haven't applied action yet
                 #     lambdas1, _ = self.physics_net(lambdas1, lambdas2, None)
             elif schedule[t-1] == 1: # Physics
@@ -968,7 +534,7 @@ class IodineVAE(GaussianLatentVAE):
                 else:
                     actionsK = None
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape)
-                lambdas1, lambdas2, h1, h2 = self.refine_lambdas2(inputK, segmentations)  # RV: Update lambdas and h's using info
+                lambdas1, lambdas2, h1, h2 = self.refine_lambdas2(inputK, segmentations, tiled_k_shape)  # RV: Update lambdas and h's using info
             else:
                 raise ValueError("Invalid schedule value: {}".format(schedule[t-1]))
 
