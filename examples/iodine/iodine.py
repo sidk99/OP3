@@ -242,7 +242,7 @@ if __name__ == "__main__":
 
     variant = dict(
         model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
-        K=7,
+        K=5,
         training_kwargs = dict(
             batch_size=80, #Used in IodineTrainer, change to appropriate constant based off dataset size
             lr=1e-4, #Used in IodineTrainer
@@ -266,7 +266,7 @@ if __name__ == "__main__":
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
-        exp_prefix='{}-{}-reg'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
+        exp_prefix='{}-{}-reg-k5'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

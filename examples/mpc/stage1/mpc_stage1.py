@@ -494,15 +494,20 @@ def main(variant):
     module_path = '/nfs/kun1/users/rishiv/Research/fun_rlkit'
     # model_file = module_path + '/examples/mpc/saved_models/iodine_params_5_15.pkl'
     # model_file = '/nfs/kun1/users/rishiv/Research/op3_exps/05-29-iodine-blocks-stack-o2p2-60k/05-29-iodine-blocks-stack_o2p2_60k_2019_05_29_00_55_37_0000--s-81417/params.pkl'
-    model_file = '/nfs/kun1/users/rishiv/Research/op3_exps/05-29-iodine-blocks-stack-o2p2-60k/05-29-iodine-blocks-stack_o2p2_60k_2019_05_29_23_06_32_0000--s-93500/params.pkl'
+    # model_file = '/nfs/kun1/users/rishiv/Research/op3_exps/05-29-iodine-blocks-stack-o2p2-60k/05-29-iodine-blocks-stack_o2p2_60k_2019_05_29_23_06_32_0000--s-93500/params.pkl'
+
+    model_file = variant['model_file'] #+ '/_params.pkl'
 
     # model_file = module_path + \
     #              '/saved_models/iodine-blocks-stack_o2p2_60k/SequentialRayExperiment_0_2019' \
     #              '-05' \
     #              '-20_16-24-523j6_e94i/model_params.pkl'
-    if variant['structure'][1] > 7:
-        variant['model']['vae_kwargs']['K'] = variant['structure'][1] + 2
-    m = iodine.create_model(variant['model'], 0)
+    # if variant['structure'][1] > 7:
+    #     # variant['model']['vae_kwargs']['K'] = variant['structure'][1] + 2
+    #     variant['model']['K'] = variant['structure'][1] + 2
+    variant['K'] = variant['structure'][1] + 2
+    # pdb.set_trace()
+    m = iodine.create_model(variant, 0)
     state_dict = torch.load(model_file)
 
     new_state_dict = OrderedDict()
@@ -537,10 +542,10 @@ def main(variant):
             module_path + '/examples/mpc/stage1/manual_constructions/%s/%d.p' % (structure, goal_idx), allow_pickle=True)
         # pdb.set_trace()
         env = BlockEnv(n_goal_obs)
-        mpc = MPC(m, env, n_actions=1000, mpc_steps=n_goal_obs, true_actions=None,
+        mpc = MPC(m, env, n_actions=500, mpc_steps=n_goal_obs, true_actions=None,
                   cost_type=variant['cost_type'], filter_goals=True, n_goal_objs=n_goal_obs,
                   logger_prefix_dir='/%s_goal_%d' % (structure, goal_idx),
-                  mpc_style=variant['mpc_style'], cem_steps=5, use_action_image=True,
+                  mpc_style=variant['mpc_style'], cem_steps=3, use_action_image=True,
                   true_data=true_data)
         goal_image = imageio.imread(goal_file)
         single_stats, actions = mpc.run(goal_image)
@@ -557,10 +562,14 @@ def main(variant):
     # np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
 #CUDA_VISIBLE_DEVICES=7 python mpc_stage1.py -de 1 -s
+#CUDA_VISIBLE_DEVICES=3 python mpc_stage1.py -de 0 -s 3 -m /nfs/kun1/users/rishiv/Research/fun_rlkit/data/models/noattention_params.pkl
+
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-de', '--debug', type=int, default=0)
-    parser.add_argument('-s', '--split', type=int, default=0)
+    parser.add_argument('-s', '--split', type=int, required=True)
+    parser.add_argument('-m', '--model_file', type=str, required=True)
 
     args = parser.parse_args()
 
@@ -578,7 +587,7 @@ if __name__ == "__main__":
         ('double-bridge-close-topfar', 8),  #5
         ('towers', 9), #6
     ]
-    n = 2 #(11+1)//n is the number of splits
+    n = 3 #(11+1)//n is the number of splits
     splits = [structures[i:i + n] for i in range(0, len(structures), n)]
     structure_split = splits[args.split]
     # pdb.set_trace()
@@ -589,14 +598,15 @@ if __name__ == "__main__":
             algorithm='MPC',
             cost_type='latent_pixel',  # 'sum_goal_min_latent' 'latent_pixel
             mpc_style='cem',  # random_shooting or cem
-            model=iodine.imsize64_large_iodine_architecture_multistep_physics,
+            model=iodine.imsize64_large_iodine_architecture_multistep_physics_NoAttention,
             structure=s,
-            debug=args.debug
+            debug=args.debug,
+            model_file=args.model_file,
             # n_goal_obs=structures[s_idx][1]
         )
 
         n_seeds = 1
-        exp_prefix = 'iodine-mpc-stage1-%s' % 'final3'
+        exp_prefix = 'iodine-mpc-stage1-noattention'
 
         run_experiment(
             main,

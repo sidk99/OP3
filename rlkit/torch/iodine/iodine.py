@@ -783,6 +783,8 @@ class IodineVAE(GaussianLatentVAE):
         else:
             schedule = np.zeros((self.seed_steps,))
             # schedule = create_schedule(False, self.test_T, self.schedule_type, self.seed_steps)  # RV: Returns schedule of 1's and 0's
+        schedule = np.array([0,0,0,0,1])
+        # print(schedule)
 
 
         #Note: self._forward_dynamic_actions require that the schedule physics steps have corresponding "true" image

@@ -115,7 +115,7 @@ class BlockEnv():
         axangle = utils.random_axangle(axis=axis)
         # axangle[-1] = 0 #Uncomment to remove rotation
 
-        scale = utils.uniform(*self.settle_bounds['scale'])
+        scale = utils.uniform(*self.settle_bounds['scale']) #Note: Scale is ignored in self.xml_action_to_model_action
         rgba = self.sample_rgba_from_hsv(*self.settle_bounds['hsv'])
         xml_action = {
             'polygon': ply,
@@ -151,15 +151,15 @@ class BlockEnv():
             axis = [1, 0, 0]
         else:
             axis = [0, 0, 1]
-        axangle = utils.random_axangle(axis=axis)
-
+        # axangle = utils.random_axangle(axis=axis)
         #axangle[-1] = random_a[9]
         # axangle[-1] = 0 #Uncomment to remove actions
+        axangle = random_a[6:10] #Adding in rotation into action space
 
         if 'horizontal' in ply:
             axangle[-1] = 0
 
-        scale = utils.uniform(*self.settle_bounds['scale'])
+        scale = utils.uniform(*self.settle_bounds['scale']) #Note: Scale is ignored in self.xml_action_to_model_action
         #rgba = self.sample_rgba_from_hsv(*self.settle_bounds['hsv'])
 
         # rgba = np.clip(random_a[-3:], [x[0] for x in self.settle_bounds['hsv']],

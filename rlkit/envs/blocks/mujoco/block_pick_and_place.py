@@ -14,6 +14,7 @@ from rlkit.util.plot import plot_multi_image
 import mujoco_py
 from mujoco_py import load_model_from_xml, MjSim, MjViewer
 import rlkit.envs.blocks.mujoco.contacts as contacts
+import copy
 
 MODEL_XML_BASE = """
 <mujoco>
@@ -51,7 +52,7 @@ def pickRandomColor(an_int):
         return np.random.uniform(low=0.0, high=1.0, size=3)
     tmp = np.random.randint(0, an_int)
     return np.array(COLOR_LIST[tmp])/255
-import copy
+
 
 class BlockPickAndPlaceEnv():
     def __init__(self, num_objects, num_colors, img_dim, include_z, random_initialize=False, view=False):
@@ -60,15 +61,18 @@ class BlockPickAndPlaceEnv():
         # self.asset_path = os.path.join(os.path.realpath(__file__), 'data/stl/')
         # self.asset_path = '../data/stl/'
         self.img_dim = img_dim
+        self.include_z = include_z
         self.polygons = ['cube', 'horizontal_rectangle', 'tetrahedron'][:1]
         self.num_colors = num_colors
         self.num_objects = num_objects
         self.view = view
+
+        #Hyper-parameters
         self.internal_steps_per_step = 2000
-        self.drop_heights = 5
-        self.bounds = {'x_min':-2.5, 'x_max':2.5, 'y_min': 1.0, 'y_max' :4.0, 'z_min':0.05, 'z_max':
-            2.2}
-        self.include_z = include_z
+        self.drop_height = 3
+        self.pick_height = 0.59
+        self.bounds = {'x_min': -2.5, 'x_max': 2.5, 'y_min': 1.0, 'y_max': 4.0, 'z_min': 0.05, 'z_max': 2.2}
+        self.TOLERANCE = 0.2
 
         self.names = []
         self.blocks = []
@@ -128,7 +132,7 @@ class BlockPickAndPlaceEnv():
         x = np.random.uniform(self.bounds['x_min'], self.bounds['x_max'])
         y = np.random.uniform(self.bounds['y_min'], self.bounds['y_max'])
         if height is None:
-            z = np.random.uniform(1, self.bounds['z_max'])
+            z = np.random.uniform(self.bounds['z_min'], self.bounds['z_max'])
         else:
             z = height
         return np.array([x, y, z])
@@ -147,9 +151,9 @@ class BlockPickAndPlaceEnv():
             self.viewer = mujoco_py.MjRenderContextOffscreen(self.sim, -1)
 
         # self.sim_state = self.sim.get_state()
-        self.get_starting_step(use_cur_pos)
+        self._get_starting_step(use_cur_pos)
 
-    def get_starting_step(self, use_cur_pos):
+    def _get_starting_step(self, use_cur_pos):
         prev_positions = {}
         for i, aname in enumerate(self.names):
             if use_cur_pos:
@@ -161,7 +165,7 @@ class BlockPickAndPlaceEnv():
                 tmp_pos = prev_positions[aname]
                 # print(aname, tmp_pos)
             else:
-                tmp_pos = self.get_random_pos(self.drop_heights)
+                tmp_pos = self.get_random_pos(self.drop_height)
             self.add_block(aname, tmp_pos)
             for i in range(self.internal_steps_per_step):
                 self.internal_step()
@@ -191,10 +195,8 @@ class BlockPickAndPlaceEnv():
         return block_name
 
     def intersect(self, a_block, pos):
-        #Threshold
-        THRESHHOLD = 0.2 #Originally 0.2 in dataset
         cur_pos = self.get_block_info(a_block)["pos"]
-        return np.max(np.abs(cur_pos - pos)) < THRESHHOLD
+        return np.max(np.abs(cur_pos - pos)) < self.TOLERANCE
 
     def get_block_info(self, a_block):
         info = {}
@@ -206,7 +208,6 @@ class BlockPickAndPlaceEnv():
         return info
 
     def set_block_info(self, a_block, info):
-        #import pdb; pdb.set_trace()
         # print(a_block, info)
         # print("Setting state: {}, {}".format(a_block, info))
         sim_state = self.sim.get_state()
@@ -247,9 +248,11 @@ class BlockPickAndPlaceEnv():
 
 
     ####Env external step functions
+    # Input: action (4) or (6)
+    # Output: resultant observation after taking the action
     def step(self, action):
+        action = self._pre_process_actions(action)
         ablock = self.internal_step(action)
-        # print(ablock)
         # print(self.get_env_info())
         #if ablock:
         for i in range(self.internal_steps_per_step):
@@ -269,7 +272,8 @@ class BlockPickAndPlaceEnv():
         #     self.add_block(aname, self.get_block_info(aname)["pos"])
         return self.get_observation()
 
-    #Note: action can either be (A) or (T, A) where we want to execute T actions in a row
+    # Input: action can either be (A) or (T, A) where we want to execute T actions in a row
+    # Output: Single obs
     def try_step(self, actions):
         tmp = self.get_env_info()
         # cur_state = copy.deepcopy(self.sim.get_state())
@@ -285,7 +289,6 @@ class BlockPickAndPlaceEnv():
         self.set_env_info(tmp)
         return obs
 
-
     def reset(self):
         self.names = []
         self.blocks = []
@@ -299,87 +302,123 @@ class BlockPickAndPlaceEnv():
         return self.get_observation()
 
     def get_observation(self):
-        img = self.sim.render(self.img_dim, self.img_dim, camera_name="fixed") #img is upside down, values btwn 0-255
-        img = img[::-1, :, :] #flips image right side up
-        return np.ascontiguousarray(img) #values btwn 0-255
+        img = self.sim.render(self.img_dim, self.img_dim, camera_name="fixed")  # img is upside down, values btwn 0-255 (D,D,3)
+        img = img[::-1, :, :]  # flips image right side up (D,D,3)
+        return np.ascontiguousarray(img)  # values btwn 0-255 (D,D,3)
 
     def get_obs_size(self):
         return [self.img_dim, self.img_dim]
 
     def get_actions_size(self):
-        return [6]
-
-    def get_rand_block_byz(self):
-        if len(self.names) == 0:
-            raise KeyError("No blocks in get_rand_block_byz()!")
         if self.include_z:
+            return 6
+        else:
+            return 4
 
+    # Inputs: actions (*,6)
+    # Outputs: (*,6) if including z, (*,4) if not
+    def _post_process_actions(self, actions):
+        if self.include_z:
+            return actions
+        else:
+            return actions[..., [0, 1, 3, 4]]
+
+    # Inputs: actions (*,4), or (*,6)
+    # Outputs: actions (*,6)
+    def _pre_process_actions(self, actions):
+        if actions.shape[-1] == 6:
+            return actions
+
+        full_actions = np.zeros(list(actions.shape)[:-1] + [6])  # (*,6)
+        full_actions[..., [0, 1, 3, 4]] = actions
+        full_actions[..., 2] = self.pick_height
+        full_actions[..., 5] = self.drop_height
+        return full_actions
+
+    # Inputs: None
+    # Outputs: Returns name of picked block
+    #   If self.include z: Pick any random block
+    #   Else: Picks a random block which can be picked up with the z pick set to self.pick_height
+    def _get_rand_block_byz(self):
+        if len(self.names) == 0:
+            raise KeyError("No blocks in _get_rand_block_byz()!")
+        if self.include_z:
             aname = np.random.choice(self.names)
         else:
-            z_lim = 0.5
-            tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
-            while (len(tmp) == 0):
-                z_lim += 0.5
-                tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
+            z_lim = self.pick_height
+            tmp = [aname for aname in self.names if abs(self.get_block_info(aname)["pos"][2] - z_lim) < self.TOLERANCE]
+            # while (len(tmp) == 0):
+            #     z_lim += 0.5
+            #     tmp = [aname for aname in self.names if self.get_block_info(aname)["pos"][2] <= z_lim]
             aname = np.random.choice(tmp)
+            # print(tmp, aname)
         return aname
 
-    def sample_action(self, action_type=None):
+    # Input: action_type
+    # Output: Single action either (6) or (4)
+    def sample_action(self, action_type=None, include_noise=True):
         if len(self.names) == 1 and action_type == 'place_block':
             action_type = None
 
         if action_type == 'pick_block': #pick block, place randomly
             # aname = np.random.choice(self.names)
-            aname = self.get_rand_block_byz()
-            pick = self.get_block_info(aname)["pos"] # + np.random.randn(3)/10
-            place = self.get_random_pos(self.drop_heights)
+            aname = self._get_rand_block_byz()
+            pick = self.get_block_info(aname)["pos"]
+            place = self.get_random_pos()
         elif action_type == 'place_block': #pick block, place on top of existing block
             # aname = np.random.choice(self.names)
-            aname = self.get_rand_block_byz()
-            pick = self.get_block_info(aname)["pos"] #+ np.random.randn(3)/10
+            aname = self._get_rand_block_byz()
+            pick = self.get_block_info(aname)["pos"]  # + np.random.randn(3)/10
             names = copy.deepcopy(self.names)
             names.remove(aname)
             aname = np.random.choice(names)
-            place = self.get_block_info(aname)["pos"] + np.random.randn(3)/10
-            place[2] = self.drop_heights
+            place = self.get_block_info(aname)["pos"]  # + np.random.randn(3)/10
+            place[5] += 2  # Each block is roughly 1 unit wide
         elif action_type == 'remove_block':
-            aname = self.get_rand_block_byz()
-            pick = self.get_block_info(aname)["pos"] + np.random.randn(3)/50
-            place = [0, 0, -5] #Place the block under the ground to remove it from scene
+            aname = self._get_rand_block_byz()
+            pick = self.get_block_info(aname)["pos"]  # + np.random.randn(3)/50
+            place = [0, 0, -5]  # Place the block under the ground to remove it from scene
         elif action_type is None:
             if self.include_z:
                 pick = self.get_random_pos()
-                place = self.get_random_pos(self.drop_heights)
+                place = self.get_random_pos()
             else:
-                pick = self.get_random_pos(0.2)
-                place = self.get_random_pos(3.5)
+                pick = self.get_random_pos(self.pick_height)
+                place = self.get_random_pos(self.drop_height)
         else:
             raise KeyError("Wrong input action_type!")
         ac = np.array(list(pick) + list(place))
-        ac[2] = 0.6
-        ac[5] = self.drop_heights
-        return ac
+        if include_noise:
+            ac += np.random.uniform(-self.TOLERANCE, self.TOLERANCE, size=6) * 1.4
+        # pdb.set_trace()
+        # ac[2] = 0.6
+        # ac[5] = self.drop_height
+        return self._post_process_actions(ac)
 
+    #Input: mean (*), std (*)
+    #Output: actions (*)
     def sample_action_gaussian(self, mean, std):
         random_a = np.random.normal(mean, std)
-        # set pick height
-        random_a[2] = 0.6
-        # set place height
-        random_a[5] = self.drop_heights
+        # # set pick height
+        # random_a[2] = 0.6
+        # # set place heights
+        # random_a[5] = self.drop_height
         return random_a
 
-    def sample_multiple_action_gaussian(self, mean, std, num_samples):
-        #mean and std should be (T, A)
-        random_a = np.random.normal(mean, std, [num_samples] + list(mean.shape))
-        # set pick height
-        random_a[:, :, 2] = 0.6
-        # set place height
-        random_a[:, :, 5] = self.drop_heights
-        return random_a
+    # # Input: mean (*), std (*)
+    # # Output: actions (*)
+    # def sample_multiple_action_gaussian(self, mean, std, num_samples):
+    #     #mean and std should be (T, A)
+    #     random_a = np.random.normal(mean, std, [num_samples] + list(mean.shape))
+    #     # set pick height
+    #     random_a[:, :, 2] = 0.6
+    #     # set place height
+    #     random_a[:, :, 5] = self.drop_height
+    #     return random_a
 
     def move_blocks_side(self):
         # Move blocks to either side
-        z = self.drop_heights
+        z = self.drop_height
         side_pos = [
             [-2.2, 1.5, z],
             [2.2, 1.5, z],
@@ -389,15 +428,13 @@ class BlockPickAndPlaceEnv():
         place_lst = []
         for i, block in enumerate(self.names):
             place = copy.deepcopy(self.get_block_info(block)["pos"])
-            place[-1] = self.drop_heights
+            place[-1] = self.drop_height
             self.add_block(block, side_pos[i])
             place_lst.append(place)
             #true_actions.append(side_pos[i] + list(place)) #Note pick & places z's might be
             # slightly
             #  off
         # sort by place height so place lowest block first
-
-
 
         for i in range(self.internal_steps_per_step):
             self.internal_step()
@@ -414,7 +451,7 @@ class BlockPickAndPlaceEnv():
         sorted(true_actions, key=lambda x : x[5])
         # print(true_actions)
 
-        return true_actions
+        return self._post_process_actions(true_actions)
 
 
     def create_tower_shape(self):
@@ -505,8 +542,6 @@ class BlockPickAndPlaceEnv():
         self.initialize(True)
 
     def compute_accuracy(self, true_data, threshold=0.2):
-
-        import copy
         mjc_data = copy.deepcopy(true_data)
 
         max_err = -float('inf')
@@ -592,10 +627,10 @@ def createSingleSim(args):
 """
 python rlkit/envs/blocks/mujoco/block_pick_and_place.py -f data/pickplace50k.h5 -nmin 3 -nmax 4 -nf 2 -ns 50000 -fpick 0.3 -fplace 0.4
 """
-
+#########Start Unit Tests##########
 def test_try_step():
-    env = BlockPickAndPlaceEnv(num_objects=2, num_colors=None, img_dim=64, include_z=False, random_initialize=True)
-    num_actions = 5
+    env = BlockPickAndPlaceEnv(num_objects=3, num_colors=None, img_dim=64, include_z=False, random_initialize=True)
+    num_actions = 2
     rand_actions = np.array([env.sample_action("pick_block") for _ in range(num_actions)])
 
     ncols = num_actions+1
@@ -606,7 +641,7 @@ def test_try_step():
     axes[1, 0].imshow(env.get_observation() / 255, interpolation='nearest')
     axes[2, 0].imshow(env.get_observation() / 255, interpolation='nearest')
 
-    ###Testing try_step()
+    # ###Testing try_step()
     for i in range(num_actions):
         # print(rand_actions[:i+1])
         axes[0, i + 1].set_title("Try step")
@@ -629,14 +664,44 @@ def test_try_step():
         # print(env.sim.get_state())
     cur_fig.savefig("test_try_step")
 
+def test_env_infos():
+    env = BlockPickAndPlaceEnv(num_objects=3, num_colors=None, img_dim=64, include_z=False, random_initialize=True)
+    obs = []
+    env_infos = []
 
-# python block_pick_and_place.py -f pickplace_multienv_10k -nmin 2 -nmax 2 -nf 21 -ns 10000 -fpick 0.3 -fplace 0.4
-# python block_pick_and_place.py -f pickplace_multienv_c3_10k -nmin 2 -nmax 2 -nf 21 -ns 10000 -fpick 0.3 -fplace 0.4 -c 3 -p 1
+    num_to_save = 4
+    for i in range(num_to_save):
+        # pdb.set_trace()
+        obs.append(env.get_observation())
+        env_infos.append(env.get_env_info())
+        env.step(env.sample_action('pick_block', include_noise=False))
 
-# python block_pick_and_place.py -f pickplace_1and2_1k -nmin 1 -nmax 2 -nf 21 -ns 1000 -fpick 0.4 -fplace 0.3
+    new_env = BlockPickAndPlaceEnv(num_objects=3, num_colors=None, img_dim=64, include_z=False, random_initialize=False)
+    new_obs = []
+    for i in range(num_to_save):
+        new_env.set_env_info(env_infos[i])
+        new_obs.append(new_env.get_observation())
 
-if __name__ == '__main__':
-    # test_try_step()
+    plot_numpy(np.array([obs, new_obs]), file_name="test_env_infos")
+    print(np.sum(np.power(np.array(obs) - np.array(new_obs), 2)))
+    #Note that the pixelwise error is NOT zero even though images look visually the same
+    #The loaded environment is nearly identical but not completely
+
+#Inputs: numpy_array (H,W,D,D,3)
+def plot_numpy(numpy_array, file_name, titles=None):
+    num_rows, num_cols = numpy_array.shape[:2]
+    cur_fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(num_rows * 6, num_cols * 6))
+    for y in range(num_rows):
+        for x in range(num_cols):
+            axes[y, x].imshow(numpy_array[y, x], interpolation='nearest')
+            if titles is not None:
+                axes[y, x].set_title(titles[y, x])
+    cur_fig.savefig(file_name)
+
+
+#########End Unit Tests##########
+
+def create_entire_dataset():
     parser = ArgumentParser()
     parser.add_argument('-f', '--filename', type=str, default=None, required=True)
     parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
@@ -658,7 +723,6 @@ if __name__ == '__main__':
     if args.filename[-3:] == ".h5":
         args.filename = args.filename[:-3]
 
-
     print(args)
     info = {}
     info["min_num_objects"] = args.min_num_objects
@@ -671,7 +735,7 @@ if __name__ == '__main__':
     info["num_frames"] = args.num_frames
     # single_sim_func = lambda : createSingleSim(args)
     single_sim_func = createSingleSim
-    #createSingleSim(args)
+    # createSingleSim(args)
     env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
     ac_size = env.get_actions_size()
     obs_size = env.get_obs_size()
@@ -680,10 +744,21 @@ if __name__ == '__main__':
     #                              random_initialize=True, view=False)
     dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
 
-    dgu.hdf5_to_image(args.filename+'.h5')
+    dgu.hdf5_to_image(args.filename + '.h5')
     for i in range(min(10, args.num_sims)):
         tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
         dgu.make_gif(tmp, "animation.gif")
+
+
+# python block_pick_and_place.py -f pickplace_multienv_10k -nmin 2 -nmax 2 -nf 21 -ns 10000 -fpick 0.3 -fplace 0.4
+# python block_pick_and_place.py -f pickplace_multienv_c3_10k -nmin 2 -nmax 2 -nf 21 -ns 10000 -fpick 0.3 -fplace 0.4 -c 3 -p 1
+
+# python block_pick_and_place.py -f pickplace_1and2_1k -nmin 1 -nmax 2 -nf 21 -ns 1000 -fpick 0.4 -fplace 0.3
+
+if __name__ == '__main__':
+    # test_try_step()
+    test_env_infos()
+    # create_entire_dataset()
 
 
 
