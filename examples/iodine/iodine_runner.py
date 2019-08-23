@@ -25,6 +25,10 @@ from rlkit.util.misc import get_module_path
 import pdb
 
 #-f twoBalls.h5 -n 2 -r 7 -c 0 -ns 1000 -nf 21
+# class MyDataParallel(torch.nn.DataParallel):
+#     def __getattr__(self, name):
+#         print(name)
+#         return getattr(self.module, name)
 
 
 def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
@@ -187,8 +191,10 @@ def train_vae(variant):
     print(logger.get_snapshot_dir())
 
     ######Model loading######
-    m = iodine_v2.create_model_v2(variant, variant['det_repsize'], variant['sto_repsize'], action_dim=train_dataset.action_dim)
+    op3_args = variant["op3_args"]
+    m = iodine_v2.create_model_v2(op3_args, op3_args['det_repsize'], op3_args['sto_repsize'], action_dim=train_dataset.action_dim)
     if variant['dataparallel']:
+        # m = MyDataParallel(m)
         m = torch.nn.DataParallel(m)
     m.cuda()
 
@@ -229,20 +235,23 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     variant = dict(
-        refinement_model_type = "size_dependent_conv",
-        decoder_model_type = "reg",
-        dynamics_model_type = "reg_ac32",
-        sto_repsize = 32,
-        det_repsize = 32,
-        K = 4,
+        op3_args = dict(
+            refinement_model_type = "size_dependent_conv",
+            decoder_model_type = "reg",
+            dynamics_model_type = "reg_ac32",
+            sto_repsize = 32,
+            det_repsize = 32,
+            beta=0,
+            K=4
+        ),
         schedule_args = dict( #Arguments for TrainingScheduler
             seed_steps = 4,
             T = 5, #Max number of steps into the future we want to go or max length of a schedule
             schedule_type = 'curriculum', #single_step_physics, curriculum, static_iodine, rprp, next_step, random_alternating
         ),
         training_args = dict( #Arguments for IodineTrainer
-            batch_size=30,  #Change to appropriate constant based off dataset size
-            lr=3e-4,
+            batch_size=10,  #Change to appropriate constant based off dataset size
+            lr=1e-3,
         ),
         num_epochs = 200,
         save_period=1,

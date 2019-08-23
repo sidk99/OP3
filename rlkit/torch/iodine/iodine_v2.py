@@ -78,6 +78,7 @@ def create_model_v2(variant, det_size, sto_size, action_dim):
 
     model = IodineVAE_v2(refinement_net, dynamics_net, decoder_net, det_size, sto_size)
     model.set_k(K)
+    model.beta = variant['beta']
     return model
 
 
@@ -236,15 +237,6 @@ class IodineVAE_v2(torch.nn.Module):
 
         k_images = images.unsqueeze(1).repeat(1, K, 1, 1, 1) #(B,K,3,D,D)
 
-        # a = torch.cat([
-        #     torch.cat([k_images.view(tiled_k_shape), colors.view(tiled_k_shape), mask.view(tiled_k_shape), mask_logits.view(tiled_k_shape)], 1), #(B*K,3,D,D), (B*K,3,D,D), (B*K,1,D,D), (B*K,1,D,D) -> (B*K,8,D,D)
-        #     lns[0](torch.cat([
-        #         x_hat_grad.view(tiled_k_shape).detach(), #(B*K,3,D,D)
-        #         mask_grad.view(tiled_k_shape).detach(),  #(B*K,1,D,D)
-        #         posterior_mask.view(tiled_k_shape).detach(), #(B*K,1,D,D)
-        #         pixel_complete_log_likelihood.unsqueeze(1).repeat(1, K, 1, 1).view(tiled_k_shape).detach(), #(B*K,1,D,D)
-        #         leave_out_ll.view(tiled_k_shape).detach()], 1)) #(B*K,1,D,D)
-        # ], 1) #(B*K,8,D,D), (B*K,7,D,D) -> (B*K,15,D,D)
         lns_2d = self.layer_norms_2d
         a = (torch.cat([
                 k_images.view(tiled_k_shape), # (B*K,3,D,D)
@@ -369,9 +361,9 @@ class IodineVAE_v2(torch.nn.Module):
         # else:
         #     kle_loss = torch.zeros_like(complete_log_likelihood).to(complete_log_likelihood.device)
         kle = self.kl_divergence_prior_post(hidden_states["prior"], hidden_states["post"])
-        kle_loss = self.beta * kle.sum() / b  # KL loss, (Sc)
+        kle_loss = kle.sum() / b  # KL loss, (Sc)
 
-        total_loss = complete_log_likelihood + kle_loss  # Total loss, (Sc)
+        total_loss = complete_log_likelihood + self.beta * kle_loss  # Total loss, (Sc)
         # ptu.check_nan([total_loss])
         return color_probs, pixel_complete_log_likelihood, kle_loss, complete_log_likelihood, total_loss
 

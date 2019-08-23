@@ -1,5 +1,20 @@
 import torch
 import numpy as np
+import pdb
+
+
+def check_nan(list_of_tensors, folder=None):
+    there_is_a_nan = False
+    for tensor in list_of_tensors:
+        if tensor is not None and torch.isnan(tensor).any():
+            there_is_a_nan = True
+            break
+
+    if there_is_a_nan:
+        if folder: #Create a txt that informs users checking log folder that a nan has occured
+            f = open(folder + "/NAN_ALERT.txt", "w")
+            f.close()
+        pdb.set_trace()
 
 
 def init_weights(m):
