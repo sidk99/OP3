@@ -303,15 +303,54 @@ class MPC:
     def filter_goal_latents(self, goal_latents, goal_latents_mask, goal_latents_recon):
         # Keep top goal latents with highest mask area except first
         n_goals = self.n_goal_objs
+        # vals, keep = torch.sort(goal_latents_mask.mean(2).mean(1), descending=True)
+        #
+        # save_image(goal_latents_mask[keep].unsqueeze(1).repeat(1, 3, 1, 1),
+        #            logger.get_snapshot_dir() + '{}/goal_masks.png'.format(self.logger_prefix_dir))
+        #
+        # # goal_latents_recon[keep[n_goals]] += goal_latents_recon[keep[n_goals + 1]]
+        # keep = keep[1:1 + n_goals]
+        # goal_latents = torch.stack([goal_latents[i] for i in keep])
+        # goal_latents_recon = torch.stack([goal_latents_recon[i] for i in keep])
+        #
+        # save_image(goal_latents_recon,
+        #            logger.get_snapshot_dir() + '%s/mpc_goal_latents_recon.png' %
+        #            self.logger_prefix_dir, nrow=10)
+        # pdb.set_trace()
+
         vals, keep = torch.sort(goal_latents_mask.mean(2).mean(1), descending=True)
-        # goal_latents_recon[keep[n_goals]] += goal_latents_recon[keep[n_goals + 1]]
-        keep = keep[1:1 + n_goals]
+        save_image(goal_latents_mask[keep].unsqueeze(1).repeat(1, 3, 1, 1),
+                   logger.get_snapshot_dir() + '{}/goal_masks.png'.format(self.logger_prefix_dir))
+
+        k = goal_latents_recon.shape[0]
+        blank_image = ptu.from_numpy(np.moveaxis(self.env._blank_observation, 2, 0)).unsqueeze(0).repeat(k,1,1,1)/255 #(K,3,D,D)
+        blank_image = blank_image * goal_latents_mask.unsqueeze(1) #(K,3,D,D)
+
+        save_image(blank_image,
+                   logger.get_snapshot_dir() + '{}/blank_image.png'.format(self.logger_prefix_dir))
+        save_image(goal_latents_recon, logger.get_snapshot_dir() + '{}/blank_image_2.png'.format(self.logger_prefix_dir))
+
+        difs = torch.abs(goal_latents_recon - blank_image) #(K,3,D,D)
+        difs = torch.where(difs > 10/255, difs, ptu.zeros_like(difs)) #.sum((1, 2)) #(K,3,D,D)
+        difs = difs.sum(1)  # (K,D,D)
+        save_image(difs.unsqueeze(1).repeat(1, 3, 1, 1),
+                   logger.get_snapshot_dir() + '{}/difs.png'.format(self.logger_prefix_dir))
+        difs = difs.sum((1, 2)) #(K)
+
+        vals, keep = torch.sort(difs, descending=True)
+
+        save_image(goal_latents_mask[keep].unsqueeze(1).repeat(1, 3, 1, 1),
+                   logger.get_snapshot_dir() + '{}/goal_masks_sorted.png'.format(self.logger_prefix_dir))
+
+        keep = keep[:n_goals]
         goal_latents = torch.stack([goal_latents[i] for i in keep])
         goal_latents_recon = torch.stack([goal_latents_recon[i] for i in keep])
 
         save_image(goal_latents_recon,
                    logger.get_snapshot_dir() + '%s/mpc_goal_latents_recon.png' %
                    self.logger_prefix_dir, nrow=10)
+        # pdb.set_trace()
+
 
         return goal_latents, goal_latents_recon
 
@@ -449,9 +488,7 @@ class MPC:
             # tmp = ptu.get_numpy(obs_rep)
             # print(np.max(tmp), np.min(tmp), np.max(tmp)*255, np.min(tmp)*255)
         else:
-            obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0],
-                                                                                 1, 1,
-                                                                                 1)
+            obs_rep = ptu.from_numpy(np.moveaxis(obs, 2, 0)).unsqueeze(0).repeat(actions.shape[0], 1, 1, 1)
 
 
         pred_obs, obs_latents, obs_latents_recon = self.model_step_batched(obs_rep, ptu.from_numpy(actions))
@@ -504,7 +541,6 @@ def main(variant):
     #              '-20_16-24-523j6_e94i/model_params.pkl'
     # if variant['structure'][1] > 7:
     #     # variant['model']['vae_kwargs']['K'] = variant['structure'][1] + 2
-    #     variant['model']['K'] = variant['structure'][1] + 2
     variant['K'] = variant['structure'][1] + 2
     # pdb.set_trace()
     m = iodine.create_model(variant, 0)
@@ -562,7 +598,7 @@ def main(variant):
     # np.save(logger.get_snapshot_dir() + '/optimal_actions.npy', np.stack(actions_lst))
 
 #CUDA_VISIBLE_DEVICES=7 python mpc_stage1.py -de 1 -s
-#CUDA_VISIBLE_DEVICES=0 python mpc_stage1.py -de 0 -s 1 -m /nfs/kun1/users/rishiv/Research/op3_exps/08-17-stack-o2p2-60k-single-step-physics-reg/08-17-stack_o2p2_60k-single_step_physics-reg-k5_2019_08_17_12_24_19_0000--s-36145/_params.pkl
+#CUDA_VISIBLE_DEVICES=3 python mpc_stage1.py -de 0 -s 8 -m /nfs/kun1/users/rishiv/Research/op3_exps/08-17-stack-o2p2-60k-single-step-physics-reg/08-17-stack_o2p2_60k-single_step_physics-allatonce_2019_08_17_16_49_17_0000--s-73253/_params.pkl
 
 
 if __name__ == "__main__":
@@ -575,19 +611,20 @@ if __name__ == "__main__":
 
 
     structures = [
-        ('bridge', 5), #1
+        ('bridge', 5), #0
         ('pyramid', 6), #1
         ('pyramid-triangle', 6), #2
-        ('spike', 6), #2
-        ('stacked', 5), #3
-        ('tall-bridge', 7), #3
-        ('three-shapes', 5), #4
-        ('double-bridge', 8),  #4
-        ('double-bridge-close', 8),  #5
-        ('double-bridge-close-topfar', 8),  #5
-        ('towers', 9), #6
+        ('spike', 6), #3
+        ('stacked', 5), #4
+        ('tall-bridge', 7), #5
+        ('three-shapes', 5), #6
+        ('double-bridge', 8),  #7
+        ('double-bridge-close', 8),  #8
+        ('double-bridge-close-topfar', 8),  #9
+        ('towers', 9), #10
     ]
-    n = 3 #(11+1)//n is the number of splits
+
+    n = 1 #(11+1)//n is the number of splits
     splits = [structures[i:i + n] for i in range(0, len(structures), n)]
     structure_split = splits[args.split]
     # pdb.set_trace()
@@ -596,7 +633,7 @@ if __name__ == "__main__":
     for s in structure_split:
         variant = dict(
             algorithm='MPC',
-            cost_type='latent_pixel',  # 'sum_goal_min_latent' 'latent_pixel
+            cost_type='latent_pixel',  # 'sum_goal_min_latent' 'latent_pixel'
             mpc_style='cem',  # random_shooting or cem
             model=iodine.imsize64_large_iodine_architecture_multistep_physics,
             structure=s,
@@ -606,7 +643,7 @@ if __name__ == "__main__":
         )
 
         n_seeds = 1
-        exp_prefix = 'iodine-mpc-stage1-k5-final'
+        exp_prefix = 'iodine-mpc-stage1-k7-fixed'
 
         run_experiment(
             main,

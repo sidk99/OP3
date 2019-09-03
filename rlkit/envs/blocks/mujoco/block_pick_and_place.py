@@ -56,10 +56,10 @@ def pickRandomColor(an_int):
 
 class BlockPickAndPlaceEnv():
     def __init__(self, num_objects, num_colors, img_dim, include_z, random_initialize=False, view=False):
-        # self.asset_path = os.path.join(os.getcwd(), '../data/stl/')
-        self.asset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../data/stl/')
-        # self.asset_path = os.path.join(os.path.realpath(__file__), 'data/stl/')
-        # self.asset_path = '../data/stl/'
+        # self.asset_path = os.path.join(os.getcwd(), '../mujoco_data/stl/')
+        self.asset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../mujoco_data/stl/')
+        # self.asset_path = os.path.join(os.path.realpath(__file__), 'mujoco_data/stl/')
+        # self.asset_path = '../mujoco_data/stl/'
         self.img_dim = img_dim
         self.include_z = include_z
         self.polygons = ['cube', 'horizontal_rectangle', 'tetrahedron'][:1]

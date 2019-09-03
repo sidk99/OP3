@@ -556,6 +556,9 @@ def create_schedule(train, T, schedule_type, seed_steps, max_T=None):
     elif schedule_type == 'next_step':
         schedule = np.ones(T)*2
         return schedule
+    elif schedule_type == 'occlusion':
+        schedule = np.zeros(4+4)
+        schedule[4::2] = 1  # 0,1,0,1,0
     else:
         raise Exception
     if max_T is not None: #Enforces that we have at most max_T-1 physics steps
@@ -579,6 +582,8 @@ def get_loss_weight(t, schedule, schedule_type):
     elif schedule_type == 'rprp':
         return t
     elif schedule_type == 'next_step':
+        return t
+    elif schedule_type == 'occlusion':
         return t
     else:
         raise Exception

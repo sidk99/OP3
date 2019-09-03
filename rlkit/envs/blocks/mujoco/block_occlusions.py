@@ -30,7 +30,7 @@ MODEL_XML_BASE = """
         <light diffuse='1.5 1.5 1.5' pos='0 -7 6' dir='0 1 1'/>  
         <geom name='wall_floor' type='plane' pos='0 0 0' euler='0 0 0' size='20 10 0.1' material='wall_visible' 
         condim='3' friction='1 1 1'/>
-        <geom name='occluding_wall' type='box' pos='2 0 0' euler='0 0 0' size='2 0.1 6' material='wall_visible' />
+        <geom name='occluding_wall' type='box' pos='2 0 0' euler='0 0.3 0' size='2 0.1 5' material='wall_visible' />
         {}
     </worldbody>
 </mujoco>
@@ -57,10 +57,10 @@ def pickRandomColor(an_int):
 
 class BlockPickAndPlaceEnv():
     def __init__(self, num_objects, num_colors, img_dim, include_z, random_initialize=False, view=False):
-        # self.asset_path = os.path.join(os.getcwd(), '../data/stl/')
-        self.asset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../data/stl/')
-        # self.asset_path = os.path.join(os.path.realpath(__file__), 'data/stl/')
-        # self.asset_path = '../data/stl/'
+        # self.asset_path = os.path.join(os.getcwd(), '../mujoco_data/stl/')
+        self.asset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../mujoco_data/stl/')
+        # self.asset_path = os.path.join(os.path.realpath(__file__), 'mujoco_data/stl/')
+        # self.asset_path = '../mujoco_data/stl/'
         self.img_dim = img_dim
         self.include_z = include_z
         self.polygons = ['cube', 'horizontal_rectangle', 'tetrahedron'][:1]
@@ -74,6 +74,7 @@ class BlockPickAndPlaceEnv():
         self.pick_height = 0.59
         self.bounds = {'x_min': -2.5, 'x_max': 2.5, 'y_min': 1.0, 'y_max': 4.0, 'z_min': 0.05, 'z_max': 2.2}
         self.TOLERANCE = 0.2
+        self.wall_pos = np.array([2, 0, 0])
 
         self.names = []
         self.blocks = []
@@ -299,8 +300,7 @@ class BlockPickAndPlaceEnv():
         for i in range(self.num_objects):
             poly = np.random.choice(self.polygons)
             pos = self.get_random_pos()
-            pos[2] += -2 * (i + 1)
-            pos[1] += -2 * (i + 1)
+            pos[2] = -2 * (i + 1)
             self.add_mesh(poly, pos, quat, self.get_random_rbga(self.num_colors))
         self.initialize(False)
         return self.get_observation()
@@ -312,9 +312,12 @@ class BlockPickAndPlaceEnv():
 
     def get_segmentation_masks(self):
         cur_obs = self.get_observation()
-        tmp = np.abs(cur_obs - self._blank_observation).sum(2) #(D,D,3) -> (D,D)
-        dif = np.where(tmp > 5, 1.0, 0.0)
-        return dif
+        tmp = np.abs(cur_obs - self._blank_observation) #(D,D,3)
+        dif = np.where(tmp > 5, 1, 0).sum(2) #(D,D,3)->(D,D)
+        dif = np.where(dif != 0, 1.0, 0.0)
+        block_seg = dif
+        background_seg = 1 - dif
+        return np.array([background_seg, block_seg]) #Note: output btwn 0-1, (2,D,D)
 
 
     def get_obs_size(self):
@@ -322,9 +325,9 @@ class BlockPickAndPlaceEnv():
 
     def get_actions_size(self):
         if self.include_z:
-            return 6
+            return [6]
         else:
-            return 4
+            return [4]
 
     # Inputs: actions (*,6)
     # Outputs: (*,6) if including z, (*,4) if not
@@ -599,6 +602,15 @@ class BlockPickAndPlaceEnv():
 
         return best_err, best_obj, best_pos, best_rgb
 
+    # #Assume only 1 block
+    # def get_left_right_left(self):
+    #     left_loc = np.array([self.wall_pos[0]-1.5, self.wall_pos[1]+1, self.pick_height])
+    #     right_loc = np.array([self.wall_pos[0]+1.5, self.wall_pos[1]+1, self.pick_height])
+    #
+    #     cur_loc = self.get_block_info('cube_0')["pos"]
+
+
+
 
 def createSingleSim(args):
     np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
@@ -627,12 +639,52 @@ def createSingleSim(args):
     acs.append(myenv.sample_action(None))
 
     values = {
-        'features': np.array(imgs),
+        'features': np.array(imgs), #(T,D,D,3)
         'actions': np.array(acs),
         'env': initial_env_info
     }
     return values
     # return np.array(imgs), np.array(acs)
+
+def create_left_right_left(env):
+    def combine(pick_loc, place_loc):
+        return np.concatenate((pick_loc, place_loc))
+
+    left_loc = np.array([-1.5, env.wall_pos[1] + 2.5, env.pick_height])
+    right_loc = np.array([1.5, env.wall_pos[1] + 2.5, env.pick_height])
+    cur_loc = env.get_block_info('cube_0')["pos"]
+
+    obs = [] #(T=3,D,D,3)
+    segs = [] #(T=3,2,D,D)
+    obs.append(env.step(combine(cur_loc, left_loc))) #Move from current position to left
+    segs.append(env.get_segmentation_masks())
+
+    obs.append(env.step(combine(left_loc, right_loc))) #Move from left position to right (behind wall)
+    segs.append(env.get_segmentation_masks())
+
+    obs.append(env.step(combine(right_loc, left_loc))) #Move from right to left
+    segs.append(env.get_segmentation_masks())
+
+    obs = np.expand_dims(np.array(obs), 1) #(T=3,D,D,3) -> (T,1,D,D,3)
+    segs = np.tile(np.expand_dims(np.array(segs), 4), (1, 1, 1, 1, 3)) #(T,2,D,D)->(T,2,D,D,3)
+    actions = np.array([combine(left_loc, right_loc), combine(right_loc, left_loc), combine(right_loc, left_loc)]) #(T=3,6)
+    actions = actions[:, [0, 1, 3, 4]] #(T=2,4)
+    return obs, segs, actions
+
+
+def create_occlusion_dataset(args):
+    np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
+    env = BlockPickAndPlaceEnv(1, args.num_colors, args.img_dim, include_z=False, random_initialize=True, view=False)
+    initial_env_info = env.get_env_info()
+    obs, segs, actions = create_left_right_left(env) #(T,1,D,D,3), (T,2,D,D,3), (T,A=4), T=3 for all
+
+    values = {
+        'features': obs.squeeze(1), #(T,D,D,3)
+        'actions': np.array(actions), #(T,A)
+        'segs': segs,
+        'env': initial_env_info
+    }
+    return values
 
 
 """
@@ -700,10 +752,17 @@ def test_env_infos():
 
 def test_occlusion():
     env = BlockPickAndPlaceEnv(num_objects=1, num_colors=None, img_dim=64, include_z=False, random_initialize=True, view=False)
-    tmp = env.get_segmentation_masks() #(D,D)
-    tmp = np.tile(np.expand_dims(tmp, 2), (1,1,3)) #(D,D)->(D,D,1)->(D,D,3)
+    background, block = env.get_segmentation_masks() #Each (D,D)
+    background = np.tile(np.expand_dims(background, 2), (1,1,3)) #(D,D)->(D,D,1)->(D,D,3)
+    block = np.tile(np.expand_dims(block, 2), (1, 1, 3))  # (D,D)->(D,D,1)->(D,D,3)
     # pdb.set_trace()
-    plot_numpy(np.array([[tmp, env.get_observation()], [tmp, env._blank_observation]]), "test_occlusion.png")
+    plot_numpy(np.array([[background, block], [env.get_observation(), env._blank_observation]]), "test_occlusion.png")
+
+def test_occlusion_dataset():
+    env = BlockPickAndPlaceEnv(num_objects=1, num_colors=None, img_dim=64, include_z=False, random_initialize=True, view=False)
+    obs, segs, actions = create_left_right_left(env) #(T=3,1,D,D,3), (T=3,2,D,D,3)
+    tmp = np.concatenate((obs, segs), axis=1) #(T,3,D,D,3)
+    plot_numpy(tmp, "test_occlusion_dataset.png")
 
 
 #Inputs: numpy_array (H,W,D,D,3)
@@ -717,43 +776,27 @@ def plot_numpy(numpy_array, file_name, titles=None):
                 axes[y, x].set_title(titles[y, x])
     cur_fig.savefig(file_name)
 #########End Unit Tests##########
-
 def create_entire_dataset():
     parser = ArgumentParser()
     parser.add_argument('-f', '--filename', type=str, default=None, required=True)
-    parser.add_argument('-nmin', '--min_num_objects', type=int, default=3)
-    parser.add_argument('-nmax', '--max_num_objects', type=int, default=3)
     parser.add_argument('-i', '--img_dim', type=int, default=64)
-    parser.add_argument('-nf', '--num_frames', type=int, default=21)
     parser.add_argument('-ns', '--num_sims', type=int, default=2)
     parser.add_argument('-mi', '--make_images', type=bool, default=False)
     parser.add_argument('-c', '--num_colors', type=int, default=None)
-    parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
-    parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
-    parser.add_argument('-r', '--remove_objects', type=bool, default=False)
-    parser.add_argument('-z', '--include_z', type=bool, default=False)
-    parser.add_argument('--output_path', default='', type=str,
-                        help='path to save images')
+    parser.add_argument('--output_path', default='', type=str, help='path to save images')
     parser.add_argument('-p', '--num_workers', type=int, default=1)
     args = parser.parse_args()
 
     if args.filename[-3:] == ".h5":
         args.filename = args.filename[:-3]
 
+    args.num_frames = 3
+
     print(args)
-    info = {}
-    info["min_num_objects"] = args.min_num_objects
-    info["max_num_objects"] = args.max_num_objects
-    info["img_dim"] = args.img_dim
-
-    if args.remove_objects:
-        args.num_frames = 2
-
-    info["num_frames"] = args.num_frames
     # single_sim_func = lambda : createSingleSim(args)
-    single_sim_func = createSingleSim
+    single_sim_func = create_occlusion_dataset
     # createSingleSim(args)
-    env = BlockPickAndPlaceEnv(1, 1, args.img_dim, args.include_z, random_initialize=True)
+    env = BlockPickAndPlaceEnv(1, 1, args.img_dim, include_z=False, random_initialize=True)
     ac_size = env.get_actions_size()
     obs_size = env.get_obs_size()
 
@@ -773,10 +816,10 @@ def create_entire_dataset():
 # python block_pick_and_place.py -f pickplace_1and2_1k -nmin 1 -nmax 2 -nf 21 -ns 1000 -fpick 0.4 -fplace 0.3
 
 if __name__ == '__main__':
-    test_occlusion()
+    # test_occlusion_dataset()
     # test_try_step()
     # test_env_infos()
-    # create_entire_dataset()
+    create_entire_dataset()
 
 
 

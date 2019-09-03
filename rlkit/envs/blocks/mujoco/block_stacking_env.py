@@ -50,7 +50,7 @@ from rlkit.envs.blocks.mujoco.XML import XML
 
 class BlockEnv():
     def __init__(self, max_num_objects_dropped):
-        self.asset_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data/stl/')
+        self.asset_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'mujoco_data/stl/')
         self.img_dim = 64
         self.polygons = ['cube', 'horizontal_rectangle', 'tetrahedron']
         self.settle_bounds = {
@@ -73,6 +73,8 @@ class BlockEnv():
         self.max_num_objects_dropped = max_num_objects_dropped
         self.logger = Logger(self.xml, sim, steps=max_num_objects_dropped + 1, img_dim=self.img_dim)
         self.logger.log(0)
+
+        self._blank_observation = self.get_observation()
 
         self.xml_actions_taken = []
         self.names = []
@@ -179,6 +181,9 @@ class BlockEnv():
         # print(xml_action)
 
         return self.xml_action_to_model_action(xml_action)
+
+    def sample_multiple_action_gaussian(self, mean, std, num_actions):
+        return np.stack([self.sample_action_gaussian(mean, std) for _ in range(num_actions)])
 
     def get_obs_size(self):
         return (self.img_dim, self.img_dim)
@@ -636,11 +641,28 @@ def timing():
     # t1 = time.time()
     # print("New step: {}".format(t1 - t0))
 
+def check_blank_observation():
+    env = BlockEnv(4)
+    bo = env._blank_observation
+    plot_numpy(np.array([[bo, bo], [bo, bo]]), "check_blank_observation.png")
 
+
+#Inputs: numpy_array (H,W,D,D,3)
+def plot_numpy(numpy_array, file_name, titles=None):
+    num_rows, num_cols = numpy_array.shape[:2]
+    cur_fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(num_rows * 6, num_cols * 6))
+    for y in range(num_rows):
+        for x in range(num_cols):
+            axes[y, x].imshow(numpy_array[y, x], interpolation='nearest')
+            if titles is not None:
+                axes[y, x].set_title(titles[y, x])
+    cur_fig.savefig(file_name)
+################################################################################
 
 if __name__ == '__main__':
+    check_blank_observation()
     # sanity_check_accuracy()
-    check_bugs_in_try_action()
+    # check_bugs_in_try_action()
     # check_bugs_in_try_actionS()
     # improve_step()
     # check_new_try_actionS()

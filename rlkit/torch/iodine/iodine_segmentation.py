@@ -1,7 +1,7 @@
 import torch
 import torch.utils.data
 from rlkit.torch.iodine.physics_network import PhysicsNetwork, PhysicsNetworkMLP, PhysicsNetworkNoAttention, PhysicsNetworkAllAtOnce
-from rlkit.torch.iodine.refinement_network import RefinementNetwork
+from rlkit.torch.iodine.refinement_segmentation_network import RefinementNetwork
 from rlkit.torch.networks import Mlp
 from torch import nn
 from torch.autograd import Variable
@@ -22,12 +22,10 @@ import copy
 
 REPSIZE_128 = 128
 
-
-
-imsize64_large_iodine_segmentation_architecture_multistep_physics_BIG = dict(
+imsize64_large_iodine_architecture_multistep_physics_SEGMENTATION = dict(
     vae_kwargs=dict(
         imsize=64,
-        representation_size=128*4,
+        representation_size=REPSIZE_128,
         input_channels=3,
         # decoder_distribution='gaussian_identity_variance',
         beta=1,
@@ -39,10 +37,10 @@ imsize64_large_iodine_segmentation_architecture_multistep_physics_BIG = dict(
         output_size=64 * 64 * 3,
         input_width=80,
         input_height=80,
-        input_channels=128*4 + 2,
+        input_channels=REPSIZE_128 + 2,
 
         kernel_sizes=[5, 5, 5, 5],
-        n_channels=[64, 64, 64, 64],
+        n_channels=[64, 64, 64, 4], #Was 64
         strides=[1, 1, 1, 1],
         paddings=[0, 0, 0, 0]
     ),
@@ -53,21 +51,27 @@ imsize64_large_iodine_segmentation_architecture_multistep_physics_BIG = dict(
     refine_args=dict(
         input_width=64,
         input_height=64,
-        input_channels=5,
+        input_channels=5, #5, 8, or 11
         paddings=[0, 0, 0, 0],
         kernel_sizes=[5, 5, 5, 5],
         n_channels=[64, 64, 64, 64],
         strides=[2, 2, 2, 2],
-        hidden_sizes=[512],
-        output_size=128*4,
-        lstm_size=256*4,
-        lstm_input_size=128*6*4,
+        hidden_sizes=[128, 128],
+        output_size=REPSIZE_128,
+        lstm_size=256,
+        lstm_input_size=768,
         added_fc_input_size=0
 
     ),
     physics_kwargs=dict(
         action_enc_size=32,
-    )
+    ) #,
+    # schedule_kwargs=dict(
+    #     train_T=10,
+    #     test_T=10,
+    #     seed_steps=5,
+    #     schedule_type='random_alternating'
+    # )
 )
 
 
@@ -154,6 +158,9 @@ def create_schedule(train, T, schedule_type, seed_steps, max_T=None):
     elif schedule_type == 'next_step':
         schedule = np.ones(T)*2
         return schedule
+    elif schedule_type == 'occlusion':
+        schedule = np.zeros(5)
+        schedule[1::2] = 1 #0,1,0,1,0
     else:
         raise Exception
     if max_T is not None: #Enforces that we have at most max_T-1 physics steps
@@ -177,6 +184,8 @@ def get_loss_weight(t, schedule, schedule_type):
     elif schedule_type == 'rprp':
         return t
     elif schedule_type == 'next_step':
+        return t
+    elif schedule_type == 'occlusion':
         return t
     else:
         raise Exception
@@ -460,11 +469,10 @@ class IodineVAE(GaussianLatentVAE):
         # pdb.set_trace()
 
         a = torch.cat([
-            x,
-            segmentations.view(tiled_k_shape)
+            # x,
+            segmentations.view(tiled_k_shape) #(bs * K, -1, self.imsize, self.imsize)
         ], 1)
         lambdas1, lambdas2 = self.refinement_net(a)
-
         return lambdas1, lambdas2, None, None
 
     #RV: Input is (bs, T, ch, imsize, imsize), schedule is (T,): 0 for refinement and 1 for physics
@@ -510,7 +518,10 @@ class IodineVAE(GaussianLatentVAE):
             #     raise ValueError("Incorrect lambdas1 shape: {}".format(lambdas1.shape))
             if schedule[t - 1] == 0: # Refine
                 inputK = input[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1).view(tiled_k_shape) #RV: (bs*K, ch, imsize, imsize)
-                lambdas1, lambdas2, h1, h2 = self.refine_lambdas2(inputK, segmentations, tiled_k_shape) #RV: Update lambdas and h's using info
+                # inputSegK = segmentations[:, current_step].unsqueeze(1).repeat(1, K, 1, 1, 1, 1).view(tiled_k_shape) #RV: (bs*K,ch,D,D)
+                inputSegK = segmentations[:, current_step].contiguous().view(tiled_k_shape)
+
+                lambdas1, lambdas2, h1, h2 = self.refine_lambdas2(inputK, inputSegK, tiled_k_shape) #RV: Update lambdas and h's using info
                 # if not applied_action: # Do physics on static scene if haven't applied action yet
                 #     lambdas1, _ = self.physics_net(lambdas1, lambdas2, None)
             elif schedule[t-1] == 1: # Physics

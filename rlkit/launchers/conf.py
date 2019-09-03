@@ -15,11 +15,10 @@ DIR_AND_MOUNT_POINT_MAPPINGS = [
     #     mount_point='/root/.mujoco',
     # ),
     dict(
-        # local_dir='/home/rishiv/Research/fun_rlkit/',
        local_dir='/nfs/kun1/users/rishiv/Research/fun_rlkit/',
         mount_point='/home/ubuntu/Research/fun_rlkit/',
-       # mount_point='/nfs/kun1/users/rishiv/Research/fun_rlkit/',
-       filter_dir=['output', 'data', 'mpc'],
+        filter_dir=['output', 'mpc/saved_models', 'data', 'ec2_data'],  #Note: Can change this!
+       # filter_dir=['output', 'data', 'mpc/saved_models', 'ec2_data'][:4],  #Note: Can change this!
        pythonpath=True,
    )
 ]
@@ -58,15 +57,17 @@ SPOT_PRICE = 0.035
 
 GPU_DOODAD_DOCKER_IMAGE = "'jcoreyes/op3-ray'" #"'rishiv/rv_ray_docker'" #'jcoreyes/op3-ray'
 gpu_instance_to_price = {
-    'p2.xlarge': 0.35, #1 GPU, 12 GB, 10 limit
-    'g3.16xlarge': 1.4, #4 GPU, 32 GB, 1 limit, only did first 10
+    'p2.xlarge': 0.35, #1 GPU, 12 GB, 10 limit, works fully
+    'g3.8xlarge': 0.7, #2 GPU, 16GB, 5 limit,
+    'g3.16xlarge': 1.4, #4 GPU, 32 GB, 1 limit, only did first 10 epochs
     'p2.8xlarge': 2.3, #8 GPU, 96 GB, 0 limit
     'p2.16xlarge': 4.5, #16 GPU, 192 GB, 0 limit
+    'p3.2xlarge': 1.0, #1 GPU, 16GB, 10 limit, works initially but fails afterwards randomly (segfault, DOODAD_USE_CLOUDPICKLE=1 DOODAD_CLOUDPICKLE_VERSION=1.2.1)
     'p3.8xlarge': 3.8, #4 GPU, 64 GB, 5 limit, worked fully
     'p3.16xlarge': 7.5, #8 GPU, 128 GB, 0 limit
     'p3dn.24xlarge': 9.5, #8 GPU, 256, 0 limit
 }
-which_gpu = 'p2.xlarge' #g3.16xlarge, p3.8xlarge
+which_gpu = 'p2.xlarge' #g3.16xlarge, p3.8xlarge, g3.8xlarge
 print("EC2 type: {}".format(which_gpu))
 GPU_INSTANCE_TYPE = which_gpu #g2.2xlarge, g3.4xlarge, g3.16xlarge, p3.8xlarge
 GPU_SPOT_PRICE = gpu_instance_to_price[which_gpu]

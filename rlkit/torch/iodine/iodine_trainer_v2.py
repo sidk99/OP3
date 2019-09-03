@@ -28,7 +28,7 @@ class TrainingScheduler:
         self.max_T = max_T
         self.T = T
 
-        self.curriculum_len = 30 #Used for "curriculum" schedule
+        self.curriculum_len = 100 #Used for "curriculum" schedule
         self.rprp_curriculum_len = 50 #Used for "rprp_curriculum" schedule
 
     #Input: epoch (Sc),  is_train (bool)

@@ -224,7 +224,7 @@ def train_vae(variant):
 #Generic run: CUDA_VISIBLE_DEVICES=[A,B,C...] python iodine_runner.py -de [0/1] -da [DATASET_NAME_HERE]
 #  -da options: look at above list of Datasets
 #  -de options: 0 for training on full dataset, 1 for training on first 100 sequences
-#Example run: CUDA_VISIBLE_DEVICES=1,2 python iodine_runner.py -de 1 -da twoBalls_10k
+#Example run: CUDA_VISIBLE_DEVICES=2,3 python iodine_runner.py -de 0 -da pickplace_multienv_10k
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -239,21 +239,24 @@ if __name__ == "__main__":
             refinement_model_type = "size_dependent_conv",
             decoder_model_type = "reg",
             dynamics_model_type = "reg_ac32",
-            sto_repsize = 32,
-            det_repsize = 32,
-            beta=0,
-            K=4
+            sto_repsize = 64,
+            det_repsize = 0,
+            extra_args = dict(
+                beta = 1,
+                deterministic_sampling = False
+            ),
+            K=7
         ),
         schedule_args = dict( #Arguments for TrainingScheduler
             seed_steps = 4,
             T = 5, #Max number of steps into the future we want to go or max length of a schedule
-            schedule_type = 'curriculum', #single_step_physics, curriculum, static_iodine, rprp, next_step, random_alternating
+            schedule_type = 'single_step_physics', #single_step_physics, curriculum, static_iodine, rprp, next_step, random_alternating
         ),
         training_args = dict( #Arguments for IodineTrainer
-            batch_size=10,  #Change to appropriate constant based off dataset size
-            lr=1e-3,
+            batch_size=120,  #Change to appropriate constant based off dataset size
+            lr=3e-4,
         ),
-        num_epochs = 200,
+        num_epochs = 100,
         save_period=1,
         dataparallel=True,
         dataset=args.dataset,

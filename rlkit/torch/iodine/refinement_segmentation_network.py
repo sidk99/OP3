@@ -110,7 +110,7 @@ class RefinementNetwork(nn.Module):
 
 
 
-    def forward(self, input, hidden1, hidden2, extra_input=None, add_fc_input=None):
+    def forward(self, input, extra_input=None, add_fc_input=None):
         #RV: Extra input is (bs*k, rep_size*5)
         # need to reshape from batch of flattened images into (channsls, w, h)
         # import pdb; pdb.set_trace()

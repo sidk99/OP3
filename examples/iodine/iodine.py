@@ -6,8 +6,11 @@ import shutil
 
 from rlkit.torch.iodine.iodine import IodineVAE
 
-import rlkit.torch.iodine.iodine as iodine
-from rlkit.torch.iodine.iodine_trainer import IodineTrainer
+# import rlkit.torch.iodine.iodine as iodine #Normal version
+# from rlkit.torch.iodine.iodine_trainer import IodineTrainer #Normal version
+import rlkit.torch.iodine.iodine_segmentation as iodine #Segmentation version
+from rlkit.torch.iodine.iodine_segmentation_trainer import IodineTrainer #Segmentation version
+
 import rlkit.torch.pytorch_util as ptu
 from rlkit.launchers.launcher_util import run_experiment
 
@@ -97,7 +100,7 @@ def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
         #kevin: bs=1500, T=15, action_dim=2
         #pickplace_multienv_10k: bs=10000, T=21, action_dim=6
         if train:
-            feats = np.array(hdf5_file['training']['features'])
+            feats = np.array(hdf5_file['training']['features']) # (T, bs, imsize, imsize, ch)
             actions = np.array(hdf5_file['training']['actions'])
         else:
             feats = np.array(hdf5_file['validation']['features'])
@@ -118,6 +121,31 @@ def load_dataset(data_path, train=True, size=None, batchsize=8, static=True):
         if 'pickplace' in data_path:
             dataset.action_dim = 4 #Changing it from 6
 
+        T = feats.shape[1]
+        print(feats.shape, np.max(feats), np.min(feats))
+        return dataset, T
+    elif 'occlusion' in data_path:
+        if train:
+            feats = np.array(hdf5_file['training']['features']) # (T,B,D,D,3)
+            actions = np.array(hdf5_file['training']['actions']) #(T,B,A=4)
+            segs = np.array(hdf5_file['training']['segs']) # (T,B,2,D,D,3)
+        else:
+            feats = np.array(hdf5_file['validation']['features'])
+            actions = np.array(hdf5_file['validation']['actions'])
+            segs = np.array(hdf5_file['validation']['segs'])
+
+        feats = np.moveaxis(feats, -1, 2)  #(T,B,D,D,3)->(T,B,3,D,D)
+        feats = np.moveaxis(feats, 0, 1)   #(T,B,3,D,D)->(B,T,3,D,D)
+
+        actions = np.moveaxis(actions, 0, 1) # (T,B,A) -> (B,T,A)
+
+        segs = np.moveaxis(segs, -1, -3)  #(T,B,2,D,D,3)->(T,B,2,3,D,D)
+        segs = np.moveaxis(segs, 0, 1)    #(T,B,2,3,D,D)->(B,T,2,3,D,D)
+        segs = segs * np.expand_dims(feats, 2)/255   #(B,T,2,3,D,D), now the segmentation is the subimage
+
+        # pdb.set_trace()
+        torch_dataset = TensorDataset(torch.Tensor(feats[:size]), torch.Tensor(actions[:size]), torch.Tensor(segs[:size]))
+        dataset = BlocksDataset(torch_dataset, batchsize=batchsize)
         T = feats.shape[1]
         print(feats.shape, np.max(feats), np.min(feats))
         return dataset, T
@@ -153,7 +181,8 @@ def copy_to_save_file(dir_str):
     shutil.copy2(base+'/rlkit/torch/iodine/iodine.py', dir_str)
     shutil.copy2(base+'/rlkit/torch/iodine/iodine_trainer.py', dir_str)
     shutil.copy2(base+'/rlkit/torch/iodine/physics_network.py', dir_str)
-    shutil.copy2(base+'/rlkit/torch/iodine/refinement_network.py', dir_str)
+    shutil.copy2(base+'/rlkit/torch/iodine/iodine_segmentation.py', dir_str)
+    shutil.copy2(base + '/rlkit/torch/iodine/refinement_network.py', dir_str)
     shutil.copy2(base+'/examples/iodine/iodine.py', dir_str+"/examples_iodine.py")
 
 def train_vae(variant):
@@ -217,7 +246,8 @@ def train_vae(variant):
 #pickplace_multienv_10k.h5, pickplace_multienv_c3_10k.h5
 #CUDA_VISIBLE_DEVICES=1 python iodine.py -da pickplace_multienv_10k -de 1
 #CUDA_VISIBLE_DEVICES=1,2 python iodine.py -da cloth -de 1
-#CUDA_VISIBLE_DEVICES=1,2,3 python iodine.py -da pickplace_1block_10k -de 0    10:9013  15:10523MiB
+#CUDA_VISIBLE_DEVICES=1,2,3 python iodine.py -da pickplace_1block_10k -de 0
+#CUDA_VISIBLE_DEVICES=2 python iodine.py -da occlusions_10k -de 1
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -241,8 +271,8 @@ if __name__ == "__main__":
     #               Initially, it should use around 8.4GB of the GPU
 
     variant = dict(
-        model=iodine.imsize64_large_iodine_architecture_multistep_physics,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
-        K=5,
+        model=iodine.imsize64_large_iodine_architecture_multistep_physics_SEGMENTATION,   #imsize64_small_iodine_architecture,   #imsize64_large_iodine_architecture_multistep_physics,
+        K=2,
         training_kwargs = dict(
             batch_size=80, #Used in IodineTrainer, change to appropriate constant based off dataset size
             lr=1e-4, #Used in IodineTrainer
@@ -252,9 +282,9 @@ if __name__ == "__main__":
             train_T=5, #Number of steps in single training sequence, change with dataset
             test_T=5,  #Number of steps in single testing sequence, change with dataset
             seed_steps=4, #Number of seed steps
-            schedule_type='single_step_physics' #single_step_physics, curriculum, static_iodine, rprp, next_step
+            schedule_type='occlusion' #single_step_physics, curriculum, static_iodine, rprp, next_step
         ),
-        num_epochs=200, #Go up to 4 timesteps in the future
+        num_epochs=150, #Go up to 4 timesteps in the future
         algorithm='Iodine',
         save_period=1,
         dataparallel=True,
@@ -266,7 +296,7 @@ if __name__ == "__main__":
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
-        exp_prefix='{}-{}-reg-k5'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
+        exp_prefix='{}-{}-just_segs-k2'.format(args.dataset, variant['schedule_kwargs']['schedule_type']),
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

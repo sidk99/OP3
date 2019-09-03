@@ -32,7 +32,6 @@ class PhysicsNetwork(nn.Module):
         #New version
         self.lambda_encoder = Mlp((hidden_size,), self.rep_size, self.rep_size,
                                   hidden_activation=nn.ELU(), output_activation=nn.ELU())
-
         #Action networks
         if action_size > 0:
             self.action_encoder = Mlp((hidden_size,), self.action_enc_size, action_size,

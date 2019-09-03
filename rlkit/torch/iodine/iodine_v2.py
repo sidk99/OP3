@@ -3,22 +3,14 @@ import torch.utils.data
 from rlkit.torch.iodine.physics_network_v2 import PhysicsNetwork_v2, PhysicsNetworkMLP_v2, Physics_Args
 from rlkit.torch.iodine.refinement_network_v2 import RefinementNetwork_v2, Refinement_Args
 from rlkit.torch.iodine.decoder_network_v2 import DecoderNetwork_V2, Decoder_Args
+from rlkit.torch.iodine.visualizer import quicksave
 from torch.distributions.multivariate_normal import MultivariateNormal
-from torch.distributions.normal import Normal
 
-from rlkit.torch.iodine.refinement_network import RefinementNetwork
-from rlkit.torch.networks import Mlp
 from torch import nn
-from torch.autograd import Variable
-from os import path as osp
-from torchvision.utils import save_image
 from torch.nn import functional as F, Parameter
 from rlkit.pythonplusplus import identity
 from rlkit.torch import pytorch_util as ptu
 import numpy as np
-from rlkit.torch.pytorch_util import from_numpy
-from rlkit.torch.conv_networks import CNN, DCNN, BroadcastCNN
-from rlkit.torch.vae.vae_base import GaussianLatentVAE
 from rlkit.torch.modules import LayerNorm2D, LayerNorm
 from rlkit.core import logger
 import os
@@ -76,9 +68,8 @@ def create_model_v2(variant, det_size, sto_size, action_dim):
     else:
         raise ValueError("{}".format(variant["dynamics_model_type"][0]))
 
-    model = IodineVAE_v2(refinement_net, dynamics_net, decoder_net, det_size, sto_size)
+    model = IodineVAE_v2(refinement_net, dynamics_net, decoder_net, det_size, sto_size, **variant['extra_args'])
     model.set_k(K)
-    model.beta = variant['beta']
     return model
 
 
@@ -87,7 +78,7 @@ def create_model_v2(variant, det_size, sto_size, action_dim):
 #  D denotes image size, A denotes action dimension, B denotes batch size
 #  (Sc) denotes a scalar while (X,Y,Z) represent the shape
 class IodineVAE_v2(torch.nn.Module):
-    def __init__(self, refine_net, dynamics_net, decode_net, det_size, sto_size, deterministic_sampling=False):
+    def __init__(self, refine_net, dynamics_net, decode_net, det_size, sto_size, beta=1, deterministic_sampling=False):
         super().__init__()
         self.refinement_net = refine_net
         self.dynamics_net = dynamics_net
@@ -96,15 +87,18 @@ class IodineVAE_v2(torch.nn.Module):
         self.det_size = det_size
         self.sto_size = sto_size
         self.full_rep_size = det_size + sto_size
+        self.deterministic_sampling = deterministic_sampling
 
         #Loss hyper-parameters
         self.sigma = 0.1
-        self.beta = 1
+        self.set_beta(beta)
+        # self.beta = beta
 
         #Deterministic sampling changes
-        self.deterministic_sampling = deterministic_sampling
-        if deterministic_sampling:
-            self.beta = 0
+        # self.deterministic_sampling = deterministic_sampling
+        # if deterministic_sampling:
+        #     if beta != 0:
+        #         print("DANGER ALERT! Having beta set to {} is mathematically incorrect when sampling deterministically".format(self.beta))
 
         #Refinement variables
         l_norm_sizes_2d = [1, 1, 1, 3]
@@ -116,8 +110,7 @@ class IodineVAE_v2(torch.nn.Module):
 
         #Initial state parameters
         if det_size != 0:
-            self.inital_deter_state = ptu.zeros(det_size)
-            # self.inital_deter_state = Parameter(ptu.randn((det_size))/np.sqrt(det_size))
+            self.inital_deter_state = Parameter(ptu.randn((det_size))/np.sqrt(det_size))
         self.initial_lambdas1 = Parameter(ptu.randn((sto_size))/np.sqrt(sto_size))
         self.initial_lambdas2 = Parameter(ptu.randn((sto_size))/np.sqrt(sto_size))
 
@@ -126,6 +119,11 @@ class IodineVAE_v2(torch.nn.Module):
     def set_k(self, k):
         self.K = k
         self.dynamics_net.set_k(k)
+
+    def set_beta(self, beta):
+        if self.deterministic_sampling and beta != 0:
+            print("DANGER ALERT! Having beta set to {} is mathematically incorrect when sampling deterministically".format(beta))
+        self.beta = beta
 
     #Input: x: (a,b,*)
     #Output: y: (a*b,*)
@@ -368,11 +366,11 @@ class IodineVAE_v2(torch.nn.Module):
         return color_probs, pixel_complete_log_likelihood, kle_loss, complete_log_likelihood, total_loss
 
 
-    #Inputs: images: (B, T_obs, 3, D, D),  actions: None or (B, T_acs, A),  initial_hidden_state
+    #Inputs: images: (B, T_obs, 3, D, D),  actions: None or (B, T_acs, A),  initial_hidden_state or None
     #   schedule: (T1),   loss_schedule:(T1)
-    #Output: colors_list (T1,B,K,3,D,D), masks_list (T1,B,K,1,D,D), final_recon (B,3,D,D),
+    #Output: colors_list (B,T1,K,3,D,D), masks_list (B,T1,K,1,D,D), final_recon (B,3,D,D),
     # total_loss, total_kle_loss, total_clog_prob, mse are all (Sc), end_hidden_state
-    def run_schedule(self, images, actions, initial_hidden_state, schedule, loss_schedule):
+    def run_schedule(self, images, actions, initial_hidden_state, schedule, loss_schedule, should_detach=False):
         self.debug["schedule"] = schedule
         self.debug["at"] = -1
         b = images.shape[0]
@@ -481,6 +479,16 @@ class IodineVAE_v2(torch.nn.Module):
         #     }
         # }
 
+        if should_detach:
+            colors_list = colors_list.detach()
+            masks_list = masks_list.detach()
+            final_recon = final_recon.detach()
+            total_loss = total_loss.detach() if total_loss is not None else None
+            total_kle_loss = total_kle_loss.detach() if total_kle_loss is not None else None
+            total_clog_prob = total_clog_prob.detach() if total_clog_prob is not None else None
+            mse = mse.detach()
+            cur_hidden_state = self.detach_state(cur_hidden_state)
+
         return colors_list, masks_list, final_recon, total_loss, total_kle_loss, total_clog_prob, mse, cur_hidden_state
 
     #Wrapper for self.run_schedule() required for training with DataParallel
@@ -497,14 +505,14 @@ class IodineVAE_v2(torch.nn.Module):
 
     #Input: Hidden state
     #Output: Hidden state with everything detached
-    def detach_state_info(self, cur_hidden_state):
+    def detach_state(self, cur_hidden_state):
         tmp = [cur_hidden_state["post"]["extra_info"][0].detach(),
                cur_hidden_state["post"]["extra_info"][1].detach()]
 
         detached_hidden_state = {
             "prior": {
                 "lambdas1": cur_hidden_state["prior"]["lambdas1"].detach(),  # (B,K,R)
-                "lambdas2": cur_hidden_state["prior"]["lambdas1"].detach(),  # (B,K,R)
+                "lambdas2": cur_hidden_state["prior"]["lambdas2"].detach(),  # (B,K,R)
             },
             "post": {  # Update posterior
                 "deter_state": cur_hidden_state["post"]["deter_state"].detach() if cur_hidden_state["post"]["deter_state"] is not None else None,
@@ -512,15 +520,16 @@ class IodineVAE_v2(torch.nn.Module):
                 "lambdas1": cur_hidden_state["post"]["lambdas1"].detach(),  # (B,K,R)
                 "lambdas2": cur_hidden_state["post"]["lambdas2"].detach(),  # (B,K,R)
                 "extra_info": tmp,  # Each (B*K,R2)
-                "samples": cur_hidden_state["post"]["samples"]  # (B,K,R)
+                "samples": cur_hidden_state["post"]["samples"].detach()  # (B,K,R)
             }
         }
         return detached_hidden_state
 
-
     #Inputs: cur_hidden_state with B=1, n
     #Outputs: cur_hidden_state with B=n
     def replicate_state(self, cur_hidden_state, n):
+        if cur_hidden_state is None:
+            return None
         tmp = [cur_hidden_state["post"]["extra_info"][0].repeat(n,1,1),
                cur_hidden_state["post"]["extra_info"][1].repeat(n,1,1)]
 
@@ -531,19 +540,165 @@ class IodineVAE_v2(torch.nn.Module):
             },
             "post": {  # Update posterior
                 "deter_state": cur_hidden_state["post"]["deter_state"].repeat(n,1,1) if cur_hidden_state["post"]["deter_state"] is not None else None, # (B,K,R)
-                "lambdas1": cur_hidden_state["post"]["lambdas1"].repeat(n,1,1),  # (b,K,R)
-                "lambdas2": cur_hidden_state["post"]["lambdas2"].repeat(n,1,1),  # (b,K,R)
+                "lambdas1": cur_hidden_state["post"]["lambdas1"].repeat(n,1,1),  # (n,K,R)
+                "lambdas2": cur_hidden_state["post"]["lambdas2"].repeat(n,1,1),  # (n,K,R)
                 "extra_info": tmp,  # Each (B*K,R2)
-                "samples": cur_hidden_state["post"]["samples"]  # (B,K,R)
+                "samples": cur_hidden_state["post"]["samples"].repeat(n,1,1)  # (n,K,R)
+            }
+        }
+        return new_hidden_state
+
+    def select_specific_state(self, cur_hidden_state, index):
+        tmp = [cur_hidden_state["post"]["extra_info"][0][index:index+1],
+               cur_hidden_state["post"]["extra_info"][1][index:index+1]]
+
+        new_hidden_state = {
+            "prior": {
+                "lambdas1": cur_hidden_state["prior"]["lambdas1"][index:index+1],  # (n,K,R)
+                "lambdas2": cur_hidden_state["prior"]["lambdas1"][index:index+1],  # (n,K,R)
+            },
+            "post": {  # Update posterior
+                "deter_state": cur_hidden_state["post"]["deter_state"][index:index+1] if
+                cur_hidden_state["post"][ "deter_state"] is not None else None, # (B,K,R)
+                "lambdas1": cur_hidden_state["post"]["lambdas1"][index:index+1],  # (n,K,R)
+                "lambdas2": cur_hidden_state["post"]["lambdas2"][index:index+1],  # (n,K,R)
+                "extra_info": tmp,  # Each (B*K,R2)
+                "samples": cur_hidden_state["post"]["samples"][index:index+1]  # (n,K,R)
+            }
+        }
+        return new_hidden_state
+
+    # # Inputs: obs (T1,3,D,D) or None, actions (T2,A) or None, initial_hidden_state or None, schedule (T3)
+    # # Assume inputs are all pytorch tensors in proper format
+    # # Outputs: Note the values are all pytorch values!
+    # def internal_inference(self, obs, actions, initial_hidden_state, schedule, figure_path=None):
+    #     loss_schedule = np.zeros_like(schedule)
+    #
+    #     #Output: colors (T1,B,K,3,D,D), masks (T1,B,K,1,D,D), final_recon (B,3,D,D),
+    #     # total_loss, total_kle_loss, total_clog_prob, mse are all (Sc), end_hidden_state
+    #     self.eval_mode = False
+    #     colors, masks, final_recon, total_loss, total_kle_loss, total_clog_prob, mse, cur_hidden_state = \
+    #         self.run_schedule(obs, actions, initial_hidden_state, schedule=schedule, loss_schedule=loss_schedule)
+    #
+    #     cur_hidden_state = self.m.detach_state_info(cur_hidden_state)
+    #     important_values = {
+    #         "colors": colors[-1], #(B,K,3,D,D)
+    #         "masks": masks[-1],  #(B,K,1,D,D)
+    #         "sub_images": colors[-1] * masks[-1], #(B,K,3,D,D)
+    #         "final_recon": final_recon, #(B,3,D,D)
+    #         "state": cur_hidden_state
+    #     }
+    #     if figure_path is not None:
+    #         quicksave(obs, colors, masks, schedule, figure_path, "full")
+    #     return important_values
+
+    # Input: array_of_states
+    # Output: One state containing the information of the previous states
+    def _stack_state(self, array_of_states):
+        new_hidden_state = {
+            "prior": {
+                "lambdas1": [],  # (n,K,R)
+                "lambdas2": [],  # (n,K,R)
+            },
+            "post": {  # Update posterior
+                "deter_state": [],
+                "lambdas1": [],  # (n,K,R)
+                "lambdas2": [],  # (n,K,R)
+                "extra_info_0": [],  # (n*K,R2)
+                "extra_info_1": [],  # (n*K,R2)
+                "samples": []  # (n,K,R)
             }
         }
 
+        for a_state in array_of_states:
+            new_hidden_state["prior"]["lambdas1"].append(a_state["prior"]["lambdas1"])
+            new_hidden_state["prior"]["lambdas2"].append(a_state["prior"]["lambdas2"])
+
+            new_hidden_state["post"]["deter_state"].append(a_state["post"]["deter_state"])
+            new_hidden_state["post"]["lambdas1"].append(a_state["post"]["lambdas1"])
+            new_hidden_state["post"]["lambdas2"].append(a_state["post"]["lambdas2"])
+            new_hidden_state["post"]["extra_info_0"].append(a_state["post"]["extra_info"][0])
+            new_hidden_state["post"]["extra_info_1"].append(a_state["post"]["extra_info"][1])
+            new_hidden_state["post"]["samples"].append(a_state["post"]["samples"])
+
+        new_hidden_state["prior"]["lambdas1"] = torch.cat(new_hidden_state["prior"]["lambdas1"])
+        new_hidden_state["prior"]["lambdas2"] = torch.cat(new_hidden_state["prior"]["lambdas2"])
+
+        if new_hidden_state["post"]["deter_state"][0] is not None:
+            new_hidden_state["post"]["deter_state"] = torch.cat(new_hidden_state["post"]["deter_state"])
+        else:
+            new_hidden_state["post"]["deter_state"] = None
+        new_hidden_state["post"]["lambdas1"] = torch.cat(new_hidden_state["post"]["lambdas1"])
+        new_hidden_state["post"]["lambdas2"] = torch.cat(new_hidden_state["post"]["lambdas2"])
+        new_hidden_state["post"]["extra_info"] = [torch.cat(new_hidden_state["post"]["extra_info_0"]),
+                                                  torch.cat(new_hidden_state["post"]["extra_info_1"])]
+        new_hidden_state["post"]["samples"] = torch.cat(new_hidden_state["post"]["samples"])
+        return new_hidden_state
+
+    # Like internal_inference except initial_hidden_state might only contain one state while obs/actions contain (B,*)
+    # Inputs: obs (B,T1,3,D,D) or None, actions (B,T2,A) or None, initial_hidden_state or None, schedule (T3)
+    #   Note: Assume that initial_hidden_state has entries of size (B=1,*)
+    def batch_internal_inference(self, obs, actions, initial_hidden_state, schedule, figure_path=None, batch_size=10):
+        loss_schedule = np.zeros_like(schedule)
+        if obs is not None:
+            b = obs.shape[0]
+        elif actions is not None:
+            b = actions.shape[0]
+        else:
+            raise ValueError("Unknown size of inputs!")
+
+        num_batches = int(np.ceil(b/batch_size))
+
+        important_info = {
+            "colors": [],
+            "masks": [],
+            "sub_images": [],
+            "final_recon": [],
+            "state": []
+        }
+
+        for i in range(num_batches):
+            start_index = i*batch_size
+            end_index = min(start_index+batch_size, b)
+
+            if obs is not None:
+                batch_obs = obs[start_index:end_index]  # (b,T1,3,D,D)
+            else:
+                batch_obs = None
+
+            if actions is not None:
+                batch_actions = actions[start_index:end_index]  # (b,T2,A)
+            else:
+                batch_actions = None
+
+            batch_initial_hidden_state = self.replicate_state(initial_hidden_state, end_index-start_index)
+            colors, masks, final_recon, total_loss, total_kle_loss, total_clog_prob, mse, cur_hidden_state = \
+                self.run_schedule(batch_obs, batch_actions, batch_initial_hidden_state, schedule=schedule,
+                                  loss_schedule=loss_schedule, should_detach=True)
+
+            important_info["colors"].append(colors[:, -1]) #(b,K,3,D,D)
+            important_info["masks"].append(masks[:, -1]) #(b,K,1,D,D)
+            important_info["sub_images"].append((colors[:, -1] * masks[:, -1])) #(b,K,3,D,D)
+            important_info["final_recon"].append(final_recon) #(b,3,D,D)
+            important_info["state"].append(cur_hidden_state)
+
+            # true_images (T1,3,D,D),  colors (T,K,3,D,D),  masks (T,K,1,D,D), schedule (T)
+            # file_name (string),  quicksave_type is either "full" or "subimages"
+            # Images are torch tensors, schedule is numpy array
+            if figure_path is not None:
+                quicksave(obs[0], colors[0], masks[0], schedule, figure_path, "full")
+                figure_path = None
+
+        # pdb.set_trace()
+        important_info["colors"] = torch.cat(important_info["colors"]) #(B,K,3,D,D)
+        important_info["masks"] = torch.cat(important_info["masks"])  # (B,K,1,D,D)
+        important_info["sub_images"] = torch.cat(important_info["sub_images"])  # (B,K,3,D,D)
+        important_info["final_recon"] = torch.cat(important_info["final_recon"])  # (B,3,D,D)
+        important_info["state"] = self._stack_state(important_info["state"]) #State with (B,*) entries
+        return important_info
 
 
-    #Inputs: cur_hidden_state with B=1, actions (B,T,A)
-    #Outputs:
-    # def run_actions(self, cur_hidden_state, actions, batch_size):
-    #     for i in range(0, actions.shape[0], batch_size):
+
 
 
 

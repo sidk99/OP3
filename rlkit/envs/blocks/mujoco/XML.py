@@ -4,7 +4,7 @@ from rlkit.envs.blocks.mujoco import utils as utils
 
 class XML:
 
-  def __init__(self, asset_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data/stl/'), timestep = 0.002):
+  def __init__(self, asset_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'mujoco_data/stl/'), timestep = 0.002):
     self.timestep = timestep
     self.asset_path = asset_path
     self.names = set()

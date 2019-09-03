@@ -3,7 +3,7 @@ from collections import defaultdict
 from os import path as osp
 import numpy as np
 import torch
-from rlkit.torch.iodine.iodine import create_schedule
+from rlkit.torch.iodine.iodine_segmentation import create_schedule
 from torch import optim
 from torchvision.utils import save_image
 from rlkit.core import logger
@@ -165,8 +165,10 @@ class IodineTrainer(Serializable):
         losses, log_probs, kles, mses = [], [], [], []
         dataloader = self.train_dataset.dataloader if train else self.test_dataset.dataloader
         for batch_idx, tensors in enumerate(dataloader):
-            obs, actions = self.prepare_tensors(tensors)
-            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(input=obs, actions=actions, schedule=schedule)
+            obs, actions, segmentations = self.prepare_tensors(tensors)
+            x_hats, masks, loss, kle_loss, x_prob_loss, mse, final_recon, lambdas = self.model(input=obs, actions=actions,
+                                                                                             schedule=schedule,
+                                                                                             segmentations=segmentations)
 
             losses.append(loss.mean().item())
             log_probs.append(x_prob_loss.mean().item())
