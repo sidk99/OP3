@@ -24,12 +24,12 @@ RUN apt-get update -q \
     && rm -rf /var/lib/apt/lists/*
 
 RUN DEBIAN_FRONTEND=noninteractive add-apt-repository --yes ppa:deadsnakes/ppa && apt-get update
-RUN DEBIAN_FRONTEND=noninteractive apt-get install --yes python3.6-dev python3.6 python3-pip
-RUN virtualenv --python=python3.6 env
+RUN DEBIAN_FRONTEND=noninteractive apt-get install --yes python3.5-dev python3.5 python3-pip
+RUN virtualenv --python=python3.5 env
 
 RUN rm /usr/bin/python
-RUN ln -s /env/bin/python3.6 /usr/bin/python
-RUN ln -s /env/bin/pip3.6 /usr/bin/pip
+RUN ln -s /env/bin/python3.5 /usr/bin/python
+RUN ln -s /env/bin/pip3.5 /usr/bin/pip
 RUN ln -s /env/bin/pytest /usr/bin/pytest
 
 RUN curl -o /usr/local/bin/patchelf https://s3-us-west-2.amazonaws.com/openai-sci-artifacts/manual-builds/patchelf_0.9_amd64.elf \
@@ -73,7 +73,7 @@ RUN pip install boto3==1.4.8
 RUN pip install dominate==2.3.1
 RUN pip install path.py==10.3.1
 
-RUN pip install http://download.pytorch.org/whl/cu90/torch-1.1.0-cp36-cp36m-linux_x86_64.whl
+RUN pip install http://download.pytorch.org/whl/cu90/torch-1.1.0-cp35-cp35m-linux_x86_64.whl
 
 RUN pip install joblib==0.9.4
 
@@ -111,5 +111,5 @@ RUN apt-get -y update && apt-get -y upgrade && apt-get install -y git wget cmake
 # Figure out how to get ray to run without this
 ENV PATH /env/bin:${PATH}
 ENV LD_LIBRARY_PATH /home/ubuntu/.mujoco/mjpro150/bin:${LD_LIBRARY_PATH}
-RUN pip install https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-0.7.0.dev2-cp36-cp36m-manylinux1_x86_64.whl
+RUN pip install https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-0.7.0.dev2-cp35-cp35m-manylinux1_x86_64.whl
 RUN pip install pyqt5
