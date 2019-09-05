@@ -5,6 +5,7 @@ import scipy.misc
 from rlkit.envs.blocks.mujoco.XML import XML
 import rlkit.envs.blocks.mujoco.contacts as contacts
 import rlkit.envs.blocks.mujoco.utils as utils
+from PIL import Image
 
 class Logger:
 
@@ -62,8 +63,7 @@ class Logger:
     def log_image(self, step, camera = 'fixed'):
         image = self.sim.render(self.render_dim, self.render_dim, camera_name = camera)
         if self.img_dim != self.render_dim:
-            image = scipy.misc.imresize(image, size = (self.img_dim, self.img_dim)).astype(np.uint8)
-
+            image = np.array(Image.fromarray(image).resize((self.img_dim, self.img_dim))).astype(np.uint8)
         if 'images' not in dir(self):
             M, N, C = image.shape
             self.images = np.zeros( (self.steps, M, N, C) )
