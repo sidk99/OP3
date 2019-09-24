@@ -180,7 +180,7 @@ def train_vae(variant):
     random.seed(seed)
 
     ######Dataset loading######
-    train_path = get_module_path() + '/ec2_data/{}.h5'.format(variant['dataset'])
+    train_path = get_module_path() + '/ec2_data/{}.h5'.format(variant['dataset'])  #ec2_data, data
     test_path = train_path
     bs = variant['training_args']['batch_size']
     train_size = 100 if variant['debug'] == 1 else None
@@ -203,6 +203,7 @@ def train_vae(variant):
     t = IodineTrainer(train_dataset, test_dataset, m, scheduler, **variant["training_args"])
 
     save_period = variant['save_period']
+    best_loss, num_stalled = 1e6, 0
     for epoch in range(variant['num_epochs']):
         should_save_imgs = (epoch % save_period == 0)
 
@@ -217,14 +218,25 @@ def train_vae(variant):
         logger.dump_tabular()
         t.save_model()
 
+        #Early termination if stalling for 5 epochs
+        # if train_stats["train/loss"] < best_loss:
+        #     best_loss = train_stats["train/loss"]
+        #     num_stalled = 0
+        # else:
+        #     num_stalled += 1
+        #     if num_stalled == 5:
+        #         break
+
         # torch.save(m.state_dict(), open(logger.get_snapshot_dir() + '/params.pkl', "wb"))
     # logger.save_extra_data(m, 'vae.pkl', mode='pickle')
 
-#Datasets: pickplace_1env_1k, pickplace_multienv_10k, stack_o2p2_60k, cloth, poke, solid, twoBalls, twoBalls_10k, pickplace_1block_10k
-#Generic run: CUDA_VISIBLE_DEVICES=[A,B,C...] python iodine_runner.py -de [0/1] -da [DATASET_NAME_HERE]
-#  -da options: look at above list of Datasets
-#  -de options: 0 for training on full dataset, 1 for training on first 100 sequences
-#Example run: CUDA_VISIBLE_DEVICES=2,3 python iodine_runner.py -de 0 -da pickplace_multienv_10k
+# Datasets: pickplace_1env_1k, pickplace_multienv_10k, stack_o2p2_60k, cloth, poke, solid, twoBalls, twoBalls_10k,
+#   pickplace_1block_10k, pickplace_o12_v2_10k, pickplace_o12_noise_10k
+# Generic run: CUDA_VISIBLE_DEVICES=[A,B,C...] python iodine_runner.py -de [0/1] -da [DATASET_NAME_HERE]
+#   -da options: look at above list of Datasets
+#   -de options: 0 for training on full dataset, 1 for training on first 100 sequences
+# Example run: CUDA_VISIBLE_DEVICES=1 python iodine_runner.py -de 1 -da stack_o2p2_60k
+
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -236,38 +248,38 @@ if __name__ == "__main__":
 
     variant = dict(
         op3_args = dict(
-            refinement_model_type = "size_dependent_conv",
-            decoder_model_type = "reg",
-            dynamics_model_type = "reg_ac32",
+            refinement_model_type = "size_dependent_conv",  # size_dependent_conv, size_dependent_conv_no_share
+            decoder_model_type = "reg",  # reg, reg_no_share
+            dynamics_model_type = "reg_ac32",  # reg_ac32, reg_ac32_no_share
             sto_repsize = 64,
-            det_repsize = 0,
+            det_repsize = 64,
             extra_args = dict(
-                beta = 1,
+                beta = 1e-2,
                 deterministic_sampling = False
             ),
-            K=7
+            K=4
         ),
-        schedule_args = dict( #Arguments for TrainingScheduler
+        schedule_args = dict(  # Arguments for TrainingScheduler
             seed_steps = 4,
-            T = 5, #Max number of steps into the future we want to go or max length of a schedule
-            schedule_type = 'single_step_physics', #single_step_physics, curriculum, static_iodine, rprp, next_step, random_alternating
+            T = 5,  # Max number of steps into the future we want to go or max length of a schedule
+            schedule_type = 'curriculum',  # single_step_physics, curriculum, static_iodine, rprp, next_step, random_alternating
         ),
-        training_args = dict( #Arguments for IodineTrainer
-            batch_size=120,  #Change to appropriate constant based off dataset size
+        training_args = dict(  # Arguments for IodineTrainer
+            batch_size= 80,  # Change to appropriate constant based off dataset size
             lr=3e-4,
         ),
-        num_epochs = 100,
-        save_period=1,
+        num_epochs = 300,
+        save_period=2,
         dataparallel=True,
         dataset=args.dataset,
         debug=args.debug,
         machine_type='g3.16xlarge'  # Note: Purely for logging purposed and NOT used for setting actual machine type
     )
 
-    #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
+    # Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
         train_vae,
-        exp_prefix='{}-{}-v2'.format(args.dataset, variant['schedule_args']['schedule_type']),
+        exp_prefix='{}-{}-v2-reg'.format(args.dataset, variant['schedule_args']['schedule_type']),
         mode=args.mode,
         variant=variant,
         use_gpu=True,  # Turn on if you have a GPU

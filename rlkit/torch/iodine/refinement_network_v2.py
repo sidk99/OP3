@@ -59,10 +59,27 @@ Refinement_Args = dict(
             lstm_input_size=repsize*5 + 128, #repsize*5 + hidden_sizes[-1]
             added_fc_input_size=action_size,
             hidden_activation = nn.ELU())
-        )
+        ),
+    size_dependent_conv_no_share=("no_share",
+         lambda repsize, k: dict(
+             input_width=64,
+             input_height=64,
+             input_channels=17,
+             paddings=[2, 2, 2],
+             kernel_sizes=[5, 5, 5],
+             n_channels=[32, 32, repsize],
+             strides=[1, 1, 1],
+             hidden_sizes=[128],
+             output_size=repsize,  #repsize
+             lstm_size=128,
+             lstm_input_size=repsize * 5 + 128,  #repsize*5 + hidden_sizes[-1]
+             added_fc_input_size=0,
+             hidden_activation=nn.ELU(),
+             k=k)
+         ),
 )
 
-
+#######Default OP3 Refinement Network##########
 class RefinementNetwork_v2(nn.Module):
     def __init__(
             self,
@@ -84,6 +101,7 @@ class RefinementNetwork_v2(nn.Module):
             hidden_init=nn.init.xavier_uniform_,
             hidden_activation=nn.ReLU(),
             lambda_output_activation=identity,
+            k=None,
     ):
         if hidden_sizes is None:
             hidden_sizes = []
@@ -105,6 +123,7 @@ class RefinementNetwork_v2(nn.Module):
         self.batch_norm_fc = batch_norm_fc
         self.added_fc_input_size = added_fc_input_size
         self.conv_input_length = self.input_width * self.input_height * self.input_channels
+        self.K = k
 
         self.conv_layers = nn.ModuleList()
         self.conv_norm_layers = nn.ModuleList()
@@ -172,7 +191,7 @@ class RefinementNetwork_v2(nn.Module):
         coords = self.coords.repeat(input.shape[0], 1, 1, 1) #(B*K,2,D,D)
         hi = torch.cat([hi, coords], 1) #(B*K,17,D,D)
 
-        hi = self.apply_forward(hi, self.conv_layers, self.conv_norm_layers,
+        hi = self._apply_forward(hi, self.conv_layers, self.conv_norm_layers,
                                use_batch_norm=self.batch_norm_conv) #(B*K,64,1,1)
         # pdb.set_trace()
         hi = self.avg_pooling(hi) #Avg pooling layer
@@ -181,13 +200,15 @@ class RefinementNetwork_v2(nn.Module):
 
         if self.added_fc_input_size != 0:
             hi = torch.cat([hi, add_fc_input], dim=1) #(B*K, 64+A)
-        output = self.apply_forward(hi, self.fc_layers, self.fc_norm_layers, use_batch_norm=self.batch_norm_fc) #(B*K, last_hidden_size)
+        output = self._apply_forward(hi, self.fc_layers, self.fc_norm_layers, use_batch_norm=self.batch_norm_fc) #(B*K, last_hidden_size)
 
         if extra_input is not None:
             output = torch.cat([output, extra_input], dim=1) #(B*K, last_hidden_size+R*5)
 
         if len(hidden1.shape) == 2: #(B*K,lstm_size)
             hidden1, hidden2 = hidden1.unsqueeze(0), hidden2.unsqueeze(0) #(1,B*K,lstm_size), (1,B*K,lstm_size)
+            hidden1 = hidden1.contiguous()
+            hidden2 = hidden2.contiguous()
         self.lstm.flatten_parameters() #For performance / multi-gpu reasons
         output, hidden = self.lstm(output.unsqueeze(1), (hidden1, hidden2)) #Note batch_first = True in lstm initialization
         #output: (B*K,1,R), hidden is tuple of size 2, each of size (B*K,1,lstm_size)
@@ -200,7 +221,7 @@ class RefinementNetwork_v2(nn.Module):
     def initialize_hidden(self, bs):
         return ptu.zeros((1, bs, self.lstm_size)), ptu.zeros((1, bs, self.lstm_size))
 
-    def apply_forward(self, input, hidden_layers, norm_layers, use_batch_norm=False):
+    def _apply_forward(self, input, hidden_layers, norm_layers, use_batch_norm=False):
         h = input
         for layer in hidden_layers:
             h = layer(h)
@@ -208,4 +229,94 @@ class RefinementNetwork_v2(nn.Module):
             #    h = norm_layer(h)
             h = self.hidden_activation(h)
         return h
+
+
+#######No-sharing OP3 Refinement Network##########
+class RefinementNetwork_v2_No_Sharing(nn.Module):
+    def __init__(
+            self,
+            input_width,
+            input_height,
+            input_channels,
+            output_size,
+            kernel_sizes,
+            n_channels,
+            strides,
+            paddings,
+            hidden_sizes,
+            lstm_size,
+            lstm_input_size,
+            added_fc_input_size=0,
+            batch_norm_conv=False,
+            batch_norm_fc=False,
+            init_w=1e-4,
+            hidden_init=nn.init.xavier_uniform_,
+            hidden_activation=nn.ReLU(),
+            lambda_output_activation=identity,
+            k=None,
+    ):
+        super().__init__()
+        if k is None:
+            raise ValueError("A value of k is needed to initialize this model!")
+        self.K = k
+        self.models = nn.ModuleList()
+        self.input_width = input_width
+        self.lstm_size = lstm_size
+
+        for i in range(self.K):
+            self.models.append(RefinementNetwork_v2(input_width,
+                input_height,
+                input_channels,
+                output_size,
+                kernel_sizes,
+                n_channels,
+                strides,
+                paddings,
+                hidden_sizes,
+                lstm_size,
+                lstm_input_size,
+                added_fc_input_size,
+                batch_norm_conv,
+                batch_norm_fc,
+                init_w,
+                hidden_init,
+                hidden_activation,
+                lambda_output_activation,
+                k=None))
+
+
+    #add_fc_input is used for next step iodine where we want to add action information
+    #Input: input (B*K,15,D,D),  hidden1 (B*K,R2),  hidden2 (B*K,R2),  extra_input (B*K,5*R),
+    # add_fc_input is usually None except for next step refinement e.g. sequence iodine (B*K,A)
+    def forward(self, input, hidden1, hidden2, extra_input=None, add_fc_input=None):
+        vals_output1, vals_output2, vals_hidden1, vals_hidden2 = [], [], [], []
+        for i in range(self.K):
+            vals = self.models[i](self._get_ith_input(input, i), self._get_ith_input(hidden1, i),
+                                          self._get_ith_input(hidden2, i), self._get_ith_input(extra_input, i),
+                                          self._get_ith_input(add_fc_input, i))
+            vals_output1.append(vals[0])  #(B,R)
+            vals_output2.append(vals[1])  #(B,R)
+            vals_hidden1.append(vals[2])  #(B,1,lstm_size)
+            vals_hidden2.append(vals[3])  #(B,1,lstm_size)
+
+        vals_output1 = torch.cat(vals_output1)
+        vals_output2 = torch.cat(vals_output2)
+        vals_hidden1 = torch.cat(vals_hidden1)
+        vals_hidden2 = torch.cat(vals_hidden2)
+        return vals_output1, vals_output2, vals_hidden1, vals_hidden2
+
+
+    # Input: x (bs*k,*) or None, i representing which latent to pick (Sc)
+    # Input: x (bs,*) or None
+    def _get_ith_input(self, x, i):
+        if x is None:
+            return None
+        x = x.view([-1, self.K] + list(x.shape[1:]))  #(bs,k,*)
+        return x[:, i]
+
+    def initialize_hidden(self, bs):
+        return ptu.zeros((1, bs, self.lstm_size)), ptu.zeros((1, bs, self.lstm_size))
+
+
+
 

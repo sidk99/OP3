@@ -289,6 +289,15 @@ class BlockPickAndPlaceEnv():
         self.set_env_info(tmp)
         return obs
 
+    # Input: actions (B,A)
+    # Output: Largest manhattan distance component to closest block (B)
+    def get_action_error(self, actions):
+        vals = np.ones(actions.shape[0])*10000
+        for i, an_action in enumerate(actions):
+            for a_block in self.names:
+                vals[i] = min(np.max(np.abs(self.get_block_info(a_block)["pos"][:2] - an_action[:2])), vals[i])
+        return vals
+
     def reset(self):
         self.names = []
         self.blocks = []
@@ -311,9 +320,9 @@ class BlockPickAndPlaceEnv():
 
     def get_actions_size(self):
         if self.include_z:
-            return 6
+            return [6]
         else:
-            return 4
+            return [4]
 
     # Inputs: actions (*,6)
     # Outputs: (*,6) if including z, (*,4) if not
@@ -356,9 +365,10 @@ class BlockPickAndPlaceEnv():
 
     # Input: action_type
     # Output: Single action either (6) or (4)
-    def sample_action(self, action_type=None, include_noise=True):
+    def sample_action(self, action_type=None, pick_noise_ratio=0.0, place_noise_ratio=0.0):
         if len(self.names) == 1 and action_type == 'place_block':
             action_type = None
+
 
         if action_type == 'pick_block': #pick block, place randomly
             # aname = np.random.choice(self.names)
@@ -368,16 +378,24 @@ class BlockPickAndPlaceEnv():
         elif action_type == 'place_block': #pick block, place on top of existing block
             # aname = np.random.choice(self.names)
             aname = self._get_rand_block_byz()
-            pick = self.get_block_info(aname)["pos"]  # + np.random.randn(3)/10
+            pick = self.get_block_info(aname)["pos"] #+ np.random.uniform(-self.TOLERANCE, self.TOLERANCE, size=6) * 0.5
             names = copy.deepcopy(self.names)
             names.remove(aname)
             aname = np.random.choice(names)
-            place = self.get_block_info(aname)["pos"]  # + np.random.randn(3)/10
-            place[5] += 2  # Each block is roughly 1 unit wide
+            place = self.get_block_info(aname)["pos"] #+ np.random.uniform(-self.TOLERANCE, self.TOLERANCE, size=6)
+            place[2] += 3  # Each block is roughly 1 unit wide
         elif action_type == 'remove_block':
             aname = self._get_rand_block_byz()
             pick = self.get_block_info(aname)["pos"]  # + np.random.randn(3)/50
             place = [0, 0, -5]  # Place the block under the ground to remove it from scene
+        # elif action_type == "noisy_pick":
+        #     aname = self._get_rand_block_byz()
+        #     pick = self.get_block_info(aname)["pos"] #+ np.random.uniform(-self.TOLERANCE, self.TOLERANCE, size=6) * 0.5
+        #     place = self.get_random_pos()
+        # elif action_type == "noisy_miss":
+        #     aname = self._get_rand_block_byz()
+        #     pick = self.get_block_info(aname)["pos"] #+ np.random.uniform(-self.TOLERANCE, self.TOLERANCE, size=6) * 5
+        #     place = self.get_random_pos()
         elif action_type is None:
             if self.include_z:
                 pick = self.get_random_pos()
@@ -388,8 +406,11 @@ class BlockPickAndPlaceEnv():
         else:
             raise KeyError("Wrong input action_type!")
         ac = np.array(list(pick) + list(place))
-        if include_noise:
-            ac += np.random.uniform(-self.TOLERANCE, self.TOLERANCE, size=6) * 1.4
+
+        if pick_noise_ratio:
+            ac[:3] += np.random.uniform(-self.TOLERANCE, self.TOLERANCE, size=3) * pick_noise_ratio
+        else:
+            ac[3:] += np.random.uniform(-self.TOLERANCE, self.TOLERANCE, size=3) * place_noise_ratio
         # pdb.set_trace()
         # ac[2] = 0.6
         # ac[5] = self.drop_height
@@ -399,11 +420,12 @@ class BlockPickAndPlaceEnv():
     #Output: actions (*)
     def sample_action_gaussian(self, mean, std):
         random_a = np.random.normal(mean, std)
-        # # set pick height
-        # random_a[2] = 0.6
-        # # set place heights
-        # random_a[5] = self.drop_height
         return random_a
+
+    # Input: mean (*), std (*), num_actions
+    # Output: actions (num_actions, *)
+    def sample_multiple_action_gaussian(self, mean, std, num_actions):
+        return np.stack([self.sample_action_gaussian(mean, std) for _ in range(num_actions)])
 
     # # Input: mean (*), std (*)
     # # Output: actions (*)
@@ -594,22 +616,28 @@ def createSingleSim(args):
     num_blocks = np.random.randint(args.min_num_objects, args.max_num_objects+1)
     myenv = BlockPickAndPlaceEnv(num_blocks, args.num_colors, args.img_dim, args.include_z, random_initialize=True, view=False)
     myenv.img_dim = args.img_dim
+    noise_ratio = args.noise
     # global myenv
     imgs = []
     acs = []
     initial_env_info = myenv.get_env_info()
     imgs.append(myenv.get_observation())
     for t in range(args.num_frames-1):
+        if np.random.uniform() < noise_ratio:
+            pick_noise_ratio = 5
+        else:
+            pick_noise_ratio = 0.5
+
         if args.remove_objects == 'True':
-            ac = myenv.sample_action('remove_block')
+            ac = myenv.sample_action('remove_block', pick_noise_ratio=pick_noise_ratio)
         else:
             rand_float = np.random.uniform()
             if rand_float < args.force_pick:
-                ac = myenv.sample_action('pick_block')
+                ac = myenv.sample_action('pick_block', pick_noise_ratio=pick_noise_ratio)
             elif rand_float < args.force_pick + args.force_place:
-                ac = myenv.sample_action('place_block')
+                ac = myenv.sample_action('place_block', pick_noise_ratio=pick_noise_ratio, place_noise_ratio=1)
             else:
-                ac = myenv.sample_action(None)
+                ac = myenv.sample_action(None, pick_noise_ratio=pick_noise_ratio)
         imgs.append(myenv.step(ac))
         acs.append(ac)
 
@@ -674,7 +702,7 @@ def test_env_infos():
         # pdb.set_trace()
         obs.append(env.get_observation())
         env_infos.append(env.get_env_info())
-        env.step(env.sample_action('pick_block', include_noise=False))
+        env.step(env.sample_action('pick_block'))
 
     new_env = BlockPickAndPlaceEnv(num_objects=3, num_colors=None, img_dim=64, include_z=False, random_initialize=False)
     new_obs = []
@@ -686,9 +714,6 @@ def test_env_infos():
     print(np.sum(np.power(np.array(obs) - np.array(new_obs), 2)))
     #Note that the pixelwise error is NOT zero even though images look visually the same
     #The loaded environment is nearly identical but not completely
-
-def test_occlusion():
-    env = BlockPickAndPlaceEnv(num_objects=3, num_colors=None, img_dim=64, include_z=False, random_initialize=True, view=True)
 
 
 #Inputs: numpy_array (H,W,D,D,3)
@@ -715,6 +740,7 @@ def create_entire_dataset():
     parser.add_argument('-c', '--num_colors', type=int, default=None)
     parser.add_argument('-fpick', '--force_pick', type=float, default=0.5)
     parser.add_argument('-fplace', '--force_place', type=float, default=0.5)
+    parser.add_argument('-noise', '--noise', type=float, default=0)
     parser.add_argument('-r', '--remove_objects', type=bool, default=False)
     parser.add_argument('-z', '--include_z', type=bool, default=False)
     parser.add_argument('--output_path', default='', type=str,
@@ -746,10 +772,10 @@ def create_entire_dataset():
     #                              random_initialize=True, view=False)
     dgu.createMultipleSims(args, obs_size, ac_size, single_sim_func, num_workers=int(args.num_workers))
 
-    dgu.hdf5_to_image(args.filename + '.h5')
-    for i in range(min(10, args.num_sims)):
-        tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
-        dgu.make_gif(tmp, "animation.gif")
+    # dgu.hdf5_to_image(args.filename + '.h5')
+    # for i in range(min(10, args.num_sims)):
+    #     tmp = os.path.join(args.output_path, "imgs/training/{}/features".format(str(i)))
+    #     dgu.make_gif(tmp, "animation.gif")
 
 
 # python block_pick_and_place.py -f pickplace_multienv_10k -nmin 2 -nmax 2 -nf 21 -ns 10000 -fpick 0.3 -fplace 0.4
@@ -758,10 +784,9 @@ def create_entire_dataset():
 # python block_pick_and_place.py -f pickplace_1and2_1k -nmin 1 -nmax 2 -nf 21 -ns 1000 -fpick 0.4 -fplace 0.3
 
 if __name__ == '__main__':
-    test_occlusion()
     # test_try_step()
     # test_env_infos()
-    # create_entire_dataset()
+    create_entire_dataset()
 
 
 

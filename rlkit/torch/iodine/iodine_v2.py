@@ -1,9 +1,9 @@
 import torch
 import torch.utils.data
-from rlkit.torch.iodine.physics_network_v2 import PhysicsNetwork_v2, PhysicsNetworkMLP_v2, Physics_Args
-from rlkit.torch.iodine.refinement_network_v2 import RefinementNetwork_v2, Refinement_Args
-from rlkit.torch.iodine.decoder_network_v2 import DecoderNetwork_V2, Decoder_Args
-from rlkit.torch.iodine.visualizer import quicksave
+from rlkit.torch.iodine.physics_network_v2 import PhysicsNetwork_v2, PhysicsNetwork_v2_No_Sharing, Physics_Args
+from rlkit.torch.iodine.refinement_network_v2 import RefinementNetwork_v2, Refinement_Args, RefinementNetwork_v2_No_Sharing
+from rlkit.torch.iodine.decoder_network_v2 import DecoderNetwork_v2, Decoder_Args, DecoderNetwork_v2_No_Sharing
+from rlkit.torch.iodine.visualizer import quicksave, visualize_state_info
 from torch.distributions.multivariate_normal import MultivariateNormal
 
 from torch import nn
@@ -48,13 +48,19 @@ def create_model_v2(variant, det_size, sto_size, action_dim):
     elif ref_model_args[0] == "sequence_iodine":
         refinement_kwargs = ref_model_args[1](sto_size, action_dim)
         refinement_net = RefinementNetwork_v2(**refinement_kwargs)
+    elif ref_model_args[0] == "no_share":
+        refinement_kwargs = ref_model_args[1](sto_size, K)
+        refinement_net = RefinementNetwork_v2_No_Sharing(**refinement_kwargs)
     else:
         raise ValueError("{}".format(ref_model_args[0]))
 
     dec_model_args = Decoder_Args[variant["decoder_model_type"]]
     if dec_model_args[0] == "reg":
         decoder_kwargs = dec_model_args[1](det_size + sto_size)
-        decoder_net = DecoderNetwork_V2(**decoder_kwargs)
+        decoder_net = DecoderNetwork_v2(**decoder_kwargs)
+    elif dec_model_args[0] == "reg_no_share":
+        decoder_kwargs = dec_model_args[1](det_size + sto_size, K)
+        decoder_net = DecoderNetwork_v2_No_Sharing(**decoder_kwargs)
     else:
         raise ValueError("{}".format(dec_model_args[0]))
 
@@ -62,9 +68,9 @@ def create_model_v2(variant, det_size, sto_size, action_dim):
     if dyn_model_args[0] == "reg":
         physics_kwargs = dyn_model_args[1](det_size, sto_size, action_dim)
         dynamics_net = PhysicsNetwork_v2(**physics_kwargs)
-    elif dyn_model_args[0] == "mlp":
-        physics_kwargs = dyn_model_args[1](det_size, sto_size, action_dim)
-        dynamics_net = PhysicsNetworkMLP_v2(K, **physics_kwargs)
+    elif dyn_model_args[0] == "reg_no_share":
+        physics_kwargs = dyn_model_args[1](det_size, sto_size, action_dim, K)
+        dynamics_net = PhysicsNetwork_v2_No_Sharing(**physics_kwargs)
     else:
         raise ValueError("{}".format(variant["dynamics_model_type"][0]))
 
@@ -146,27 +152,35 @@ class IodineVAE_v2(torch.nn.Module):
         # (2pi) ^ ch = 248.05
         return torch.exp((-torch.pow(inputs - targets, 2).sum(1) / (ch * 2 * sigma ** 2))) / (np.sqrt(sigma ** (2 * ch)) * 248.05)
 
+    #Input: softplus (*)
+    #Output: stds (*)
+    def _softplus_to_std(self, softplus):
+        softplus = torch.min(softplus, torch.ones_like(softplus)*80)
+        return torch.sqrt(torch.log(1 + softplus.exp()) + 1e-5)
+
+
     #Compute the kl loss between prior and posterior
     #Note: This is NOT normalized
     def kl_divergence_prior_post(self, prior, post):
         mu1, softplus1 = prior["lambdas1"], prior["lambdas2"]
         mu2, softplus2 = post["lambdas1"], post["lambdas2"]
 
-        # if torch.sum(mu1-mu2).pow(2) + (softplus1-softplus2).pow(2) < 1e-5:
-        #     return torch.zeros(mu1.shape[:-1]).to(mu1.device)
-        # if torch.equal(mu1, mu2) and torch.equal(softplus1, softplus2):
-        #     return torch.zeros((1)).to(mu1.device)
-
-        stds1 = torch.sqrt(torch.log(1 + softplus1.exp()) + 1e-5)
-        stds2 = torch.sqrt(torch.log(1 + softplus2.exp()) + 1e-5)
+        # stds1 = torch.sqrt(torch.log(1 + softplus1.exp()) + 1e-5)
+        # stds2 = torch.sqrt(torch.log(1 + softplus2.exp()) + 1e-5)
+        stds1 = self._softplus_to_std(softplus1)
+        stds2 = self._softplus_to_std(softplus2)
         q1 = MultivariateNormal(loc=mu1, scale_tril=torch.diag_embed(stds1))
         q2 = MultivariateNormal(loc=mu2, scale_tril=torch.diag_embed(stds2))
+        # tmp = torch.distributions.kl.kl_divergence(q2, q1) #KL(post||prior), note ordering matters!
+        # ptu.check_nan(tmp, logger.get_snapshot_dir())
+        # return tmp
         return torch.distributions.kl.kl_divergence(q2, q1) #KL(post||prior), note ordering matters!
 
     def get_samples(self, means, softplusses):
         if self.deterministic_sampling:
             return means
-        stds = torch.sqrt(torch.log(1 + softplusses.exp()) + 1e-5)
+        # stds = torch.sqrt(torch.log(1 + softplusses.exp()) + 1e-5)
+        stds = self._softplus_to_std(softplusses)
         epsilon = ptu.randn(*means.size()).to(stds.device)
         latents = epsilon * stds + means
         return latents
@@ -261,6 +275,8 @@ class IodineVAE_v2(torch.nn.Module):
         # h1, h2 = self._flatten_first_two(hidden_states["post"]["extra_info"][0]), \
         #          self._flatten_first_two(hidden_states["post"]["extra_info"][1])  # (B*K, R2)
         h1, h2 = hidden_states["post"]["extra_info"][0], hidden_states["post"]["extra_info"][1] #Each (1,B*K,R2)
+        h1 = h1.view(bs * K, -1)
+        h2 = h2.view(bs * K, -1)
 
         # pdb.set_trace()
         lambdas1, lambdas2, h1, h2 = self.refinement_net(a, h1, h2,
@@ -366,14 +382,22 @@ class IodineVAE_v2(torch.nn.Module):
         return color_probs, pixel_complete_log_likelihood, kle_loss, complete_log_likelihood, total_loss
 
 
-    #Inputs: images: (B, T_obs, 3, D, D),  actions: None or (B, T_acs, A),  initial_hidden_state or None
+    #Inputs: images: None or (B, T_obs, 3, D, D),  actions: None or (B, T_acs, A),  initial_hidden_state or None
     #   schedule: (T1),   loss_schedule:(T1)
     #Output: colors_list (B,T1,K,3,D,D), masks_list (B,T1,K,1,D,D), final_recon (B,3,D,D),
     # total_loss, total_kle_loss, total_clog_prob, mse are all (Sc), end_hidden_state
     def run_schedule(self, images, actions, initial_hidden_state, schedule, loss_schedule, should_detach=False):
         self.debug["schedule"] = schedule
         self.debug["at"] = -1
-        b = images.shape[0]
+
+        if images is not None:
+            b = images.shape[0]
+        elif actions is not None:
+            b = actions.shape[0]
+        else:
+            raise ValueError("Need either images or actions")
+
+
         if initial_hidden_state is None: #Initialize initial_hidden_state if it is not passed in
             initial_hidden_state = self._get_initial_hidden_states(b, images.device)
 
@@ -455,7 +479,10 @@ class IodineVAE_v2(torch.nn.Module):
 
 
         final_recon = (colors_list[-1] * masks_list[-1]).sum(1) #(B,K,3,D,D) -> (B,3,D,D)
-        mse = torch.pow(final_recon - images[:, -1], 2).mean() #(B,3,D,D) -> (Sc)
+        if images is not None:
+            mse = torch.pow(final_recon - images[:, -1], 2).mean() #(B,3,D,D) -> (Sc)
+        else:
+            mse = torch.zeros(size=()).to(final_recon.device)  # (Sc)
         colors_list = colors_list.permute(1, 0, 2, 3, 4, 5) #(T1,B,K,3,D,D) -> (B,T1,K,3,D,D)
         masks_list = masks_list.permute(1, 0, 2, 3, 4, 5) #(T1,B,K,1,D,D) -> (B,T1,K,1,D,D)
 
@@ -635,10 +662,16 @@ class IodineVAE_v2(torch.nn.Module):
         new_hidden_state["post"]["samples"] = torch.cat(new_hidden_state["post"]["samples"])
         return new_hidden_state
 
-    # Like internal_inference except initial_hidden_state might only contain one state while obs/actions contain (B,*)
-    # Inputs: obs (B,T1,3,D,D) or None, actions (B,T2,A) or None, initial_hidden_state or None, schedule (T3)
+    # Description: Runs inference with the given inputs and returns a state_info dictionary
+    # Inputs: obs (B,T1,3,D,D) or None, actions (B,T2,A) or None, initial_hidden_state or None, schedule (T3), select_best=False
     #   Note: Assume that initial_hidden_state has entries of size (B=1,*)
-    def batch_internal_inference(self, obs, actions, initial_hidden_state, schedule, figure_path=None, batch_size=10):
+    # Outputs:
+    #   If select_best==True: We assume that we are not doing a rollout and that our final output should be
+    #       the same as obs[:,-1]. We therefore pick the state_info that results in the best output
+    #       (e.g. lowest reconstruction error) so output B=1
+    #   Else:
+    #       Output B remains the same
+    def batch_internal_inference(self, obs, actions, initial_hidden_state, schedule, select_best=False, figure_path=None, batch_size=10):
         loss_schedule = np.zeros_like(schedule)
         if obs is not None:
             b = obs.shape[0]
@@ -685,9 +718,8 @@ class IodineVAE_v2(torch.nn.Module):
             # true_images (T1,3,D,D),  colors (T,K,3,D,D),  masks (T,K,1,D,D), schedule (T)
             # file_name (string),  quicksave_type is either "full" or "subimages"
             # Images are torch tensors, schedule is numpy array
-            if figure_path is not None:
+            if i == 0 and figure_path is not None:
                 quicksave(obs[0], colors[0], masks[0], schedule, figure_path, "full")
-                figure_path = None
 
         # pdb.set_trace()
         important_info["colors"] = torch.cat(important_info["colors"]) #(B,K,3,D,D)
@@ -695,7 +727,28 @@ class IodineVAE_v2(torch.nn.Module):
         important_info["sub_images"] = torch.cat(important_info["sub_images"])  # (B,K,3,D,D)
         important_info["final_recon"] = torch.cat(important_info["final_recon"])  # (B,3,D,D)
         important_info["state"] = self._stack_state(important_info["state"]) #State with (B,*) entries
+
+
+        if select_best:
+            mses = torch.pow(important_info["final_recon"] - obs[:, -1], 2).mean((-1, -2, -3))  # (B,3,D,D) -> (B)
+            best_index = torch.argmin(mses)
+
+            for akey in important_info:
+                if akey == "state":
+                    important_info[akey] = self.select_specific_state(important_info[akey], best_index)
+                else:
+                    important_info[akey] = important_info[akey][best_index:best_index + 1]
+
+            if figure_path is not None:
+                visualize_state_info(important_info, file_name="{}_best.{}".format(*figure_path.split(".")),
+                                     true_image=obs[best_index, -1])
+
+
         return important_info
+
+
+
+
 
 
 

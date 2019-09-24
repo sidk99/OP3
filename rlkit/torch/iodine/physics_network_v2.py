@@ -20,16 +20,18 @@ Physics_Args = dict(
         action_enc_size = 32,
         hidden_activation=nn.ELU())
     ),
-    mlp_ac32 = ("mlp",
-        lambda repsize, action_size: dict(
-        representation_size=repsize,
-        action_size=action_size,
-        action_enc_size=32,
-        hidden_activation=nn.ELU())
-    )
+    reg_ac32_no_share = ("reg_no_share",
+        lambda det_size, sto_size, action_size, k: dict(
+        det_size = det_size,
+        sto_size = sto_size,
+        action_size = action_size,
+        action_enc_size = 32,
+        hidden_activation=nn.ELU(),
+        k=k)),
 )
 
 
+########Regular dynamics network########
 class PhysicsNetwork_v2(nn.Module):
     def __init__(
             self,
@@ -39,10 +41,11 @@ class PhysicsNetwork_v2(nn.Module):
             action_enc_size,
             hidden_activation=nn.ELU(),
             deterministic_state_activation=identity,
-            lambda_output_activation=identity
+            lambda_output_activation=identity,
+            k=None
     ):
         super().__init__()
-        self.K = None
+        self.K = k
         self.det_size = det_size
         self.sto_size = sto_size
         self.full_rep_size = det_size + sto_size
@@ -161,50 +164,62 @@ class PhysicsNetwork_v2(nn.Module):
         return deter_state, lambdas1, lambdas2
 
 
-
-class PhysicsNetworkMLP_v2(nn.Module):
+########No sharing dynamics network########
+class PhysicsNetwork_v2_No_Sharing(nn.Module):
     def __init__(
             self,
-            K,
-            representation_size,
+            det_size,
+            sto_size,
             action_size,
             action_enc_size,
+            hidden_activation=nn.ELU(),
+            deterministic_state_activation=identity,
+            lambda_output_activation=identity,
+            k=None,
     ):
         super().__init__()
-        self.K = K
-        self.rep_size = representation_size
-        self.action_size = action_size
+        if k is None:
+            raise ValueError("A value of k is needed to initialize this model!")
+        self.K = k
+        self.models = nn.ModuleList()
 
-        self.action_enc_size = action_enc_size if action_size > 0 else 0
-        self.effect_size = action_enc_size
-        # self.enc_rep_size = representation_size - self.effect_size
-        hidden_size = representation_size
-        self.interaction_size = representation_size
+        for i in range(self.K):
+            self.models.append(PhysicsNetwork_v2(det_size,
+            sto_size,
+            action_size,
+            action_enc_size,
+            hidden_activation,
+            deterministic_state_activation,
+            lambda_output_activation,
+            k=k))
 
-        self.action_encoder = Mlp((hidden_size,), self.action_enc_size, action_size,
-                                  hidden_activation=nn.ELU(), output_activation=nn.ELU())
-        self.mlp_net = Mlp([hidden_size]*5, self.rep_size*K, self.rep_size*K+self.action_enc_size,
-                                             hidden_activation=nn.ELU())
 
+    # Inputs: sampled_state (B*K, Rd+Rs), Action: (B*K, A)
+    # Note: sampled_state is Rd+Rs as we take in the full state and not just the stochastic part (Rs)
+    def forward(self, sampled_state, actions):
+        vals_deter_state, vals_lambdas1, vals_lambdas2 = [], [], []
+        for i in range(self.K):
+            vals = self.models[i](sampled_state, actions)
+            vals_deter_state.append(self._get_ith_input(vals[0], i))  # (B,Rd)
+            vals_lambdas1.append(self._get_ith_input(vals[1], i))  # (B,Rs)
+            vals_lambdas2.append(self._get_ith_input(vals[2], i))  # (B,Rs)
 
-    # lambdas are each (bs*K, representation_size), actions are (bs*K, A)
-    def forward(self, lambda1, lambda2, actions):
-        K = self.K
-        # lambda1 = lambda1.view(-1, K, self.rep_size) #(bs, K, rep_size)
-        lambda1 = lambda1.view(-1, K*self.rep_size) #(bs, K*rep_size)
+        vals_deter_state = torch.cat(vals_deter_state)
+        vals_lambdas1 = torch.cat(vals_lambdas1)
+        vals_lambdas2 = torch.cat(vals_lambdas2)
+        return vals_deter_state, vals_lambdas1, vals_lambdas2
 
-        # pdb.set_trace()
-        actions = actions[::K]
-        if self.action_size == 4:
-            action_enc = self.action_encoder(actions[:, torch.LongTensor([0, 1, 3, 4])])  # RV: Encode actions, why torch.longTensor?
-        else:
-            action_enc = self.action_encoder(actions)  # Encode actions
-        lambda1 = torch.cat([lambda1, action_enc], -1)  # RV: Concatonate lambdas with actions
-        lambda1 = self.mlp_net(lambda1)
-        # lambda1 = lambda1.view(-1, K, self.rep_size)
-        lambda1 = lambda1.view(-1, self.rep_size)
-
-        return lambda1, lambda2
+    # Input: x (bs*k,*) or None, i representing which latent to pick (Sc)
+    # Input: x (bs,*) or None
+    def _get_ith_input(self, x, i):
+        if x is None:
+            return None
+        x = x.view([-1, self.K] + list(x.shape[1:]))  # (bs,k,*)
+        return x[:, i]
 
     def set_k(self, k):
-        assert k == self.K  #We cannot change k as mlp takes in a fixed number of latents
+        assert k == self.K
+
+
+
+

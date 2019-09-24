@@ -28,7 +28,8 @@ class TrainingScheduler:
         self.max_T = max_T
         self.T = T
 
-        self.curriculum_len = 100 #Used for "curriculum" schedule
+        self.curriculum_offset = 100  #Used for "curriculum" schedule
+        self.curriculum_increase = 10 #Used for "curriculum" schedule
         self.rprp_curriculum_len = 50 #Used for "rprp_curriculum" schedule
 
     #Input: epoch (Sc),  is_train (bool)
@@ -51,24 +52,29 @@ class TrainingScheduler:
             schedule = np.ones((T,))
             schedule[:seed_steps] = 0
         elif schedule_type == 'curriculum':
+            if epoch > self.curriculum_offset:
+                max_multi_step = (epoch-self.curriculum_offset) // self.curriculum_increase + 2  # Start off with max_multi_step = 2
+            else:
+                max_multi_step = 1
+            max_multi_step = min(max_multi_step, T)
             if is_train:
-                max_multi_step = epoch//self.curriculum_len + 1
-                rollout_len = np.random.randint(max_multi_step) + 1 #Enforces at least 1 physics step
+                # max_multi_step = epoch//self.curriculum_len + 1
+                rollout_len = np.random.randint(max_multi_step) + 1  # Enforces at least 1 physics step
                 schedule = np.zeros(seed_steps + rollout_len + 1)
                 schedule[seed_steps:seed_steps + rollout_len] = 1  # schedule looks like [0,0,0,0,1,1,1,0]
             else:
-                max_multi_step = epoch // self.curriculum_len + 1
+                # max_multi_step = epoch // self.curriculum_len + 1
                 schedule = np.zeros(seed_steps + max_multi_step + 1)
                 schedule[seed_steps:seed_steps + max_multi_step] = 1
         elif schedule_type == 'rprp_curriculum':
             if is_train:
-                max_multi_step = epoch // self.curriculum_len + 1
+                max_multi_step = epoch // self.rprp_curriculum_len + 1
                 rollout_len = np.random.randint(max_multi_step) + 1
-                schedule = np.zeros(seed_steps + rollout_len + 1 + rollout_len + 1) #rrrrprpr
+                schedule = np.zeros(seed_steps + rollout_len + 1 + rollout_len + 1)  # rrrrprpr
                 schedule[seed_steps:] = 1
                 schedule[seed_steps - 1::rollout_len + 1] = 0
             else:
-                rollout_len = epoch // self.curriculum_len + 1
+                rollout_len = epoch // self.rprp_curriculum_len + 1
                 schedule = np.zeros(seed_steps + rollout_len + 1 + rollout_len + 1)  # rrrrprpr
                 schedule[seed_steps:] = 1
                 schedule[seed_steps - 1::rollout_len + 1] = 0
@@ -97,8 +103,11 @@ class TrainingScheduler:
     #Output: If we should not save the model, output is None
     # If we should save the model, output is file_name (string)
     def should_save_model(self, epoch):
-        if self.schedule_type == "curriculum" and epoch % self.curriculum_len == 0:
-            return "{}_physics_steps".format(epoch//self.curriculum_len)
+        if self.schedule_type == "curriculum":
+            if epoch >= self.curriculum_offset and (epoch-self.curriculum_offset) % self.curriculum_increase == 0:
+                return "{}_physics_steps".format((epoch-self.curriculum_offset)//self.curriculum_increase)
+        elif epoch % 50 == 49:
+            return "{}_epoch_save".format(epoch)
         return None
 
 
@@ -171,9 +180,9 @@ class IodineTrainer(Serializable):
             total_kle_loss = total_kle_loss.mean()
             mse = mse.mean()
 
-            # ptu.check_nan([total_loss])
+            # ptu.check_nan([total_loss], folder=logger.get_snapshot_dir())
             total_loss.backward()
-#             # ptu.check_nan([x.data for x in self.model.parameters()])
+            # ptu.check_nan([x.data for x in self.model.parameters()], folder=logger.get_snapshot_dir())
 
             t2 = time.time()
             torch.nn.utils.clip_grad_norm_([x for x in self.model.parameters()], 5.0)
