@@ -39,4 +39,34 @@ def quicksave(true_images, colors, masks, schedule, file_name, quicksave_type):
     create_image_from_subimages(full_plot, file_name)
 
 
+# Input: state_info_dict with B=1, file_name (Str), true_image (B=1,1,3,D,D) or (1,3,D,D) or (3,D,D)
+# Output: N/A. Visualizes subimages, mask, reconstruction
+def visualize_state_info(state_info_dict, file_name, true_image=None):
+    sub_images = state_info_dict["sub_images"]  # (B,K,3,D,D)
+    masks = state_info_dict["masks"].repeat(1,1,3,1,1)  # (B,K,1,D,D) -> (B,K,3,D,D)
+    final_recon = state_info_dict["final_recon"]  # (B,3,D,D)
+    colors = state_info_dict["colors"]  # (B,K,3,D,D)
+
+    # pdb.set_trace()
+
+    if true_image is not None:
+        if len(true_image.shape) == 3:
+            true_image = true_image.unsqueeze(0).unsqueeze(0) # (B=1,1,3,D,D)
+        elif len(true_image.shape) == 4:
+            true_image = true_image.unsqueeze(0)  # (B=1,1,3,D,D)
+        # true_image = true_image.unsqueeze(0).unsqueeze(0)  # (B=1,1,3,D,D)
+        full_plot = torch.cat([true_image, final_recon.unsqueeze(1), sub_images, masks, colors], dim=1)  # (B=1,1+1+K+K+k,3,D,D)
+    else:
+        full_plot = torch.cat([final_recon.unsqueeze(1), sub_images, masks, colors], dim=1)  # (B=1,1+K+K+k,3,D,D)
+
+    create_image_from_subimages(full_plot, file_name)  # full_plot is (1,?,3,D,D)
+
+
+    # important_info["colors"] = torch.cat(important_info["colors"])  # (B,K,3,D,D)
+    # important_info["masks"] = torch.cat(important_info["masks"])  # (B,K,1,D,D)
+    # important_info["sub_images"] = torch.cat(important_info["sub_images"])  # (B,K,3,D,D)
+    # important_info["final_recon"] = torch.cat(important_info["final_recon"])  # (B,3,D,D)
+    # important_info["state"] = self._stack_state(important_info["state"])  # State with (B,*) entries
+
+
 
