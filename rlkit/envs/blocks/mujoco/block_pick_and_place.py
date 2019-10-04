@@ -416,16 +416,54 @@ class BlockPickAndPlaceEnv():
         # ac[5] = self.drop_height
         return self._post_process_actions(ac)
 
-    #Input: mean (*), std (*)
-    #Output: actions (*)
-    def sample_action_gaussian(self, mean, std):
-        random_a = np.random.normal(mean, std)
-        return random_a
+    # #Input: mean (*), std (*)
+    # #Output: actions (*)
+    # def sample_action_gaussian(self, mean, std):
+    #     random_a = np.random.normal(mean, std)
+    #
+    #     # x = np.random.uniform(self.bounds['x_min'], self.bounds['x_max'])
+    #     # y = np.random.uniform(self.bounds['y_min'], self.bounds['y_max'])
+    #     # if height is None:
+    #     # if should_clip:
+    #     #     random_a[0] = np.clip(random_a[0], self.bounds['x_min'], self.bounds['x_max'])
+    #     return random_a
 
     # Input: mean (*), std (*), num_actions
     # Output: actions (num_actions, *)
     def sample_multiple_action_gaussian(self, mean, std, num_actions):
-        return np.stack([self.sample_action_gaussian(mean, std) for _ in range(num_actions)])
+        # return np.stack([self.sample_action_gaussian(mean, std) for _ in range(num_actions)])
+        ans = np.random.normal(mean, std, size=[num_actions] + list(mean.shape))
+
+        ## Clip actions to stay in bounds
+        if not self.include_z:
+            ans[..., 0] = np.clip(ans[..., 0], self.bounds['x_min'], self.bounds['x_max'])
+            ans[..., 1] = np.clip(ans[..., 1], self.bounds['y_min'], self.bounds['y_max'])
+            ans[..., 2] = np.clip(ans[..., 2], self.bounds['x_min'], self.bounds['x_max'])
+            ans[..., 3] = np.clip(ans[..., 3], self.bounds['y_min'], self.bounds['y_max'])
+        else:
+            ans[..., 0] = np.clip(ans[..., 0], self.bounds['x_min'], self.bounds['x_max'])
+            ans[..., 1] = np.clip(ans[..., 1], self.bounds['y_min'], self.bounds['y_max'])
+            ans[..., 2] = np.clip(ans[..., 2], self.bounds['z_min'], self.bounds['z_max'])
+            ans[..., 3] = np.clip(ans[..., 3], self.bounds['x_min'], self.bounds['x_max'])
+            ans[..., 4] = np.clip(ans[..., 4], self.bounds['y_min'], self.bounds['y_max'])
+            ans[..., 5] = np.clip(ans[..., 5], self.bounds['z_min'], self.bounds['z_max'])
+        return ans
+
+    # Input: mean (*, 2/3), std (*, 2/3), num_actions
+    # Output: actions (num_actions, *, 2/3)
+    def sample_multiple_place_locs_gaussian(self, mean, std, num_actions):
+        ans = np.random.normal(mean, std, size=[num_actions] + list(mean.shape))
+
+        ## Clip actions to stay in bounds
+        if not self.include_z:
+            ans[..., 0] = np.clip(ans[..., 0], self.bounds['x_min'], self.bounds['x_max'])
+            ans[..., 1] = np.clip(ans[..., 1], self.bounds['y_min'], self.bounds['y_max'])
+        else:
+            ans[..., 0] = np.clip(ans[..., 0], self.bounds['x_min'], self.bounds['x_max'])
+            ans[..., 1] = np.clip(ans[..., 1], self.bounds['y_min'], self.bounds['y_max'])
+            ans[..., 2] = np.clip(ans[..., 2], self.bounds['z_min'], self.bounds['z_max'])
+        return ans
+
 
     # # Input: mean (*), std (*)
     # # Output: actions (*)
@@ -562,6 +600,14 @@ class BlockPickAndPlaceEnv():
         self.names = env_info["names"]
         self.blocks = env_info["blocks"]
         self.initialize(True)
+
+    # Output: (N,3)
+    def get_block_locs(self):
+        ans = []
+        for a_block in self.names:
+            ans.append(self.get_block_info(a_block)["pos"])  # (3)
+        ans = np.array(ans)  # (Num_blocks,3)
+        return ans
 
     def compute_accuracy(self, true_data, threshold=0.2):
         mjc_data = copy.deepcopy(true_data)

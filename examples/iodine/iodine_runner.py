@@ -265,7 +265,7 @@ if __name__ == "__main__":
             schedule_type = 'curriculum',  # single_step_physics, curriculum, static_iodine, rprp, next_step, random_alternating
         ),
         training_args = dict(  # Arguments for IodineTrainer
-            batch_size= 80,  # Change to appropriate constant based off dataset size
+            batch_size= 10,  # Change to appropriate constant based off dataset size
             lr=3e-4,
         ),
         num_epochs = 300,

@@ -77,9 +77,13 @@ def get_object_subimage_recon(frames, actions, model, model_type, T, image_type)
 
             #If plotting masks
             # if image_type == 'masks':
-            #     masks_recons = masks.repeat(1, 1, 1, 3, 1, 1)  # (bs, 5, K, 3, D, D)
-            #     masks_recons = masks_recons[:, -1]  # (bs, K, 3, D, D)
-            #     masks_recons.append()
+            object_recons = masks.repeat(1, 1, 1, 3, 1, 1)  # (bs, 5, K, 3, D, D)
+            object_recons = object_recons[:, -1]  # (bs, K, 3, D, D)
+
+            #If plotting subimages with white background
+            # masks = masks.repeat(1, 1, 1, 3, 1, 1)  # (bs, 5, K, 3, D, D)
+            # masks = masks[:, -1]  # (bs, K, 3, D, D)
+            # object_recons = torch.where(masks < 0.01, ptu.ones_like(object_recons), object_recons)
 
             tmp = torch.cat([final_recons, object_recons], dim=1) #(bs, K+1, 3, D, D)
             all_object_recons.append(tmp)
@@ -89,7 +93,7 @@ def get_object_subimage_recon(frames, actions, model, model_type, T, image_type)
         return all_object_recons, mse
     elif model_type == 'rprp':
         #T is the total number of frames, so we do T-1 physics steps
-        num_refine_per_phys = 4
+        num_refine_per_phys = 1
         schedule = np.zeros(seed_steps + (T-1)*num_refine_per_phys) #len(schedule) = T2
         schedule[seed_steps::num_refine_per_phys] = 1 #[0,0,0,0,1,0,1,0,1,0] if num_refine_per_phys=2 for example
         # pdb.set_trace()
@@ -100,8 +104,13 @@ def get_object_subimage_recon(frames, actions, model, model_type, T, image_type)
         final_recons = object_recons.sum(2, keepdim=True) #(bs, T, 1, 3, D, D)
 
         # If plotting masks
-        # object_recons = masks.repeat(1, 1, 1, 3, 1, 1)  # (bs, T2, K, 3, D, D)
-        # object_recons = object_recons[:, seed_steps - 1::num_refine_per_phys]  # (bs, T, K, 3, D, D)
+        object_recons = masks.repeat(1, 1, 1, 3, 1, 1)  # (bs, T2, K, 3, D, D)
+        object_recons = object_recons[:, seed_steps - 1::num_refine_per_phys]  # (bs, T, K, 3, D, D)
+
+        # If plotting subimages with white background
+        # masks = masks.repeat(1, 1, 1, 3, 1, 1)  # (bs, 5, K, 3, D, D)
+        # masks = masks[:, seed_steps - 1::num_refine_per_phys]  # (bs, T, K, 3, D, D)
+        # object_recons = torch.where(masks < 0.01, ptu.ones_like(object_recons), object_recons)
 
         all_object_recons = torch.cat([final_recons, object_recons], dim=2) #(bs, T, K+1, 3, D, D)
         mse = get_image_mse(frames[:, :T], all_object_recons[:, :, 0]) #(bs, T)
@@ -109,7 +118,7 @@ def get_object_subimage_recon(frames, actions, model, model_type, T, image_type)
         return all_object_recons, mse
     elif model_type == 'rprp_pred':
         # T is the total number of frames, so we do T-1 physics steps
-        num_refine_per_phys = 4
+        num_refine_per_phys = 1
         schedule = np.zeros(seed_steps + (T - 1) * num_refine_per_phys)  # len(schedule) = T2
         schedule[seed_steps::num_refine_per_phys] = 1  # [0,0,0,0,1,0,1,0,1,0] if num_refine_per_phys=2 for example
         # pdb.set_trace()
@@ -119,6 +128,11 @@ def get_object_subimage_recon(frames, actions, model, model_type, T, image_type)
         object_recons = x_hats * masks  # (bs, T2, K, 3, D, D)
         object_recons = object_recons[:, seed_steps::num_refine_per_phys]  # (bs, T-1, K, 3, D, D)
         final_recons = object_recons.sum(2, keepdim=True)  # (bs, T-1, 1, 3, D, D)
+
+        # If plotting masks
+        object_recons = masks.repeat(1, 1, 1, 3, 1, 1)  # (bs, T2, K, 3, D, D)
+        object_recons = object_recons[:, seed_steps::num_refine_per_phys]  # (bs, T-1, K, 3, D, D)
+
         all_object_recons = torch.cat([final_recons, object_recons], dim=2)  # (bs, T-1, K+1, 3, D, D)
         padding = ptu.zeros([all_object_recons.shape[0], 1, *list(all_object_recons.shape[2:])])  # (bs, 1, K+1, 3, D, D)
         all_object_recons = torch.cat([padding, all_object_recons], dim=1)  # (bs, T, K+1, 3, D, D)
@@ -129,6 +143,10 @@ def get_object_subimage_recon(frames, actions, model, model_type, T, image_type)
         x_hats, masks, total_loss, kle_loss, log_likelihood, mse, final_recon, lambdas = model._forward_dynamic_actions(frames, actions, schedule)
         object_recons = x_hats * masks  # (bs, T-1, K, 3, D, D)
         final_recons = object_recons.sum(2, keepdim=True)  # (bs, T-1, 1, 3, D, D)
+
+        # If plotting masks
+        object_recons = masks.repeat(1, 1, 1, 3, 1, 1)  # (bs, T-1, K, 3, D, D)
+
         all_object_recons = torch.cat([final_recons, object_recons], dim=2)  # (bs, T-1, K+1, 3, D, D)
         padding = ptu.zeros([all_object_recons.shape[0], 1, *list(all_object_recons.shape[2:])]) #(bs, 1, K+1, 3, D, D)
         all_object_recons = torch.cat([padding, all_object_recons], dim=1) #(bs, T, K+1, 3, D, D)
@@ -165,7 +183,7 @@ def create_image(models_and_type, frames, actions, image_prefix, T, image_type):
 
 def create_images_from_dataset(variant):
     train_path = get_module_path() + '/ec2_data/{}.h5'.format(variant['dataset'])
-    num_samples = 10
+    num_samples = 100
     train_dataset, _ = load_dataset(train_path, train=False, batchsize=1, size=num_samples, static=False)
 
     models_and_type = []
@@ -354,27 +372,27 @@ dataset_to_models = dict(
     poke = [dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=4,
                        model_file="/nfs/kun1/users/rishiv/Research/op3_exps/07-04-poke-rprp-reg/07-04-poke-rprp-reg_2019_07_04_23_58_16_0000--s-38337/_params.pkl",
                        model_type="rprp"),
-                  dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=4,
-                       model_file="/nfs/kun1/users/rishiv/Research/op3_exps/07-04-poke-rprp-reg/07-04-poke-rprp-reg_2019_07_04_23_58_16_0000--s-38337/_params.pkl",
-                       model_type="rprp_pred"),
+                  # dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=4,
+                  #      model_file="/nfs/kun1/users/rishiv/Research/op3_exps/07-04-poke-rprp-reg/07-04-poke-rprp-reg_2019_07_04_23_58_16_0000--s-38337/_params.pkl",
+                  #      model_type="rprp_pred"),
                   dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=4,
                        model_file="/nfs/kun1/users/rishiv/Research/op3_exps/06-28-iodine-blocks-poke-static-iodine/06-28-iodine-blocks-poke-static-iodine_2019_06_28_05_55_05_0000--s-63777/_params.pkl",
-                       model_type="static"),
-                  dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=4,
-                       model_file="/nfs/kun1/users/rishiv/Research/op3_exps/06-29-poke-next-step/06-29-poke-next_step_2019_06_29_05_36_03_0000--s-98425/_params.pkl",
-                       model_type="next_step")],
+                       model_type="static")],
+                  # dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=4,
+                  #      model_file="/nfs/kun1/users/rishiv/Research/op3_exps/06-29-poke-next-step/06-29-poke-next_step_2019_06_29_05_36_03_0000--s-98425/_params.pkl",
+                  #      model_type="next_step")],
     solid = [dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=5,
-                       model_file="/nfs/kun1/users/rishiv/Research/op3_exps/07-04-cloth-rprp-reg/07-04-cloth-rprp-reg_2019_07_04_23_46_09_0000--s-59196/_params.pkl",
+                       model_file="/nfs/kun1/users/rishiv/Research/op3_exps/07-06-solid-rprp-reg/07-06-solid-rprp-reg_2019_07_06_08_20_29_0000--s-48759/_params.pkl",
                        model_type="rprp"),
-                  dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=5,
-                       model_file="/nfs/kun1/users/rishiv/Research/op3_exps/07-04-cloth-rprp-reg/07-04-cloth-rprp-reg_2019_07_04_23_46_09_0000--s-59196/_params.pkl",
-                       model_type="rprp_pred"),
+                  # dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=5,
+                  #      model_file="/nfs/kun1/users/rishiv/Research/op3_exps/07-06-solid-rprp-reg/07-06-solid-rprp-reg_2019_07_06_08_20_29_0000--s-48759/_params.pkl",
+                  #      model_type="rprp_pred"),
                   dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=5,
                        model_file="/nfs/kun1/users/rishiv/Research/op3_exps/06-30-solid-static-iodine/06-30-solid-static_iodine_2019_06_30_12_55_14_0000--s-12264/_params.pkl",
-                       model_type="static"),
-                  dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=5,
-                       model_file="/nfs/kun1/users/rishiv/Research/op3_exps/07-01-solid-next-step/07-01-solid-next_step_2019_07_01_08_40_56_0000--s-50539/_params.pkl",
-                       model_type="next_step")],
+                       model_type="static")],
+                  # dict(model=iodine.imsize64_large_iodine_architecture_multistep_physics, K=5,
+                  #      model_file="/nfs/kun1/users/rishiv/Research/op3_exps/07-01-solid-next-step/07-01-solid-next_step_2019_07_01_08_40_56_0000--s-50539/_params.pkl",
+                  #      model_type="next_step")],
 )
 
 #Example usage: CUDA_VISIBLE_DEVICES=0 python visualize_datasets.py -da cloth
@@ -419,7 +437,7 @@ if __name__ == "__main__":
 
     #Relevant options: 'here_no_doodad', 'local_docker', 'ec2'
     run_experiment(
-        create_mse_graphs, #get_mse_from_dataset, create_images_from_dataset, analyze_mse, create_mse_graphs
+        create_images_from_dataset, #get_mse_from_dataset, create_images_from_dataset, analyze_mse, create_mse_graphs
         exp_prefix='images-{}'.format(args.dataset),
         mode=args.mode,
         variant=variant,

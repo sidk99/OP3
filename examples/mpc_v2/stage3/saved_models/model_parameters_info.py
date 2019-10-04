@@ -48,5 +48,33 @@ params_to_info = dict(
         ),
         folder="/nfs/kun1/users/rishiv/Research/op3_exps/09-20-pickplace-multienv-10k-random-alternating-v2-reg/09-20-pickplace_multienv_10k-random_alternating-v2-reg_2019_09_20_07_31_14_0000--s-13521",
     ),
+    reg_9_23_params=dict(
+        op3_args=dict(
+            refinement_model_type="size_dependent_conv",
+            decoder_model_type="reg",
+            dynamics_model_type="reg_ac32",
+            sto_repsize=64,
+            det_repsize=64,
+            extra_args=dict(
+                beta=1,
+                deterministic_sampling=False
+            )
+        ),
+        folder="/nfs/kun1/users/rishiv/Research/op3_exps/09-23-pickplace-o12-noise-10k-curriculum-v2-reg/09-23-pickplace_o12_noise_10k-curriculum-v2-reg_2019_09_24_04_45_57_0000--s-98070",
+    ),
+    sto_9_23_params=dict(
+        op3_args=dict(
+            refinement_model_type="size_dependent_conv",
+            decoder_model_type="reg",
+            dynamics_model_type="reg_ac32",
+            sto_repsize=128,
+            det_repsize=0,
+            extra_args=dict(
+                beta=1,
+                deterministic_sampling=False
+            )
+        ),
+        folder="/nfs/kun1/users/rishiv/Research/op3_exps/09-23-pickplace-o12-noise-10k-curriculum-v2-sto/09-23-pickplace_o12_noise_10k-curriculum-v2-sto_2019_09_24_04_48_25_0000--s-40338",
+    ),
 )
 

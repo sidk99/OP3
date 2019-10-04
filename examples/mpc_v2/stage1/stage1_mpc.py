@@ -191,7 +191,8 @@ class Cost:
             #Add captions
             caption = np.zeros(full_plot.shape[:2])
             caption[0, 1:] = ptu.get_numpy(sorted_costs[:plot_size])
-            caption[1:1+n_goal_latents, 1:] = ptu.get_numpy(corresponding_costs[:plot_size])[:,:plot_size]
+            caption[1:1 + n_goal_latents, 1:] = ptu.get_numpy(corresponding_costs[:, :plot_size])
+            # caption[1:1+n_goal_latents, 1:] = ptu.get_numpy(corresponding_costs[:plot_size])[:,:plot_size]
 
             plot_multi_image(ptu.get_numpy(full_plot),
                              '{}/mpc_pred_{}.png'.format(self.logging_directory, self.image_suffix), caption=caption)
@@ -326,7 +327,7 @@ class Stage1_MPC:
             # actions.extend(next_actions)
             # obs.extend(next_obs)
 
-            self._remove_goal_latent(goal_info, goal_latent_index)
+            # self._remove_goal_latent(goal_info, goal_latent_index)
             # cur_state_and_other_info = self.update_state(next_obs, next_actions, cur_state_and_other_info["state"]) #Not required for stage 1
 
         ########Create final mpc image########
@@ -470,7 +471,8 @@ def main(variant):
 
     ######Start Model loading######
     op3_args = variant["op3_args"]
-    op3_args['K'] = n_goal_obs + 2
+    # op3_args['K'] = n_goal_obs + 2
+    op3_args['K'] = 1
     m = iodine_v2.create_model_v2(op3_args, op3_args['det_repsize'], op3_args['sto_repsize'], action_dim=0)
 
     # model_file = variant['model_file']
@@ -500,8 +502,12 @@ def main(variant):
         mpc = Stage1_MPC(m, logging_directory)
         cost_class = Cost(logging_directory, **variant['cost_args'])
         cem_process = Stage1_CEM(score_actions_class=cost_class, **variant['cem_args'])
+
+        filter_goal_params = None
+        if variant["filter_goal_image"]:
+            filter_goal_params ={"n_objects": n_goal_obs}
         single_stats = mpc.run_plan(goal_image, env, cem_process, n_goal_obs, true_data,
-                                    filter_goal_image={"n_objects": n_goal_obs})
+                                    filter_goal_image=filter_goal_params)
         for k, v in single_stats.items():
             stats[k].append(v)
 
@@ -520,8 +526,8 @@ def main(variant):
     ######End planning execution######
 
 
-#Example run: CUDA_VISIBLE_DEVICES=0 python stage1_mpc.py -de 0 -s 2 -m /nfs/kun1/users/rishiv/Research/op3_exps/08-24-stack-o2p2-60k-single-step-physics-v2/08-24-stack_o2p2_60k-single_step_physics-v2_2019_08_24_15_50_23_0000--s-67083/_params.pkl
-# CUDA_VISIBLE_DEVICES=2 python stage1_mpc.py -de 0 -s 0 -m s64d64_v1_params
+#Example run:
+# CUDA_VISIBLE_DEVICES=3 python stage1_mpc.py -de 0 -s 3 -m [s64d64_v1_params, unfactorized_v1_params]
 
 
 if __name__ == "__main__":
@@ -547,7 +553,7 @@ if __name__ == "__main__":
         ('towers', 9), #10
     ]
 
-    n = 11 #(11+1)//n is the number of splits
+    n = 3 #(11+1)//n is the number of splits
     splits = [structures[i:i + n] for i in range(0, len(structures), n)]
     structure_split = splits[args.split]
 
@@ -579,13 +585,14 @@ if __name__ == "__main__":
                 post_process = 'raw',
                 aggregate = 'min',
             ),
+            filter_goal_image = False,
             structure=s,
             debug=args.debug,
             model_file=args.model_file,
         )
 
         n_seeds = 1
-        exp_prefix = 'iodine-mpc-stage1-k7-fixed'
+        exp_prefix = 'iodine-mpc-stage1-k7-v2'
 
         run_experiment(
             main,

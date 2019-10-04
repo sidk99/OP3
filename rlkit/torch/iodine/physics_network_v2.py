@@ -2,8 +2,8 @@ import torch
 import torch.utils.data
 from rlkit.torch.pytorch_util import from_numpy
 from torch import nn
-from torch.autograd import Variable
-from torch.nn import functional as F
+# from torch.autograd import Variable
+# from torch.nn import functional as F
 from rlkit.pythonplusplus import identity
 from rlkit.torch.networks import Mlp
 from rlkit.torch import pytorch_util as ptu
@@ -76,25 +76,10 @@ class PhysicsNetwork_v2(nn.Module):
         self.interaction_attention_network = Mlp((hidden_size,), 1, self.interaction_size,
                                                  hidden_activation=hidden_activation, output_activation=nn.Sigmoid())
 
-
-        ###If deterministic state directly produces lambdas
-        # if self.det_size != 0:
-        #     # Note: final_merge_network consolidates all the information into the new deterministic state
-        #     self.final_merge_network = Mlp((hidden_size,), self.det_size, self.effect_size+self.full_rep_size,
-        #                                    hidden_activation=hidden_activation, output_activation=deterministic_state_activation)
-        #     output_size = self.det_size
-        # else:
-        #     self.final_merge_network = Mlp((hidden_size,), self.sto_size, self.effect_size + self.full_rep_size,
-        #                                    hidden_activation=hidden_activation, output_activation=hidden_activation)
-        #     output_size = self.sto_size
-        # self.state_to_lambdas1 = Mlp((hidden_size,), self.sto_size, output_size, hidden_activation=hidden_activation,
-        #                             output_activation=lambda_output_activation)
-        # self.state_to_lambdas2 = Mlp((hidden_size,), self.sto_size, output_size, hidden_activation=hidden_activation,
-        #                             output_activation=lambda_output_activation)
-
-        ###If deterministic state has a separate output branch
         self.final_merge_network = Mlp((hidden_size,), self.full_rep_size, self.effect_size + self.full_rep_size,
                                        hidden_activation=hidden_activation, output_activation=hidden_activation)
+
+        # If deterministic state has a separate output branch
         if self.det_size != 0:
             self.det_output = Mlp((hidden_size,), self.det_size, self.full_rep_size,
                                   hidden_activation=hidden_activation, output_activation=deterministic_state_activation)
@@ -115,10 +100,11 @@ class PhysicsNetwork_v2(nn.Module):
         state_enc_flat = self.inertia_encoder(sampled_state) #Encode sample
 
         if actions is not None:
-            if self.action_size == 4 and actions.shape[-1] == 6:
-                action_enc = self.action_encoder(actions[:, torch.LongTensor([0, 1, 3, 4])]) #RV: Encode actions, why torch.longTensor?
-            else:
-                action_enc = self.action_encoder(actions) #Encode actions
+            # if self.action_size == 4 and actions.shape[-1] == 6:
+            #     action_enc = self.action_encoder(actions[:, torch.LongTensor([0, 1, 3, 4])]) #RV: Encode actions, why torch.longTensor?
+            # else:
+            #     action_enc = self.action_encoder(actions) #Encode actions
+            action_enc = self.action_encoder(actions)  # Encode actions
             state_enc_actions = torch.cat([state_enc_flat, action_enc], -1)
 
             state_action_effect = self.action_effect_network(state_enc_actions) #(bs*k, h)
@@ -146,13 +132,6 @@ class PhysicsNetwork_v2(nn.Module):
 
         state_and_effect = torch.cat([state_enc.view(bs*K, self.full_rep_size), total_effect], -1)  # (bs*k,h)
 
-        ###If deterministic state directly produces lambdas
-        # deter_state = self.final_merge_network(state_and_effect) #Deterministic state (bs*k,h)
-        # lambdas1 = self.state_to_lambdas1(deter_state) #Initial lambda parameters (B*K,R)
-        # lambdas2 = self.state_to_lambdas2(deter_state) #(B*K,R)
-        # if self.det_size == 0:
-        #     deter_state = None
-
         aggregate_state = self.final_merge_network(state_and_effect)
         if self.det_size == 0:
             deter_state = None
@@ -162,6 +141,53 @@ class PhysicsNetwork_v2(nn.Module):
         lambdas2 = self.lambdas2_output(aggregate_state)
 
         return deter_state, lambdas1, lambdas2
+
+    # Inputs: sampled_state (B,Rd+Rs), action (B,A)
+    # Outputs: Attention values (B)
+    def get_state_action_attention_values(self, sampled_state, actions):
+        # pdb.set_trace()
+        state_enc_flat = self.inertia_encoder(sampled_state)  # Encode sample
+        action_enc = self.action_encoder(actions)  # Encode actions
+
+        state_enc_actions = torch.cat([state_enc_flat, action_enc], -1)
+        state_action_attention = self.action_attention_network(state_enc_actions)  # (B, 1)
+        return state_action_attention
+
+    # Inputs: sampled_state (B*K,Rd+Rs), action (B*K,A)
+    # Outputs: state_action_attention (B*K,1),  interaction_attention (B*K,K-1,1)
+    def get_all_attention_values(self, sampled_state, actions, K):
+        bs = sampled_state.shape[0]//K
+
+        state_enc_flat = self.inertia_encoder(sampled_state)  # Encode sample
+        if actions is not None:
+            action_enc = self.action_encoder(actions)  # Encode actions
+            state_enc_actions = torch.cat([state_enc_flat, action_enc], -1)
+
+            state_action_effect = self.action_effect_network(state_enc_actions)  # (bs*k, h)
+            state_action_attention = self.action_attention_network(state_enc_actions)  # (bs*k, 1)
+            state_enc = (state_action_effect * state_action_attention).view(bs, K, self.full_rep_size)  # (bs, k, h)
+        else:
+            state_action_attention = None
+            state_enc = state_enc_flat.view(bs, K, self.full_rep_size)  # (bs, k, h)
+
+        deltas = torch.abs(state_enc.view(bs*K, -1) - state_enc_flat).sum(1, keepdim=True)  # (bs*k,h) -> (bs*k,1)
+
+        if K != 1:
+            pairs = []
+            for i in range(K):
+                for j in range(K):
+                    if i == j:
+                        continue
+                    pairs.append(torch.cat([state_enc[:, i], state_enc[:, j]], -1))  # Create array of all pairs
+
+            all_pairs = torch.stack(pairs, 1).view(bs * K, K - 1, -1)  # Create torch of all pairs
+            pairwise_interaction = self.pairwise_encoder_network(all_pairs)  # (bs*k,k-1,h)
+            interaction_attention = self.interaction_attention_network(pairwise_interaction)  # (bs*k,k-1,1)
+        else:
+            interaction_attention = None
+
+        return state_action_attention, interaction_attention, deltas
+
 
 
 ########No sharing dynamics network########

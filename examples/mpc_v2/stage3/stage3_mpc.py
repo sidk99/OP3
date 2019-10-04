@@ -1,5 +1,10 @@
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.collections import PatchCollection
+from matplotlib.patches import Rectangle
+from mpl_toolkits.mplot3d import Axes3D  # Note, this is needed for 3d plotting even if it doesn't seem used!
+import matplotlib.cm as cm
 
 from rlkit.torch import pytorch_util as ptu
 import rlkit.torch.iodine.visualizer as visualizer
@@ -239,17 +244,19 @@ class Cost:
 
 
 
-#############Action Selection Class#########
+#############Start Action Selection Class#########
 ####Stage3 Specific
 class Stage3_CEM:
-    def __init__(self, logging_dir, cem_steps, num_samples, time_horizon, score_actions_class):
+    def __init__(self, logging_dir, cem_steps, num_samples, time_horizon, score_actions_class, action_type=None):
         self.logging_dir = logging_dir
         self.cem_steps = cem_steps
         self.num_samples = num_samples
         self.time_horizon = time_horizon
         self.score_actions_class = score_actions_class
+        self.action_type = action_type  # action_type is None or an integer representing K
         self.env = None
         self.goal_info = None
+        self.num_loc_samples = 200
 
     def select_action(self, goal_info, initial_hidden_state, env, model, logging_suffix):
         self.env = env
@@ -257,7 +264,61 @@ class Stage3_CEM:
         self.initial_hidden_state = initial_hidden_state
         return self._cem(model, logging_suffix)
 
-    # Inputs: actions (B,T,A),  model
+    # Input: hidden_states_and_info with B=1
+    # Output: pick locations per each hidden state (K,2)
+    def _get_latent_locs(self, model, hidden_state_and_info):
+        rand_actions = ptu.from_numpy(np.stack([self.env.sample_action() for _ in range(self.num_loc_samples)])) # (B,A)
+        state_action_attention, interaction_attention, all_delta_vals, all_lambdas_deltas = \
+            model.get_all_activation_values(hidden_state_and_info, rand_actions)
+        interaction_attention = interaction_attention.sum(-1)  # (B,K,K-1) -> (B,K)
+        # interaction_attention = interaction_attention/torch.max(interaction_attention)  # (B,K)
+        normalized_weights = interaction_attention / interaction_attention.sum(0)  #(B,K)
+        # predicted_info = model.batch_internal_inference(obs=None, actions=rand_actions,
+        #                                                 initial_hidden_state=hidden_state_and_info,
+        #                                                 schedule=schedule, figure_path=None)
+        mean_point = (normalized_weights.unsqueeze(2) * rand_actions[:, :2].unsqueeze(1))  # ((B,K)->(B,K,1) * (B,2)->(B,1,2)) -> (B,K,2)
+        mean_point = mean_point.sum(0)  #(B,K,2) -> (K,2)
+        return mean_point
+
+    # Input: latent actions (B=Na,T,A=Nl+2), initial_hidden_state (B=1), all pytorch tensors
+    # Output: predicted_info
+    def _latent_batch_internal_inference(self, model, actions, initial_hidden_state):
+        # Replicate initial_hidden_state_and_info to make B=1 to B=Na
+        #
+        # For t = 1 to T:
+            # For each hidden state, we need to get a pick location pick_locs (K,2)
+            # Once we have pick locations for all hidden states, we can create the appriopriate env actions (B,A=raw)
+            # Apply model.batch_internal_inference() with proper actions
+            # Get new hidden states, repeat
+        num_actions = actions.shape[0]
+        all_hidden_states = model.replicate_state(initial_hidden_state, num_actions)  # (B=Na)
+        all_pick_locs = ptu.zeros(num_actions, self.time_horizon, self.action_type, 2)  # (B,T,K,2)
+        all_env_actions = ptu.zeros(num_actions, self.time_horizon, 4)  # (B,T,4)
+        schedule = np.array([1])  # Always want to do a rollout of just a single action
+        for t in range(self.time_horizon):
+            for i in range(num_actions):
+                single_state = model.select_specific_state(all_hidden_states, [i])
+                pick_locs = self._get_latent_locs(model, single_state)  # (K,2)
+                if t == 0:
+                    all_pick_locs[:, t] = pick_locs  # Broadcast across everything as we have the same initial state
+                    break
+                else:
+                    all_pick_locs[i, t] = pick_locs
+
+            raw_actions = actions[:, t, :-2]  # (B,K), note these are one hot vectors
+            selected_pick_locs = (raw_actions.unsqueeze(2) * all_pick_locs[:, t]).sum(1)  # (B,K,1)*(K,2)->(B,K,2)->(B,2)  Note that we use the one hot encoding as a mask
+            env_actions = torch.cat([selected_pick_locs, actions[:, t, -2:]], dim=1)  # (B,2) (B,2) -> (B,4)
+            all_env_actions[:, t] = env_actions  # (B,4)
+
+            # pdb.set_trace()
+            env_actions = env_actions.unsqueeze(1)  # (B,1,4)
+            predicted_info = model.batch_internal_inference(obs=None, actions=env_actions,
+                                                            initial_hidden_state=all_hidden_states,
+                                                            schedule=schedule, figure_path=None)
+            all_hidden_states = predicted_info["state"]
+        return predicted_info, all_env_actions
+
+    # Inputs: actions (B,T,A) np,  model
     # Outputs: Index of actions based off sorted costs (B), paired goal latent (for removal) (B), final_recons (B,3,D,D)
     def _random_shooting(self, actions, model, image_suffix):
         # Like internal_inference except initial_hidden_state might only contain one state while obs/actions contain (B,*)
@@ -268,29 +329,68 @@ class Stage3_CEM:
         goal_info = self.goal_info
         schedule = np.array([1]*actions.shape[1])
         actions = ptu.from_numpy(actions)
-        predicted_info = model.batch_internal_inference(obs=None, actions=actions, initial_hidden_state=self.initial_hidden_state,
-                                                          schedule=schedule, figure_path=None)
+        if self.action_type is None:
+            predicted_info = model.batch_internal_inference(obs=None, actions=actions, initial_hidden_state=self.initial_hidden_state,
+                                                            schedule=schedule, figure_path=None)
+            all_env_actions = actions
+        else:
+            predicted_info, all_env_actions = self._latent_batch_internal_inference(model, actions, self.initial_hidden_state)
         # pdb.set_trace()
         sorted_costs, best_actions_indices, goal_latent_indices = self.score_actions_class.get_action_rankings(
             goal_info["state"]["post"]["samples"][0], goal_info["sub_images"][0], goal_info["goal_image"],
             predicted_info["state"]["post"]["samples"], predicted_info["sub_images"], predicted_info["final_recon"],
             image_suffix = image_suffix)
-        # Inputs: goal_latents (n_goal_latents=K,R), goal_latents_recon (n_goal_latents=K,3,64,64)
-        # goal_image (1,3,64,64), pred_latents (n_actions,K,R), pred_latents_recon (n_actions,K,3,64,64)
-        # pred_images (n_actions,3,64,64)
+        # Inputs to above get_action_rankings(): goal_latents (n_goal_latents=K,R),
+        # goal_latents_recon (n_goal_latents=K,3,64,64),  goal_image (1,3,64,64), pred_latents (n_actions,K,R),
+        # pred_latents_recon (n_actions,K,3,64,64),  pred_images (n_actions,3,64,64)
 
         num_plot_actions = 20
-        self.plot_action_errors(self.env, actions[best_actions_indices][:num_plot_actions, 0],
+        self.plot_action_errors(self.env, all_env_actions[best_actions_indices][:num_plot_actions, 0],
                                 predicted_info["final_recon"][best_actions_indices][:num_plot_actions],
                                 image_suffix+"_action_errors")
-        return best_actions_indices, goal_latent_indices, predicted_info["final_recon"]
+
+        # act_vals = model.get_activation_values(self.initial_hidden_state, actions[:, 0])  # (B,K)
+        # plot_action_vals(self.env, ptu.get_numpy(act_vals), ptu.get_numpy(actions[:, 0]), "{}/{}".format(self.logging_dir, image_suffix))
+
+        # state_action_attention, interaction_attention, delta_vals, all_lambdas_deltas = \
+        #     model.get_all_activation_values(self.initial_hidden_state, actions[:, 0])  # (B,K),  (B,K,K-1),  (B,K)
+        # actions = actions.detach()
+        #
+        # tmp = {"state_action_attention": ptu.get_numpy(state_action_attention),
+        #        "interaction_attention": ptu.get_numpy(interaction_attention),
+        #        "delta_vals": ptu.get_numpy(delta_vals),
+        #        "all_lambdas_deltas": ptu.get_numpy(all_lambdas_deltas),
+        #        "actions": ptu.get_numpy(actions)}
+        # # pickle.dump(tmp, open('{}/initial_action_vals.pickle'.format(self.logging_dir), 'wb'))
+        #
+        # # plot_action_vals(self.env, ptu.get_numpy(state_action_attention), ptu.get_numpy(actions[:, 0]),
+        # #                  "{}/{}_oa".format(self.logging_dir, image_suffix))
+        # interaction_attention = interaction_attention.sum(2)  # (B,K)
+        # plot_action_vals(self.env, ptu.get_numpy(interaction_attention), ptu.get_numpy(actions[:, 0]),
+        #                  "{}/{}_oo".format(self.logging_dir, image_suffix))
+        # # pdb.set_trace()
+        best_single_env_action = all_env_actions[best_actions_indices[0]]
+
+        return best_actions_indices, goal_latent_indices, predicted_info["final_recon"], ptu.get_numpy(best_single_env_action)
 
     # Inputs: N/A
     # Outputs: actions (B,T,A)
     def _get_initial_actions(self):
         actions = []
         for i in range(self.time_horizon):
-            actions.append(np.stack([self.env.sample_action() for _ in range(self.num_samples)]))  # (T,B,A)
+            if self.action_type is None:  # Normal action space
+                actions.append(np.stack([self.env.sample_action() for _ in range(self.num_samples)]))  # (B,A)
+            else:  # Object action space
+                # actions.append(np.stack([self.env.sample_action() for _ in range(self.num_samples)]))  # (B,A=4)
+                tmp = np.stack([self.env.sample_action() for _ in range(self.num_samples)])  # (B,A=4)
+                cur_actions = np.zeros((self.num_samples, self.action_type + 2))
+                cur_actions[:, -2:] = tmp[:, -2:]
+
+                #https://stackoverflow.com/questions/45093615/random-one-hot-matrix-in-numpy
+                rand_latents_idxs = np.eye(self.action_type)[np.random.choice(self.action_type, self.num_samples)]  # (B, Nl)
+                cur_actions[:, :-2] = rand_latents_idxs
+                actions.append(cur_actions)
+
         actions = np.array(actions).transpose((1, 0, 2))  # (B,T,A)
         return np.array(actions)
 
@@ -301,16 +401,48 @@ class Stage3_CEM:
         filter_cutoff = int(self.num_samples * 0.1)  # F
 
         for i in range(self.cem_steps):
-            best_actions_indices, goal_latent_indices, pred_recons = self._random_shooting(actions, model, "action_{}_{}".format(logging_suffix, i))  # (B)
+            best_actions_indices, goal_latent_indices, pred_recons, best_single_env_action \
+                = self._random_shooting(actions, model, "action_{}_{}".format(logging_suffix, i))  # all (B), except for best_single_env_action (A=4)
             sorted_actions = actions[best_actions_indices]  # (B,T,A)
-            best_actions = sorted_actions[:filter_cutoff]  # (F,T,A)
-            mean = best_actions.mean(0)  # (T,A)
-            std = best_actions.std(0) + 0.05  # (T,A),  +0.05 is added as a minimum std deviation (note pick threshold is 0.2)
-            actions = self.env.sample_multiple_action_gaussian(mean, std, self.num_samples)  # (B,T,A)
+            sorted_best_actions = sorted_actions[:filter_cutoff]  # (F,T,A)
+            # mean = best_actions.mean(0)  # (T,A)
+            # std = best_actions.std(0) + 0.05  # (T,A),  +0.05 is added as a minimum std deviation (note pick threshold is 0.2)
+            # actions = self.env.sample_multiple_action_gaussian(mean, std, self.num_samples)  # (B,T,A)
+            actions = self._resample_action(sorted_best_actions)  # (B,T,A)
             print("Step {}".format(i))
 
         best_action_index = best_actions_indices[0]
-        return np.array(best_actions[0]), goal_latent_indices[best_action_index], pred_recons[best_action_index]
+        return np.array(best_single_env_action), goal_latent_indices[best_action_index], pred_recons[best_action_index]
+
+    # Input: best_actions (B,T,A)
+    # Output: New actions sampled for distributions fit on the best actions
+    def _resample_action(self, best_actions):
+        if self.action_type == None:
+            mean = best_actions.mean(0)  # (T,A)
+            std = best_actions.std(0) + 0.05  # (T,A), +0.05 is added as a minimum std deviation (note pick threshold is 0.2)
+            actions = self.env.sample_multiple_action_gaussian(mean, std, self.num_samples)  # (B,T,A)
+        else:
+            mean = best_actions.mean(0)  # (T,A=Nl+2)
+            std = best_actions.std(0) + 0.05  # (T,A), +0.05 is added as a minimum std deviation (note pick threshold is 0.2)
+            actions = np.zeros((self.num_samples, self.time_horizon, self.action_type+2))  # (B,T,A)
+            for t in range(self.time_horizon):
+                latent_means = mean[t, :-2]  # (Nl)
+                latent_probs = (latent_means + 0.1) / (latent_means + 0.1).sum()  # (Nl)
+                latent_idxs = np.random.choice(self.action_type, size=self.num_samples, p=latent_probs)  # (Nl)
+                latent_one_hot = self.to_one_hot(latent_idxs, self.action_type)  # (B,Nl)
+                actions[:, t, :-2] = latent_one_hot
+            pick_locs = self.env.sample_multiple_place_locs_gaussian(mean[:, -2:], std[:, -2:], self.num_samples)  # (B,T,2)
+            actions[:, :, -2:] = pick_locs  # (B,T,A)
+        return actions
+
+
+
+    # Input: vals (B), num_choices=Nc
+    # Output: (B,Nc)
+    def to_one_hot(self, vals, num_choices):
+        return np.eye(num_choices)[vals]
+
+
 
     # Input: actions (B,A),  pred_recons (B,3,D,D)
     def plot_action_errors(self, env, actions, pred_recons, file_name):
@@ -319,24 +451,94 @@ class Stage3_CEM:
         full_plot = pred_recons.view([5, -1] + list(pred_recons.shape[1:]))  # (5,B//5,3,D,D)
         caption = np.reshape(errors, (5, -1))  # (5,B//5) np
         plot_multi_image(ptu.get_numpy(full_plot), '{}/{}.png'.format(self.logging_dir, file_name), caption=caption)
+#############End Action Selection Class#########
 
 
-########Process env functions########
-#Input: env_obs (D,D,3) or (T,D,D,3), values between 0-255, numpy array
-#Output: (1,3,D,D), values between 0-1, torch
+#############Start latent to pick location#########
+def latent_pick_debugging(hidden_state, env, model):
+    num_samples = 1000
+    actions = np.stack([env.sample_action() for _ in range(num_samples)])
+    vals = model.get_activation_values(hidden_state, actions)
+
+# Input: env,  act_vals (B,K),  actions (B,A)
+# Output: Image / heatmap of pick locations and corresponding act_vals
+def plot_action_vals(env, act_vals, actions, file_name):
+    file_name = file_name.split(".")[0]  # Removes .png or similar extention
+    k = act_vals.shape[1]
+    # x = actions[:, 0].repeat(k)
+    # y = actions[:, 1].repeat(k)
+    # z = act_vals.flatten()  # (B*K)
+    block_locs = env.get_block_locs()  # (Nb,3), where Nb=Number of blocks
+
+    colors = cm.rainbow(np.linspace(0, 1, k))  # (K,4), rgba values
+    normalized_act_vals = act_vals/np.max(act_vals)  # (B,K)
+
+    fig, ax = plt.subplots(1)
+    # pdb.set_trace()
+    for i in range(k):
+        rgba_colors = np.zeros((act_vals.shape[0], 4))  # (B,4)
+        rgba_colors[:] = colors[i]  # (4)
+        rgba_colors[:, -1] = normalized_act_vals[:, i]  # (B)
+        ax.scatter(actions[:, 0], actions[:, 1], c=rgba_colors, label="{}".format(i))
+
+        tmp = normalized_act_vals[:, i]
+        mean_point = np.array([np.sum(tmp * actions[:, 0]), np.sum(tmp * actions[:, 1])])
+        mean_point = mean_point / np.sum(tmp)
+        ax.scatter(mean_point[0], mean_point[1], color='k')
+    # ax.scatter(x, y, c=z, cmap='Greens')
+    ax.legend()
+    make_error_boxes(ax, block_locs[:, 0], block_locs[:, 1], env.TOLERANCE)
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+    plt.savefig("{}_2d.png".format(file_name))
+    # pickle.dump(fig, open('{}_2d.pickle'.format(file_name), 'wb'))
+
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection='3d')
+    # # ax.scatter3D(x, y, z, c=z, cmap='Greens')
+    # for i in range(k):
+    #     rgba_colors = np.zeros((act_vals.shape[0], 4))  # (B,4)
+    #     rgba_colors[:] = colors[i]  # (4)
+    #     rgba_colors[:, -1] = normalized_act_vals[:, i]  # (B)
+    #     ax.scatter(actions[:, 0], actions[:, 1], act_vals[:, i], c=rgba_colors, label="{}".format(i))
+    # # make_error_boxes(ax, block_locs[:, 0], block_locs[:, 1], env.TOLERANCE)
+    # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+    # plt.savefig("{}_3d.png".format(file_name))
+    # pickle.dump(fig, open('{}_3d.pickle'.format(file_name), 'wb'))
+
+# https://matplotlib.org/3.1.1/gallery/statistics/errorbars_and_boxes.html#sphx-glr-gallery-statistics-errorbars-and-boxes-py
+def make_error_boxes(ax, xdata, ydata, box_width, linewidth=1, facecolor='none', edgecolor='k', alpha=1):
+    errorboxes = []  # Create list for all the error patches
+
+    # Loop over data points; create box from x,y points
+    for x, y in zip(xdata, ydata):
+        rect = Rectangle((x - box_width, y - box_width), box_width*2, box_width*2, linewidth=linewidth)
+        errorboxes.append(rect)
+
+    # Create patch collection with specified colour/alpha
+    pc = PatchCollection(errorboxes, facecolor=facecolor, alpha=alpha, edgecolor=edgecolor)
+    ax.add_collection(pc)  # Add collection to axes
+    # art3d.pathpatch_2d_to_3d(p, z=0, zdir="x")
+#############End latent to pick location#########
+
+
+########Start process env functions########
+# Input: env_obs (D,D,3) or (T,D,D,3), values between 0-255, numpy array
+# Output: (1,3,D,D), values between 0-1, torch
 def process_env_obs(env_obs):
     if len(env_obs.shape) == 3: #(D,D,3) numpy
         env_obs = np.expand_dims(env_obs, 0) #(T=1,D,D,3), numpy
     return ptu.from_numpy(np.moveaxis(env_obs, 3, 1))/255
+
 
 # Input: env_obs (A) or (T,A), numpy array
 def process_env_actions(env_actions):
     if len(env_actions.shape) == 1: #(A) numpy
         env_actions = np.expand_dims(env_actions, 0) #(T=1,A), numpy
     return ptu.from_numpy(env_actions)
+########End process env functions########
 
 
-##############MPC Class ############
+##############Start MPC Class ############
 class Stage3_MPC:
     def __init__(self, model, logging_dir):
         self.model = model
@@ -474,7 +676,7 @@ class Stage3_MPC:
 
         for akey in goal_info:
             if akey == "state":
-                goal_info[akey] = self.model.select_specific_state(goal_info[akey], best_index)
+                goal_info[akey] = self.model.select_specific_state(goal_info[akey], [best_index])
             else:
                 goal_info[akey] = goal_info[akey][best_index:best_index+1]
 
@@ -520,7 +722,7 @@ class Stage3_MPC:
         # if file_name is not None:
         #     visualizer.visualize_state_info(state_info, file_name, true_image=input_obs[:, -1])
         return state_info
-
+##############End MPC Class ############
 
 
 
@@ -564,7 +766,7 @@ def main(variant):
     ######End Model loading######
 
     goal_folder = module_path + '/examples/mpc/stage3/goals/objects_seed_{}/'.format(variant['number_goal_objects'])
-    num_seed_frames = 1
+    num_seed_frames = 2
     aggregate_stats = {}
 
     ######Start planning execution######
@@ -599,7 +801,7 @@ def main(variant):
         cost_class = Cost(logging_directory, **variant['cost_args'])
         cem_process = Stage3_CEM(logging_dir=logging_directory, score_actions_class=cost_class, **variant['cem_args'])
         mpc = Stage3_MPC(m, logging_directory)
-        single_stats = mpc.run_plan(goal_image, env, seed_frames, seed_actions, cem_process, num_actions_to_take=1,
+        single_stats = mpc.run_plan(goal_image, env, seed_frames, seed_actions, cem_process, num_actions_to_take=variant["num_actions_to_take"],
                                     planning_horizon=1, true_data=goal_env_info, filter_goal_image = False)
                                     # filter_goal_image={"n_objects": variant['number_goal_objects']})
 
@@ -616,26 +818,12 @@ def main(variant):
         aggregate_stats["num_goals_tried"] = i+1
         json.dump(aggregate_stats, open(logger.get_snapshot_dir() + '/results_stats.json', 'w'))
 
-
-
     with open(logger.get_snapshot_dir() + '/results_final.pkl', 'wb') as f:
         pickle.dump(stats, f)
-
-    # aggregate_stats = {}
-    # for k,v in stats.items():
-    #     if k != 'actions':
-    #         aggregate_stats[k] = float(np.mean(v))
-    # aggregate_stats["individual_correct"] = stats["correct"]
-    # json.dump(aggregate_stats, open(logger.get_snapshot_dir() + '/results_stats.json', 'w'))
-    ######End planning execution######
+##############End planning execution#############
 
 
-
-
-
-
-# CUDA_VISIBLE_DEVICES=1 python stage3_mpc.py -de 0 -s 0 -m [s64d64_v1_params,curriculum_aws_params,random_aws_params]
-
+# CUDA_VISIBLE_DEVICES=0 python stage3_mpc.py -de 0 -s 0 -m [s64d64_v1_params,curriculum_aws_params,random_aws_params]
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-de', '--debug', type=int, default=0)
@@ -654,12 +842,14 @@ if __name__ == "__main__":
         algorithm='MPC',
         op3_args=params_to_info[args.model_file]["op3_args"],
         cem_args=dict(
-            cem_steps=3,
-            num_samples=1000,
-            time_horizon=1,
+            cem_steps=2,
+            num_samples=100,
+            time_horizon=2,
+            action_type=4,  # Should be [None, 4], This controls if it is object oriented (when set to 4) or raw env action space (None)
         ),
+        num_actions_to_take=2,
         cost_args=dict(
-            core_type='final_recon',  # "subimage", "final_recon", "latent"
+            core_type='subimage',  # "subimage", "final_recon", "latent"
             compare_func='mse',    # mse, psuedo_intersect
             post_process='raw',
             aggregate='sum',
@@ -667,7 +857,7 @@ if __name__ == "__main__":
         goal_start_end_range=[start_idx, end_idx],
         debug=args.debug,
         model_file=args.model_file,
-        number_goal_objects=1,
+        number_goal_objects=2,
     )
 
     run_experiment(
