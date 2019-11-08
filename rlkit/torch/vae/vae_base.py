@@ -104,7 +104,12 @@ class GaussianLatentVAE(VAEBase):
     def rsample(self, latent_distribution_params):
         mu, logvar = latent_distribution_params
         stds = (0.5 * logvar).exp()
-        epsilon = ptu.randn(*mu.size())
+        epsilon = ptu.randn(*mu.size()).to(stds.device)
+        #print("Epsilon type", epsilon.is_cuda)
+        #print("STDS type", stds.is_cuda)
+        #print("Mu type", mu.is_cuda)
+
+
         latents = epsilon * stds + mu
         return latents
 

@@ -1,0 +1,10 @@
+{
+  "batch_size": 128,
+  "exp_id": "0",
+  "exp_prefix": "10-17-vae-clevr",
+  "instance_type": "None",
+  "list_size": 4,
+  "num_epochs": 50,
+  "representation_size": 64,
+  "seed": "13309"
+}

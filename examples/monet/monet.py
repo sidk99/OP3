@@ -1,3 +1,5 @@
+import sys
+sys.path.insert(0, '/media/sidk/Data/sidk/Research/OP3/')
 from rlkit.torch.monet.monet import MonetVAE
 from rlkit.torch.conv_networks import BroadcastCNN
 import rlkit.torch.monet.monet as monet
@@ -9,6 +11,7 @@ from rlkit.launchers.launcher_util import run_experiment
 from rlkit.core import logger
 import numpy as np
 import h5py
+
 
 def load_dataset(data_path, train=True):
     hdf5_file = h5py.File(data_path, 'r')  # RV: Data file

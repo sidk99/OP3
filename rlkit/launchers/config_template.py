@@ -4,15 +4,16 @@ Copy this file to config.py and modify as needed.
 # Change these things
 CODE_DIRS_TO_MOUNT = [
     #'/home/user/python/module/one',
-    '/home/jcoreyes/abstract/rlkit',
+    '/media/sidk/Data/sidk/Research/OP3',
 ]
 DIR_AND_MOUNT_POINT_MAPPINGS = [
     dict(
-        local_dir='/home/jcoreyes/.mujoco/',
+        local_dir='/home/sidk/.mujoco/',
         mount_point='/root/.mujoco',
     ),
+    -+USE
 ]
-LOCAL_LOG_DIR = '/home/jcoreyes/objects/op3_exps'
+LOCAL_LOG_DIR = '/media/sidk/Data/sidk/Research/OP3/listvaeruns'
 
 
 """

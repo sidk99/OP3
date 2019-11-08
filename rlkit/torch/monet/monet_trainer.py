@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from torch import optim
 from torchvision.utils import save_image
-from multiworld.core.image_env import normalize_image
+#from multiworld.core.image_env import normalize_image
 from rlkit.core import logger
 from rlkit.core.serializable import Serializable
 from rlkit.core.eval_util import create_stats_ordered_dict
@@ -231,6 +231,7 @@ class MonetTrainer(Serializable):
             logger.record_tabular("test/KL", np.mean(kles))
             logger.record_tabular("test/loss", np.mean(losses))
             logger.record_tabular("beta", self.beta)
+            print(logger.get_snapshot_dir())
 
             logger.dump_tabular()
             if save_vae:
